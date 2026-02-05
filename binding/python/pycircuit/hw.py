@@ -20,6 +20,7 @@ def _int_width(ty: str) -> int:
 class Wire:
     m: Module
     sig: Signal
+    signed: bool = False
 
     def __post_init__(self) -> None:
         _int_width(self.sig.ty)
@@ -61,11 +62,12 @@ class Wire:
         if isinstance(v, int):
             if width is None:
                 width = self.width
-            return self.m.const_wire(int(v), width=int(width))
+            const_sig = self.m.const(int(v), width=int(width))
+            return Wire(self.m, const_sig, signed=(int(v) < 0))
         raise TypeError(f"unsupported operand type: {type(v).__name__}")
 
     def _promote2(self, other: Union["Wire", "Reg", Signal, int]) -> tuple["Wire", "Wire"]:
-        """Promote operands to a common width (zero-extend smaller operand)."""
+        """Promote operands to a common width (extend smaller operand)."""
         a = self._as_wire(self, width=None)
         if isinstance(other, int):
             b = self._as_wire(int(other), width=a.width)
@@ -73,29 +75,85 @@ class Wire:
             b = self._as_wire(other, width=None)
         out_w = max(a.width, b.width)
         if a.width != out_w:
-            a = a.zext(width=out_w)
+            a = a.sext(width=out_w) if a.signed else a.zext(width=out_w)
         if b.width != out_w:
-            b = b.zext(width=out_w)
+            b = b.sext(width=out_w) if b.signed else b.zext(width=out_w)
         return a, b
 
     def __add__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
         a, b = self._promote2(other)
-        return Wire(self.m, self.m.add(a.sig, b.sig))
+        return Wire(self.m, self.m.add(a.sig, b.sig), signed=(a.signed or b.signed))
+
+    def __radd__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        return self.__add__(other)
+
+    def __sub__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        a, b = self._promote2(other)
+        return Wire(self.m, self.m.sub(a.sig, b.sig), signed=(a.signed or b.signed))
+
+    def __rsub__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        b = self._as_wire(self, width=None)
+        a = self._as_wire(other, width=b.width)
+        aa, bb = a._promote2(b) if isinstance(a, Wire) else (a, b)
+        return Wire(self.m, self.m.sub(aa.sig, bb.sig), signed=(aa.signed or bb.signed))
+
+    def __mul__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        a, b = self._promote2(other)
+        return Wire(self.m, self.m.mul(a.sig, b.sig), signed=(a.signed or b.signed))
+
+    def __rmul__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        return self.__mul__(other)
+
+    def __rfloordiv__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        num = self._as_wire(other, width=None)
+        return num.__floordiv__(self)
+
+    def __floordiv__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        a, b = self._promote2(other)
+        if a.signed or b.signed:
+            return Wire(self.m, self.m.sdiv(a.sig, b.sig), signed=True)
+        return Wire(self.m, self.m.udiv(a.sig, b.sig), signed=False)
+
+    def __rtruediv__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        return self.__rfloordiv__(other)
+
+    def __truediv__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        # Treat `/` as integer division for hardware values.
+        return self.__floordiv__(other)
+
+    def __rmod__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        num = self._as_wire(other, width=None)
+        return num.__mod__(self)
+
+    def __mod__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        a, b = self._promote2(other)
+        if a.signed or b.signed:
+            return Wire(self.m, self.m.srem(a.sig, b.sig), signed=True)
+        return Wire(self.m, self.m.urem(a.sig, b.sig), signed=False)
 
     def __and__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
         a, b = self._promote2(other)
-        return Wire(self.m, self.m.and_(a.sig, b.sig))
+        return Wire(self.m, self.m.and_(a.sig, b.sig), signed=(a.signed or b.signed))
+
+    def __rand__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        return self.__and__(other)
 
     def __or__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
         a, b = self._promote2(other)
-        return Wire(self.m, self.m.or_(a.sig, b.sig))
+        return Wire(self.m, self.m.or_(a.sig, b.sig), signed=(a.signed or b.signed))
+
+    def __ror__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        return self.__or__(other)
 
     def __xor__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
         a, b = self._promote2(other)
-        return Wire(self.m, self.m.xor(a.sig, b.sig))
+        return Wire(self.m, self.m.xor(a.sig, b.sig), signed=(a.signed or b.signed))
+
+    def __rxor__(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        return self.__xor__(other)
 
     def __invert__(self) -> "Wire":
-        return Wire(self.m, self.m.not_(self.sig))
+        return Wire(self.m, self.m.not_(self.sig), signed=self.signed)
 
     def __lshift__(self, other: int) -> "Wire":
         if not isinstance(other, int):
@@ -107,28 +165,20 @@ class Wire:
         amt = int(amount)
         if amt < 0:
             raise ValueError("lshr amount must be >= 0")
-        if amt == 0:
-            return self
-        if amt >= self.width:
-            return self.m.const_wire(0, width=self.width)
-        sliced = self.slice(lsb=amt, width=self.width - amt)
-        return sliced.zext(width=self.width)
+        return Wire(self.m, self.m.lshri(self.sig, amount=amt), signed=False)
 
     def ashr(self, *, amount: int) -> "Wire":
         """Arithmetic shift right by a constant amount (sign-fill)."""
         amt = int(amount)
         if amt < 0:
             raise ValueError("ashr amount must be >= 0")
-        if amt == 0:
-            return self
-        if amt >= self.width:
-            return self[self.width - 1].sext(width=self.width)
-        sliced = self.slice(lsb=amt, width=self.width - amt)
-        return sliced.sext(width=self.width)
+        return Wire(self.m, self.m.ashri(self.sig, amount=amt), signed=True)
 
     def __rshift__(self, other: int) -> "Wire":
         if not isinstance(other, int):
             raise TypeError(">> only supports constant integer shift amounts")
+        if self.signed:
+            return self.ashr(amount=int(other))
         return self.lshr(amount=int(other))
 
     def eq(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
@@ -138,11 +188,32 @@ class Wire:
     def ult(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
         """Unsigned less-than compare (result is i1)."""
         a, b = self._promote2(other)
-        ext_w = a.width + 1
-        a_ext = a.zext(width=ext_w)
-        b_ext = b.zext(width=ext_w)
-        diff = a_ext + ((~b_ext) + 1)
-        return diff[ext_w - 1]
+        return Wire(self.m, self.m.ult(a.sig, b.sig))
+
+    def slt(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        """Signed less-than compare (result is i1)."""
+        a, b = self._promote2(other)
+        return Wire(self.m, self.m.slt(a.sig, b.sig))
+
+    def lt(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        """Less-than compare respecting signed intent (result is i1)."""
+        a, b = self._promote2(other)
+        if a.signed or b.signed:
+            return Wire(self.m, self.m.slt(a.sig, b.sig))
+        return Wire(self.m, self.m.ult(a.sig, b.sig))
+
+    def gt(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        """Greater-than compare respecting signed intent (result is i1)."""
+        other_w = self._as_wire(other, width=None)
+        return other_w.lt(self)
+
+    def le(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        """Less-than-or-equal compare respecting signed intent (result is i1)."""
+        return ~self.gt(other)
+
+    def ge(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
+        """Greater-than-or-equal compare respecting signed intent (result is i1)."""
+        return ~self.lt(other)
 
     def ugt(self, other: Union["Wire", "Reg", Signal, int]) -> "Wire":
         """Unsigned greater-than compare (result is i1)."""
@@ -182,25 +253,25 @@ class Wire:
             bw = self._as_wire(int(b), width=out_w)
 
         if aw.width != out_w:
-            aw = aw.zext(width=out_w)
+            aw = aw.sext(width=out_w) if aw.signed else aw.zext(width=out_w)
         if bw.width != out_w:
-            bw = bw.zext(width=out_w)
-        return Wire(self.m, self.m.mux(self.sig, aw.sig, bw.sig))
+            bw = bw.sext(width=out_w) if bw.signed else bw.zext(width=out_w)
+        return Wire(self.m, self.m.mux(self.sig, aw.sig, bw.sig), signed=(aw.signed or bw.signed))
 
     def trunc(self, *, width: int) -> "Wire":
-        return Wire(self.m, self.m.trunc(self.sig, width=width))
+        return Wire(self.m, self.m.trunc(self.sig, width=width), signed=self.signed)
 
     def zext(self, *, width: int) -> "Wire":
-        return Wire(self.m, self.m.zext(self.sig, width=width))
+        return Wire(self.m, self.m.zext(self.sig, width=width), signed=False)
 
     def sext(self, *, width: int) -> "Wire":
-        return Wire(self.m, self.m.sext(self.sig, width=width))
+        return Wire(self.m, self.m.sext(self.sig, width=width), signed=True)
 
     def slice(self, *, lsb: int, width: int) -> "Wire":
-        return Wire(self.m, self.m.extract(self.sig, lsb=lsb, width=width))
+        return Wire(self.m, self.m.extract(self.sig, lsb=lsb, width=width), signed=False)
 
     def shl(self, *, amount: int) -> "Wire":
-        return Wire(self.m, self.m.shli(self.sig, amount=amount))
+        return Wire(self.m, self.m.shli(self.sig, amount=amount), signed=self.signed)
 
     def __getitem__(self, idx: int | slice) -> "Wire":
         if isinstance(idx, slice):
@@ -232,7 +303,15 @@ class Wire:
         scoped_name = getattr(self.m, "scoped_name", None)
         if callable(scoped_name):
             scoped = scoped_name(scoped)
-        return Wire(self.m, self.m.alias(self.sig, name=scoped))
+        return Wire(self.m, self.m.alias(self.sig, name=scoped), signed=self.signed)
+
+    def as_signed(self) -> "Wire":
+        """Mark this value as signed for shift/div/compare lowering."""
+        return Wire(self.m, self.sig, signed=True)
+
+    def as_unsigned(self) -> "Wire":
+        """Mark this value as unsigned for shift/div/compare lowering."""
+        return Wire(self.m, self.sig, signed=False)
 
 
 @dataclass(frozen=True)
@@ -400,11 +479,11 @@ class Circuit(Module):
     def domain(self, name: str) -> ClockDomain:
         return ClockDomain(clk=self.clock(f"{name}_clk"), rst=self.reset(f"{name}_rst"))
 
-    def in_wire(self, name: str, *, width: int) -> Wire:
-        return Wire(self, self.input(name, width=width))
+    def in_wire(self, name: str, *, width: int, signed: bool = False) -> Wire:
+        return Wire(self, self.input(name, width=width), signed=bool(signed))
 
     def const_wire(self, value: int, *, width: int) -> Wire:
-        return Wire(self, self.const(value, width=width))
+        return Wire(self, self.const(value, width=width), signed=(int(value) < 0))
 
     def new_wire(self, *, width: int) -> Wire:
         return Wire(self, super().new_wire(width=width))
@@ -420,7 +499,7 @@ class Circuit(Module):
         if isinstance(v, Reg):
             v = v.q
         if isinstance(v, Wire):
-            return Wire(self, self.alias(v.sig, name=self.scoped_name(name)))
+            return Wire(self, self.alias(v.sig, name=self.scoped_name(name)), signed=v.signed)
         return Wire(self, self.alias(v, name=self.scoped_name(name)))
 
     def assign(self, dst: Union[Wire, Reg, Signal], src: Union[Wire, Reg, Signal, int]) -> None:  # type: ignore[override]
@@ -501,7 +580,7 @@ class Circuit(Module):
 
         r = self.reg_wire(clk, rst, en_w, next_w, init_w)
         # Name the observable value of the state variable.
-        q_named = Wire(self, self.alias(r.q.sig, name=full))
+        q_named = Wire(self, self.alias(r.q.sig, name=full), signed=r.q.signed)
         return Reg(q=q_named, clk=r.clk, rst=r.rst, en=r.en, next=r.next, init=r.init)
 
     def reg_wire(
@@ -515,7 +594,7 @@ class Circuit(Module):
             init_w = init if isinstance(init, Wire) else Wire(self, init)
 
         q_sig = self.reg(clk, rst, en_w.sig, next_w.sig, init_w.sig)
-        q_w = Wire(self, q_sig)
+        q_w = Wire(self, q_sig, signed=(next_w.signed or init_w.signed))
         return Reg(q=q_w, clk=clk, rst=rst, en=en_w, next=next_w, init=init_w)
 
     def reg_domain(self, domain: ClockDomain, en: Union[Wire, Signal], next_: Union[Wire, Signal], init: Union[Wire, Signal, int]) -> Reg:
@@ -586,6 +665,116 @@ class Circuit(Module):
             name=name,
         )
         return Wire(self, rdata)
+
+    def sync_mem(
+        self,
+        clk: Signal,
+        rst: Signal,
+        *,
+        ren: Union[Wire, Reg, Signal],
+        raddr: Union[Wire, Reg, Signal],
+        wvalid: Union[Wire, Reg, Signal],
+        waddr: Union[Wire, Reg, Signal],
+        wdata: Union[Wire, Reg, Signal],
+        wstrb: Union[Wire, Reg, Signal],
+        depth: int,
+        name: str | None = None,
+    ) -> Wire:
+        def as_sig(v: Union[Wire, Reg, Signal]) -> Signal:
+            if isinstance(v, Reg):
+                return v.q.sig
+            if isinstance(v, Wire):
+                return v.sig
+            return v
+
+        rdata = super().sync_mem(
+            clk,
+            rst,
+            as_sig(ren),
+            as_sig(raddr),
+            as_sig(wvalid),
+            as_sig(waddr),
+            as_sig(wdata),
+            as_sig(wstrb),
+            depth=depth,
+            name=name,
+        )
+        return Wire(self, rdata)
+
+    def sync_mem_dp(
+        self,
+        clk: Signal,
+        rst: Signal,
+        *,
+        ren0: Union[Wire, Reg, Signal],
+        raddr0: Union[Wire, Reg, Signal],
+        ren1: Union[Wire, Reg, Signal],
+        raddr1: Union[Wire, Reg, Signal],
+        wvalid: Union[Wire, Reg, Signal],
+        waddr: Union[Wire, Reg, Signal],
+        wdata: Union[Wire, Reg, Signal],
+        wstrb: Union[Wire, Reg, Signal],
+        depth: int,
+        name: str | None = None,
+    ) -> tuple[Wire, Wire]:
+        def as_sig(v: Union[Wire, Reg, Signal]) -> Signal:
+            if isinstance(v, Reg):
+                return v.q.sig
+            if isinstance(v, Wire):
+                return v.sig
+            return v
+
+        rdata0, rdata1 = super().sync_mem_dp(
+            clk,
+            rst,
+            as_sig(ren0),
+            as_sig(raddr0),
+            as_sig(ren1),
+            as_sig(raddr1),
+            as_sig(wvalid),
+            as_sig(waddr),
+            as_sig(wdata),
+            as_sig(wstrb),
+            depth=depth,
+            name=name,
+        )
+        return Wire(self, rdata0), Wire(self, rdata1)
+
+    def async_fifo(
+        self,
+        in_clk: Signal,
+        in_rst: Signal,
+        out_clk: Signal,
+        out_rst: Signal,
+        *,
+        in_valid: Union[Wire, Reg, Signal],
+        in_data: Union[Wire, Reg, Signal],
+        out_ready: Union[Wire, Reg, Signal],
+        depth: int,
+    ) -> tuple[Wire, Wire, Wire]:
+        def as_sig(v: Union[Wire, Reg, Signal]) -> Signal:
+            if isinstance(v, Reg):
+                return v.q.sig
+            if isinstance(v, Wire):
+                return v.sig
+            return v
+
+        in_ready, out_valid, out_data = super().async_fifo(
+            in_clk,
+            in_rst,
+            out_clk,
+            out_rst,
+            as_sig(in_valid),
+            as_sig(in_data),
+            as_sig(out_ready),
+            depth=depth,
+        )
+        return Wire(self, in_ready), Wire(self, out_valid), Wire(self, out_data)
+
+    def cdc_sync(self, clk: Signal, rst: Signal, a: Union[Wire, Reg, Signal], *, stages: int | None = None) -> Wire:
+        sig = a.q.sig if isinstance(a, Reg) else (a.sig if isinstance(a, Wire) else a)
+        out = super().cdc_sync(clk, rst, sig, stages=stages)
+        return Wire(self, out)
 
     def fifo(
         self,

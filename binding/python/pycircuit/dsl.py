@@ -45,6 +45,10 @@ class Module:
     # --- builders ---
     def const(self, value: int, *, width: int) -> Signal:
         ty = self.i(width)
+        if width <= 0:
+            raise ValueError("width must be > 0")
+        # Represent negative literals in two's complement at the requested width.
+        value = int(value) & ((1 << int(width)) - 1)
         tmp = self._tmp()
         self._emit(f"{tmp} = pyc.constant {value} : {ty}")
         return Signal(ref=tmp, ty=ty)
@@ -53,6 +57,42 @@ class Module:
         self._require_same_ty(a, b, "add")
         tmp = self._tmp()
         self._emit(f"{tmp} = pyc.add {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def sub(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "sub")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.sub {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def mul(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "mul")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.mul {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def udiv(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "udiv")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.udiv {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def urem(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "urem")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.urem {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def sdiv(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "sdiv")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.sdiv {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def srem(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "srem")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.srem {a.ref}, {b.ref} : {a.ty}")
         return Signal(ref=tmp, ty=a.ty)
 
     def mux(self, sel: Signal, a: Signal, b: Signal) -> Signal:
@@ -90,6 +130,18 @@ class Module:
         self._require_same_ty(a, b, "eq")
         tmp = self._tmp()
         self._emit(f"{tmp} = pyc.eq {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty="i1")
+
+    def ult(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "ult")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.ult {a.ref}, {b.ref} : {a.ty}")
+        return Signal(ref=tmp, ty="i1")
+
+    def slt(self, a: Signal, b: Signal) -> Signal:
+        self._require_same_ty(a, b, "slt")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.slt {a.ref}, {b.ref} : {a.ty}")
         return Signal(ref=tmp, ty="i1")
 
     def trunc(self, a: Signal, *, width: int) -> Signal:
@@ -133,6 +185,24 @@ class Module:
             raise ValueError("shli amount must be >= 0")
         tmp = self._tmp()
         self._emit(f"{tmp} = pyc.shli {a.ref} {{amount = {int(amount)}}} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def lshri(self, a: Signal, *, amount: int) -> Signal:
+        if not a.ty.startswith("i"):
+            raise TypeError("lshri requires an integer input")
+        if amount < 0:
+            raise ValueError("lshri amount must be >= 0")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.lshri {a.ref} {{amount = {int(amount)}}} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
+
+    def ashri(self, a: Signal, *, amount: int) -> Signal:
+        if not a.ty.startswith("i"):
+            raise TypeError("ashri requires an integer input")
+        if amount < 0:
+            raise ValueError("ashri amount must be >= 0")
+        tmp = self._tmp()
+        self._emit(f"{tmp} = pyc.ashri {a.ref} {{amount = {int(amount)}}} : {a.ty}")
         return Signal(ref=tmp, ty=a.ty)
 
     def concat(self, *inputs: Signal) -> Signal:
@@ -258,6 +328,130 @@ class Module:
             + f"{attrs} : {raddr.ty}, {wdata.ty}, {wstrb.ty}"
         )
         return Signal(ref=tmp, ty=wdata.ty)
+
+    def sync_mem(
+        self,
+        clk: Signal,
+        rst: Signal,
+        ren: Signal,
+        raddr: Signal,
+        wvalid: Signal,
+        waddr: Signal,
+        wdata: Signal,
+        wstrb: Signal,
+        *,
+        depth: int,
+        name: str | None = None,
+    ) -> Signal:
+        """Synchronous 1R1W memory (registered read data, prototype)."""
+        if clk.ty != "!pyc.clock":
+            raise TypeError("sync_mem clk must be !pyc.clock")
+        if rst.ty != "!pyc.reset":
+            raise TypeError("sync_mem rst must be !pyc.reset")
+        if ren.ty != "i1":
+            raise TypeError("sync_mem ren must be i1")
+        if wvalid.ty != "i1":
+            raise TypeError("sync_mem wvalid must be i1")
+        if raddr.ty != waddr.ty:
+            raise TypeError("sync_mem raddr/waddr must have the same type")
+        if depth <= 0:
+            raise ValueError("sync_mem depth must be > 0")
+
+        tmp = self._tmp()
+        attrs = f"{{depth = {int(depth)}"
+        if name is not None:
+            attrs += f', name = "{name}"'
+        attrs += "}"
+        self._emit(
+            f"{tmp} = pyc.sync_mem {clk.ref}, {rst.ref}, {ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
+            + f"{attrs} : {raddr.ty}, {wdata.ty}, {wstrb.ty}"
+        )
+        return Signal(ref=tmp, ty=wdata.ty)
+
+    def sync_mem_dp(
+        self,
+        clk: Signal,
+        rst: Signal,
+        ren0: Signal,
+        raddr0: Signal,
+        ren1: Signal,
+        raddr1: Signal,
+        wvalid: Signal,
+        waddr: Signal,
+        wdata: Signal,
+        wstrb: Signal,
+        *,
+        depth: int,
+        name: str | None = None,
+    ) -> tuple[Signal, Signal]:
+        """Synchronous 2R1W memory (registered outputs, prototype)."""
+        if clk.ty != "!pyc.clock":
+            raise TypeError("sync_mem_dp clk must be !pyc.clock")
+        if rst.ty != "!pyc.reset":
+            raise TypeError("sync_mem_dp rst must be !pyc.reset")
+        if ren0.ty != "i1" or ren1.ty != "i1":
+            raise TypeError("sync_mem_dp ren0/ren1 must be i1")
+        if wvalid.ty != "i1":
+            raise TypeError("sync_mem_dp wvalid must be i1")
+        if raddr0.ty != raddr1.ty or raddr0.ty != waddr.ty:
+            raise TypeError("sync_mem_dp raddr0/raddr1/waddr must have the same type")
+        if depth <= 0:
+            raise ValueError("sync_mem_dp depth must be > 0")
+
+        out0 = self._tmp()
+        out1 = self._tmp()
+        attrs = f"{{depth = {int(depth)}"
+        if name is not None:
+            attrs += f', name = "{name}"'
+        attrs += "}"
+        self._emit(
+            f"{out0}, {out1} = pyc.sync_mem_dp {clk.ref}, {rst.ref}, {ren0.ref}, {raddr0.ref}, {ren1.ref}, {raddr1.ref}, "
+            + f"{wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} {attrs} : {raddr0.ty}, {wdata.ty}, {wstrb.ty}"
+        )
+        return Signal(ref=out0, ty=wdata.ty), Signal(ref=out1, ty=wdata.ty)
+
+    def async_fifo(
+        self,
+        in_clk: Signal,
+        in_rst: Signal,
+        out_clk: Signal,
+        out_rst: Signal,
+        in_valid: Signal,
+        in_data: Signal,
+        out_ready: Signal,
+        *,
+        depth: int,
+    ) -> tuple[Signal, Signal, Signal]:
+        if in_clk.ty != "!pyc.clock" or out_clk.ty != "!pyc.clock":
+            raise TypeError("async_fifo clk must be !pyc.clock")
+        if in_rst.ty != "!pyc.reset" or out_rst.ty != "!pyc.reset":
+            raise TypeError("async_fifo rst must be !pyc.reset")
+        if in_valid.ty != "i1":
+            raise TypeError("async_fifo in_valid must be i1")
+        if out_ready.ty != "i1":
+            raise TypeError("async_fifo out_ready must be i1")
+        if depth <= 0:
+            raise ValueError("async_fifo depth must be > 0")
+        in_ready = self._tmp()
+        out_valid = self._tmp()
+        out_data = self._tmp()
+        self._emit(
+            f"{in_ready}, {out_valid}, {out_data} = pyc.async_fifo {in_clk.ref}, {in_rst.ref}, {out_clk.ref}, {out_rst.ref}, "
+            + f"{in_valid.ref}, {in_data.ref}, {out_ready.ref} {{depth = {int(depth)}}} : {in_data.ty}"
+        )
+        return Signal(in_ready, "i1"), Signal(out_valid, "i1"), Signal(out_data, in_data.ty)
+
+    def cdc_sync(self, clk: Signal, rst: Signal, a: Signal, *, stages: int | None = None) -> Signal:
+        if clk.ty != "!pyc.clock":
+            raise TypeError("cdc_sync clk must be !pyc.clock")
+        if rst.ty != "!pyc.reset":
+            raise TypeError("cdc_sync rst must be !pyc.reset")
+        tmp = self._tmp()
+        if stages is None:
+            self._emit(f"{tmp} = pyc.cdc_sync {clk.ref}, {rst.ref}, {a.ref} : {a.ty}")
+        else:
+            self._emit(f"{tmp} = pyc.cdc_sync {clk.ref}, {rst.ref}, {a.ref} {{stages = {int(stages)}}} : {a.ty}")
+        return Signal(ref=tmp, ty=a.ty)
 
     # --- structured emission helpers (for AST/JIT frontends) ---
     def emit_line(self, line: str) -> None:

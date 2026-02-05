@@ -74,6 +74,108 @@ OpFoldResult AddOp::fold(FoldAdaptor adaptor) {
   return {};
 }
 
+OpFoldResult SubOp::fold(FoldAdaptor adaptor) {
+  auto outTy = cast<IntegerType>(getResult().getType());
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (a && b)
+    return intAttrFor(outTy, (*a - *b).trunc(outTy.getWidth()));
+  if (b && b->isZero())
+    return getLhs();
+  if (getLhs() == getRhs())
+    return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+  return {};
+}
+
+OpFoldResult MulOp::fold(FoldAdaptor adaptor) {
+  auto outTy = cast<IntegerType>(getResult().getType());
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (a && b)
+    return intAttrFor(outTy, (*a * *b).trunc(outTy.getWidth()));
+  if (a) {
+    if (a->isZero())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+    if (a->isOne())
+      return getRhs();
+  }
+  if (b) {
+    if (b->isZero())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+    if (b->isOne())
+      return getLhs();
+  }
+  return {};
+}
+
+OpFoldResult UdivOp::fold(FoldAdaptor adaptor) {
+  auto outTy = cast<IntegerType>(getResult().getType());
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (b) {
+    if (b->isZero())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+    if (b->isOne())
+      return getLhs();
+  }
+  if (a && a->isZero())
+    return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+  if (a && b)
+    return intAttrFor(outTy, a->udiv(*b).trunc(outTy.getWidth()));
+  return {};
+}
+
+OpFoldResult UremOp::fold(FoldAdaptor adaptor) {
+  auto outTy = cast<IntegerType>(getResult().getType());
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (b) {
+    if (b->isZero())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+    if (b->isOne())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+  }
+  if (a && a->isZero())
+    return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+  if (a && b)
+    return intAttrFor(outTy, a->urem(*b).trunc(outTy.getWidth()));
+  return {};
+}
+
+OpFoldResult SdivOp::fold(FoldAdaptor adaptor) {
+  auto outTy = cast<IntegerType>(getResult().getType());
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (b) {
+    if (b->isZero())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+    if (b->isOne())
+      return getLhs();
+  }
+  if (a && a->isZero())
+    return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+  if (a && b)
+    return intAttrFor(outTy, a->sdiv(*b).trunc(outTy.getWidth()));
+  return {};
+}
+
+OpFoldResult SremOp::fold(FoldAdaptor adaptor) {
+  auto outTy = cast<IntegerType>(getResult().getType());
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (b) {
+    if (b->isZero())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+    if (b->isOne())
+      return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+  }
+  if (a && a->isZero())
+    return intAttrFor(outTy, llvm::APInt(outTy.getWidth(), 0));
+  if (a && b)
+    return intAttrFor(outTy, a->srem(*b).trunc(outTy.getWidth()));
+  return {};
+}
+
 OpFoldResult AndOp::fold(FoldAdaptor adaptor) {
   auto outTy = cast<IntegerType>(getResult().getType());
   auto a = asIntAttr(adaptor.getLhs());
@@ -165,6 +267,30 @@ OpFoldResult EqOp::fold(FoldAdaptor adaptor) {
   return {};
 }
 
+OpFoldResult UltOp::fold(FoldAdaptor adaptor) {
+  if (getLhs() == getRhs())
+    return IntegerAttr::get(IntegerType::get(getContext(), 1), 0);
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (a && b) {
+    bool lt = a->ult(*b);
+    return IntegerAttr::get(IntegerType::get(getContext(), 1), lt ? 1 : 0);
+  }
+  return {};
+}
+
+OpFoldResult SltOp::fold(FoldAdaptor adaptor) {
+  if (getLhs() == getRhs())
+    return IntegerAttr::get(IntegerType::get(getContext(), 1), 0);
+  auto a = asIntAttr(adaptor.getLhs());
+  auto b = asIntAttr(adaptor.getRhs());
+  if (a && b) {
+    bool lt = a->slt(*b);
+    return IntegerAttr::get(IntegerType::get(getContext(), 1), lt ? 1 : 0);
+  }
+  return {};
+}
+
 OpFoldResult TruncOp::fold(FoldAdaptor adaptor) {
   if (getIn().getType() == getResult().getType())
     return getIn();
@@ -221,6 +347,41 @@ OpFoldResult ShliOp::fold(FoldAdaptor adaptor) {
   auto a = asIntAttr(adaptor.getIn());
   if (a) {
     llvm::APInt shifted = (*a << static_cast<unsigned>(amt)).trunc(outTy.getWidth());
+    return intAttrFor(getResult().getType(), shifted);
+  }
+  return {};
+}
+
+OpFoldResult LshriOp::fold(FoldAdaptor adaptor) {
+  std::int64_t amt = getAmountAttr().getInt();
+  if (amt == 0)
+    return getIn();
+  auto outTy = cast<IntegerType>(getResult().getType());
+  if (static_cast<std::uint64_t>(amt) >= outTy.getWidth())
+    return intAttrFor(getResult().getType(), llvm::APInt(outTy.getWidth(), 0));
+  auto a = asIntAttr(adaptor.getIn());
+  if (a) {
+    llvm::APInt shifted = a->lshr(static_cast<unsigned>(amt)).trunc(outTy.getWidth());
+    return intAttrFor(getResult().getType(), shifted);
+  }
+  return {};
+}
+
+OpFoldResult AshriOp::fold(FoldAdaptor adaptor) {
+  std::int64_t amt = getAmountAttr().getInt();
+  if (amt == 0)
+    return getIn();
+  auto outTy = cast<IntegerType>(getResult().getType());
+  auto a = asIntAttr(adaptor.getIn());
+  if (static_cast<std::uint64_t>(amt) >= outTy.getWidth()) {
+    if (a) {
+      bool neg = a->isNegative();
+      return intAttrFor(getResult().getType(), neg ? llvm::APInt::getAllOnes(outTy.getWidth())
+                                                   : llvm::APInt(outTy.getWidth(), 0));
+    }
+  }
+  if (a) {
+    llvm::APInt shifted = a->ashr(static_cast<unsigned>(amt)).trunc(outTy.getWidth());
     return intAttrFor(getResult().getType(), shifted);
   }
   return {};
@@ -324,6 +485,26 @@ LogicalResult ShliOp::verify() {
   return success();
 }
 
+LogicalResult LshriOp::verify() {
+  auto ty = dyn_cast<IntegerType>(getIn().getType());
+  if (!ty)
+    return emitOpError("only supports integer types");
+  std::int64_t amt = getAmountAttr().getInt();
+  if (amt < 0)
+    return emitOpError("amount must be >= 0");
+  return success();
+}
+
+LogicalResult AshriOp::verify() {
+  auto ty = dyn_cast<IntegerType>(getIn().getType());
+  if (!ty)
+    return emitOpError("only supports integer types");
+  std::int64_t amt = getAmountAttr().getInt();
+  if (amt < 0)
+    return emitOpError("amount must be >= 0");
+  return success();
+}
+
 LogicalResult ConcatOp::verify() {
   if (getInputs().empty())
     return emitOpError("requires at least one input");
@@ -412,6 +593,122 @@ LogicalResult ByteMemOp::verify() {
       return emitOpError("name must be non-empty when provided");
   }
 
+  return success();
+}
+
+LogicalResult SyncMemOp::verify() {
+  auto addrTy = dyn_cast<IntegerType>(getRaddr().getType());
+  auto waddrTy = dyn_cast<IntegerType>(getWaddr().getType());
+  if (!addrTy || !waddrTy)
+    return emitOpError("only supports integer address types");
+  if (addrTy != waddrTy)
+    return emitOpError("waddr type must match raddr type");
+
+  auto dataTy = dyn_cast<IntegerType>(getWdata().getType());
+  auto rdataTy = dyn_cast<IntegerType>(getRdata().getType());
+  if (!dataTy || !rdataTy)
+    return emitOpError("only supports integer data types");
+  if (dataTy != rdataTy)
+    return emitOpError("rdata type must match wdata type");
+
+  unsigned dataW = dataTy.getWidth();
+  if (dataW == 0 || dataW > 64)
+    return emitOpError("prototype supports data widths 1..64");
+  if ((dataW % 8) != 0)
+    return emitOpError("prototype requires data width divisible by 8");
+
+  auto strbTy = dyn_cast<IntegerType>(getWstrb().getType());
+  if (!strbTy)
+    return emitOpError("only supports integer wstrb types");
+  if (strbTy.getWidth() != (dataW / 8))
+    return emitOpError("wstrb width must be (data_width / 8)");
+
+  auto depthAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
+  if (!depthAttr)
+    return emitOpError("requires integer attribute `depth` (entries)");
+  if (depthAttr.getValue().getSExtValue() <= 0)
+    return emitOpError("depth must be > 0");
+
+  if (auto nameAttr = (*this)->getAttrOfType<StringAttr>("name")) {
+    if (nameAttr.getValue().empty())
+      return emitOpError("name must be non-empty when provided");
+  }
+
+  return success();
+}
+
+LogicalResult SyncMemDPOp::verify() {
+  auto addrTy0 = dyn_cast<IntegerType>(getRaddr0().getType());
+  auto addrTy1 = dyn_cast<IntegerType>(getRaddr1().getType());
+  auto waddrTy = dyn_cast<IntegerType>(getWaddr().getType());
+  if (!addrTy0 || !addrTy1 || !waddrTy)
+    return emitOpError("only supports integer address types");
+  if (addrTy0 != addrTy1 || addrTy0 != waddrTy)
+    return emitOpError("raddr0/raddr1/waddr types must match");
+
+  auto dataTy = dyn_cast<IntegerType>(getWdata().getType());
+  auto rdataTy0 = dyn_cast<IntegerType>(getRdata0().getType());
+  auto rdataTy1 = dyn_cast<IntegerType>(getRdata1().getType());
+  if (!dataTy || !rdataTy0 || !rdataTy1)
+    return emitOpError("only supports integer data types");
+  if (dataTy != rdataTy0 || dataTy != rdataTy1)
+    return emitOpError("rdata types must match wdata type");
+
+  unsigned dataW = dataTy.getWidth();
+  if (dataW == 0 || dataW > 64)
+    return emitOpError("prototype supports data widths 1..64");
+  if ((dataW % 8) != 0)
+    return emitOpError("prototype requires data width divisible by 8");
+
+  auto strbTy = dyn_cast<IntegerType>(getWstrb().getType());
+  if (!strbTy)
+    return emitOpError("only supports integer wstrb types");
+  if (strbTy.getWidth() != (dataW / 8))
+    return emitOpError("wstrb width must be (data_width / 8)");
+
+  auto depthAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
+  if (!depthAttr)
+    return emitOpError("requires integer attribute `depth` (entries)");
+  if (depthAttr.getValue().getSExtValue() <= 0)
+    return emitOpError("depth must be > 0");
+
+  if (auto nameAttr = (*this)->getAttrOfType<StringAttr>("name")) {
+    if (nameAttr.getValue().empty())
+      return emitOpError("name must be non-empty when provided");
+  }
+
+  return success();
+}
+
+LogicalResult AsyncFifoOp::verify() {
+  auto inTy = getInData().getType();
+  auto outTy = getOutData().getType();
+  if (inTy != outTy)
+    return emitOpError("out_data type must match in_data type");
+  auto depthAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
+  if (!depthAttr)
+    return emitOpError("requires integer attribute `depth`");
+  std::int64_t depth = depthAttr.getValue().getSExtValue();
+  if (depth < 2)
+    return emitOpError("depth must be >= 2");
+  // Prototype async FIFO assumes a power-of-two depth for gray-code pointers.
+  std::uint64_t d = static_cast<std::uint64_t>(depth);
+  if ((d & (d - 1)) != 0)
+    return emitOpError("depth must be a power of two in the prototype");
+  return success();
+}
+
+LogicalResult CdcSyncOp::verify() {
+  auto ty = dyn_cast<IntegerType>(getIn().getType());
+  if (!ty)
+    return emitOpError("only supports integer types");
+  if (ty.getWidth() == 0 || ty.getWidth() > 64)
+    return emitOpError("prototype supports widths 1..64");
+  auto stagesAttr = (*this)->getAttrOfType<IntegerAttr>("stages");
+  if (stagesAttr) {
+    if (stagesAttr.getValue().getSExtValue() < 1)
+      return emitOpError("stages must be >= 1");
+  }
   return success();
 }
 

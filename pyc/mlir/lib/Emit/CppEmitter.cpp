@@ -15,6 +15,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 
 using namespace mlir;
@@ -124,6 +125,46 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     os << "    " << nt.get(a.getResult()) << " = (" << nt.get(a.getLhs()) << " + " << nt.get(a.getRhs()) << ");\n";
     return success();
   }
+  if (auto s = dyn_cast<pyc::SubOp>(op)) {
+    os << "    " << nt.get(s.getResult()) << " = (" << nt.get(s.getLhs()) << " - " << nt.get(s.getRhs()) << ");\n";
+    return success();
+  }
+  if (auto m = dyn_cast<pyc::MulOp>(op)) {
+    os << "    " << nt.get(m.getResult()) << " = (" << nt.get(m.getLhs()) << " * " << nt.get(m.getRhs()) << ");\n";
+    return success();
+  }
+  if (auto d = dyn_cast<pyc::UdivOp>(op)) {
+    unsigned w = bitWidth(d.getResult().getType());
+    if (w == 0 || w > 64)
+      return d.emitError("C++ emitter only supports widths 1..64 for udiv in the prototype");
+    os << "    " << nt.get(d.getResult()) << " = pyc::cpp::udiv<" << w << ">(" << nt.get(d.getLhs()) << ", "
+       << nt.get(d.getRhs()) << ");\n";
+    return success();
+  }
+  if (auto r = dyn_cast<pyc::UremOp>(op)) {
+    unsigned w = bitWidth(r.getResult().getType());
+    if (w == 0 || w > 64)
+      return r.emitError("C++ emitter only supports widths 1..64 for urem in the prototype");
+    os << "    " << nt.get(r.getResult()) << " = pyc::cpp::urem<" << w << ">(" << nt.get(r.getLhs()) << ", "
+       << nt.get(r.getRhs()) << ");\n";
+    return success();
+  }
+  if (auto d = dyn_cast<pyc::SdivOp>(op)) {
+    unsigned w = bitWidth(d.getResult().getType());
+    if (w == 0 || w > 64)
+      return d.emitError("C++ emitter only supports widths 1..64 for sdiv in the prototype");
+    os << "    " << nt.get(d.getResult()) << " = pyc::cpp::sdiv<" << w << ">(" << nt.get(d.getLhs()) << ", "
+       << nt.get(d.getRhs()) << ");\n";
+    return success();
+  }
+  if (auto r = dyn_cast<pyc::SremOp>(op)) {
+    unsigned w = bitWidth(r.getResult().getType());
+    if (w == 0 || w > 64)
+      return r.emitError("C++ emitter only supports widths 1..64 for srem in the prototype");
+    os << "    " << nt.get(r.getResult()) << " = pyc::cpp::srem<" << w << ">(" << nt.get(r.getLhs()) << ", "
+       << nt.get(r.getRhs()) << ");\n";
+    return success();
+  }
   if (auto m = dyn_cast<pyc::MuxOp>(op)) {
     os << "    " << nt.get(m.getResult()) << " = (" << nt.get(m.getSel()) << ".toBool() ? " << nt.get(m.getA())
        << " : " << nt.get(m.getB()) << ");\n";
@@ -155,6 +196,22 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
   if (auto e = dyn_cast<pyc::EqOp>(op)) {
     os << "    " << nt.get(e.getResult()) << " = pyc::cpp::Wire<1>((" << nt.get(e.getLhs()) << " == "
        << nt.get(e.getRhs()) << ") ? 1u : 0u);\n";
+    return success();
+  }
+  if (auto u = dyn_cast<pyc::UltOp>(op)) {
+    unsigned w = bitWidth(u.getLhs().getType());
+    if (w == 0 || w > 64)
+      return u.emitError("C++ emitter only supports widths 1..64 for ult in the prototype");
+    os << "    " << nt.get(u.getResult()) << " = pyc::cpp::Wire<1>((" << nt.get(u.getLhs()) << ".value() < "
+       << nt.get(u.getRhs()) << ".value()) ? 1u : 0u);\n";
+    return success();
+  }
+  if (auto s = dyn_cast<pyc::SltOp>(op)) {
+    unsigned w = bitWidth(s.getLhs().getType());
+    if (w == 0 || w > 64)
+      return s.emitError("C++ emitter only supports widths 1..64 for slt in the prototype");
+    os << "    " << nt.get(s.getResult()) << " = pyc::cpp::Wire<1>((pyc::cpp::asSigned<" << w << ">(" << nt.get(s.getLhs())
+       << ") < pyc::cpp::asSigned<" << w << ">(" << nt.get(s.getRhs()) << ")) ? 1u : 0u);\n";
     return success();
   }
   if (auto t = dyn_cast<pyc::TruncOp>(op)) {
@@ -197,8 +254,24 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     unsigned w = bitWidth(sh.getResult().getType());
     if (w == 0 || w > 64)
       return sh.emitError("C++ emitter only supports widths 1..64 for shli in the prototype");
-    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::Wire<" << w << ">(" << nt.get(sh.getIn())
-       << ".value() << " << sh.getAmountAttr().getInt() << "ull);\n";
+    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::shl<" << w << ">(" << nt.get(sh.getIn()) << ", "
+       << sh.getAmountAttr().getInt() << "u);\n";
+    return success();
+  }
+  if (auto sh = dyn_cast<pyc::LshriOp>(op)) {
+    unsigned w = bitWidth(sh.getResult().getType());
+    if (w == 0 || w > 64)
+      return sh.emitError("C++ emitter only supports widths 1..64 for lshri in the prototype");
+    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::lshr<" << w << ">(" << nt.get(sh.getIn()) << ", "
+       << sh.getAmountAttr().getInt() << "u);\n";
+    return success();
+  }
+  if (auto sh = dyn_cast<pyc::AshriOp>(op)) {
+    unsigned w = bitWidth(sh.getResult().getType());
+    if (w == 0 || w > 64)
+      return sh.emitError("C++ emitter only supports widths 1..64 for ashri in the prototype");
+    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::ashr<" << w << ">(" << nt.get(sh.getIn()) << ", "
+       << sh.getAmountAttr().getInt() << "u);\n";
     return success();
   }
   if (auto c = dyn_cast<pyc::ConcatOp>(op)) {
@@ -296,6 +369,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
   llvm::SmallVector<pyc::RegOp> regs;
   llvm::SmallVector<pyc::FifoOp> fifos;
   llvm::SmallVector<pyc::ByteMemOp> byteMems;
+  llvm::SmallVector<pyc::SyncMemOp> syncMems;
+  llvm::SmallVector<pyc::SyncMemDPOp> syncMemDPs;
+  llvm::SmallVector<pyc::AsyncFifoOp> asyncFifos;
+  llvm::SmallVector<pyc::CdcSyncOp> cdcSyncs;
   llvm::SmallVector<pyc::CombOp> combs;
 
   for (Operation &op : top) {
@@ -305,6 +382,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
       fifos.push_back(fifo);
     else if (auto mem = dyn_cast<pyc::ByteMemOp>(op))
       byteMems.push_back(mem);
+    else if (auto mem = dyn_cast<pyc::SyncMemOp>(op))
+      syncMems.push_back(mem);
+    else if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op))
+      syncMemDPs.push_back(mem);
+    else if (auto fifo = dyn_cast<pyc::AsyncFifoOp>(op))
+      asyncFifos.push_back(fifo);
+    else if (auto s = dyn_cast<pyc::CdcSyncOp>(op))
+      cdcSyncs.push_back(s);
     else if (auto comb = dyn_cast<pyc::CombOp>(op))
       combs.push_back(comb);
   }
@@ -316,14 +401,32 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
       return sanitizeId(nameAttr.getValue());
     return nt.get(m.getRdata());
   };
+  auto syncMemKey = [&](pyc::SyncMemOp m) -> std::string {
+    if (auto nameAttr = m->getAttrOfType<StringAttr>("name"))
+      return sanitizeId(nameAttr.getValue());
+    return nt.get(m.getRdata());
+  };
+  auto syncMemDPKey = [&](pyc::SyncMemDPOp m) -> std::string {
+    if (auto nameAttr = m->getAttrOfType<StringAttr>("name"))
+      return sanitizeId(nameAttr.getValue());
+    return nt.get(m.getRdata0());
+  };
+  auto asyncFifoKey = [&](pyc::AsyncFifoOp f) { return nt.get(f.getInReady()); };
+  auto cdcKey = [&](pyc::CdcSyncOp s) { return nt.get(s.getOut()); };
 
   std::sort(regs.begin(), regs.end(), [&](pyc::RegOp a, pyc::RegOp b) { return regKey(a) < regKey(b); });
   std::sort(fifos.begin(), fifos.end(), [&](pyc::FifoOp a, pyc::FifoOp b) { return fifoKey(a) < fifoKey(b); });
   std::sort(byteMems.begin(), byteMems.end(), [&](pyc::ByteMemOp a, pyc::ByteMemOp b) { return memKey(a) < memKey(b); });
+  std::sort(syncMems.begin(), syncMems.end(), [&](pyc::SyncMemOp a, pyc::SyncMemOp b) { return syncMemKey(a) < syncMemKey(b); });
+  std::sort(syncMemDPs.begin(), syncMemDPs.end(), [&](pyc::SyncMemDPOp a, pyc::SyncMemDPOp b) { return syncMemDPKey(a) < syncMemDPKey(b); });
+  std::sort(asyncFifos.begin(), asyncFifos.end(), [&](pyc::AsyncFifoOp a, pyc::AsyncFifoOp b) { return asyncFifoKey(a) < asyncFifoKey(b); });
+  std::sort(cdcSyncs.begin(), cdcSyncs.end(), [&](pyc::CdcSyncOp a, pyc::CdcSyncOp b) { return cdcKey(a) < cdcKey(b); });
   auto combKey = [&](pyc::CombOp c) { return nt.get(c.getResult(0)); };
   std::sort(combs.begin(), combs.end(), [&](pyc::CombOp a, pyc::CombOp b) { return combKey(a) < combKey(b); });
 
   llvm::DenseMap<Operation *, std::string> byteMemInstName;
+  llvm::DenseMap<Operation *, std::string> syncMemInstName;
+  llvm::DenseMap<Operation *, std::string> syncMemDPInstName;
 
   for (auto r : regs) {
     unsigned w = bitWidth(r.getQ().getType());
@@ -365,6 +468,73 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
 
     os << "  pyc::cpp::pyc_byte_mem<" << addrW << ", " << dataW << ", " << depth << "> " << instName << ";\n";
   }
+  for (auto mem : syncMems) {
+    auto addrTy = dyn_cast<IntegerType>(mem.getRaddr().getType());
+    auto dataTy = dyn_cast<IntegerType>(mem.getRdata().getType());
+    if (!addrTy || !dataTy)
+      return mem.emitError("C++ emitter only supports integer sync_mem types");
+    unsigned addrW = addrTy.getWidth();
+    unsigned dataW = dataTy.getWidth();
+    if (addrW == 0 || addrW > 64)
+      return mem.emitError("C++ emitter only supports sync_mem addr widths 1..64 in the prototype");
+    if (dataW == 0 || dataW > 64)
+      return mem.emitError("C++ emitter only supports sync_mem data widths 1..64 in the prototype");
+
+    auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
+    if (!depthAttr)
+      return mem.emitError("missing integer attribute `depth`");
+    auto depth = depthAttr.getValue().getZExtValue();
+
+    std::string instName = nt.get(mem.getRdata()) + "_inst";
+    if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
+      instName = sanitizeId(nameAttr.getValue());
+    syncMemInstName.try_emplace(mem.getOperation(), instName);
+
+    os << "  pyc::cpp::pyc_sync_mem<" << addrW << ", " << dataW << ", " << depth << "> " << instName << ";\n";
+  }
+  for (auto mem : syncMemDPs) {
+    auto addrTy = dyn_cast<IntegerType>(mem.getRaddr0().getType());
+    auto dataTy = dyn_cast<IntegerType>(mem.getRdata0().getType());
+    if (!addrTy || !dataTy)
+      return mem.emitError("C++ emitter only supports integer sync_mem_dp types");
+    unsigned addrW = addrTy.getWidth();
+    unsigned dataW = dataTy.getWidth();
+    if (addrW == 0 || addrW > 64)
+      return mem.emitError("C++ emitter only supports sync_mem_dp addr widths 1..64 in the prototype");
+    if (dataW == 0 || dataW > 64)
+      return mem.emitError("C++ emitter only supports sync_mem_dp data widths 1..64 in the prototype");
+
+    auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
+    if (!depthAttr)
+      return mem.emitError("missing integer attribute `depth`");
+    auto depth = depthAttr.getValue().getZExtValue();
+
+    std::string instName = nt.get(mem.getRdata0()) + "_inst";
+    if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
+      instName = sanitizeId(nameAttr.getValue());
+    syncMemDPInstName.try_emplace(mem.getOperation(), instName);
+
+    os << "  pyc::cpp::pyc_sync_mem_dp<" << addrW << ", " << dataW << ", " << depth << "> " << instName << ";\n";
+  }
+  for (auto fifo : asyncFifos) {
+    unsigned w = bitWidth(fifo.getOutData().getType());
+    if (w == 0 || w > 64)
+      return fifo.emitError("C++ emitter only supports async_fifo widths 1..64 in the prototype");
+    auto depthAttr = fifo->getAttrOfType<IntegerAttr>("depth");
+    if (!depthAttr)
+      return fifo.emitError("missing integer attribute `depth`");
+    auto depth = depthAttr.getValue().getZExtValue();
+    os << "  pyc::cpp::pyc_async_fifo<" << w << ", " << depth << "> " << nt.get(fifo.getInReady()) << "_inst;\n";
+  }
+  for (auto s : cdcSyncs) {
+    unsigned w = bitWidth(s.getOut().getType());
+    if (w == 0 || w > 64)
+      return s.emitError("C++ emitter only supports cdc_sync widths 1..64 in the prototype");
+    std::uint64_t stages = 2;
+    if (auto st = s->getAttrOfType<IntegerAttr>("stages"))
+      stages = st.getValue().getZExtValue();
+    os << "  pyc::cpp::pyc_cdc_sync<" << w << ", " << stages << "> " << nt.get(s.getOut()) << "_inst;\n";
+  }
   os << "\n";
 
   // Constructor (wire members default-initialize to 0).
@@ -397,6 +567,37 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
        << ", " << nt.get(mem.getRdata()) << ", " << nt.get(mem.getWvalid()) << ", " << nt.get(mem.getWaddr()) << ", "
        << nt.get(mem.getWdata()) << ", " << nt.get(mem.getWstrb()) << ")";
   }
+  for (auto mem : syncMems) {
+    os << (firstInit ? " :\n" : ",\n");
+    firstInit = false;
+    std::string instName = syncMemInstName.lookup(mem.getOperation());
+    os << "      " << instName << "(" << nt.get(mem.getClk()) << ", " << nt.get(mem.getRst()) << ", " << nt.get(mem.getRen())
+       << ", " << nt.get(mem.getRaddr()) << ", " << nt.get(mem.getRdata()) << ", " << nt.get(mem.getWvalid()) << ", "
+       << nt.get(mem.getWaddr()) << ", " << nt.get(mem.getWdata()) << ", " << nt.get(mem.getWstrb()) << ")";
+  }
+  for (auto mem : syncMemDPs) {
+    os << (firstInit ? " :\n" : ",\n");
+    firstInit = false;
+    std::string instName = syncMemDPInstName.lookup(mem.getOperation());
+    os << "      " << instName << "(" << nt.get(mem.getClk()) << ", " << nt.get(mem.getRst()) << ", " << nt.get(mem.getRen0())
+       << ", " << nt.get(mem.getRaddr0()) << ", " << nt.get(mem.getRdata0()) << ", " << nt.get(mem.getRen1()) << ", "
+       << nt.get(mem.getRaddr1()) << ", " << nt.get(mem.getRdata1()) << ", " << nt.get(mem.getWvalid()) << ", "
+       << nt.get(mem.getWaddr()) << ", " << nt.get(mem.getWdata()) << ", " << nt.get(mem.getWstrb()) << ")";
+  }
+  for (auto fifo : asyncFifos) {
+    os << (firstInit ? " :\n" : ",\n");
+    firstInit = false;
+    os << "      " << nt.get(fifo.getInReady()) << "_inst(" << nt.get(fifo.getInClk()) << ", " << nt.get(fifo.getInRst())
+       << ", " << nt.get(fifo.getInValid()) << ", " << nt.get(fifo.getInReady()) << ", " << nt.get(fifo.getInData())
+       << ", " << nt.get(fifo.getOutClk()) << ", " << nt.get(fifo.getOutRst()) << ", " << nt.get(fifo.getOutValid())
+       << ", " << nt.get(fifo.getOutReady()) << ", " << nt.get(fifo.getOutData()) << ")";
+  }
+  for (auto s : cdcSyncs) {
+    os << (firstInit ? " :\n" : ",\n");
+    firstInit = false;
+    os << "      " << nt.get(s.getOut()) << "_inst(" << nt.get(s.getClk()) << ", " << nt.get(s.getRst()) << ", "
+       << nt.get(s.getIn()) << ", " << nt.get(s.getOut()) << ")";
+  }
   os << " {\n";
   os << "    eval();\n";
   os << "  }\n\n";
@@ -419,9 +620,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
     llvm::DenseMap<Operation *, unsigned> nodeIndex;
 
     auto shouldInclude = [&](Operation &op) -> bool {
-      if (isa<func::ReturnOp>(op) || isa<pyc::WireOp>(op) || isa<pyc::RegOp>(op))
+      if (isa<func::ReturnOp>(op) || isa<pyc::WireOp>(op) || isa<pyc::RegOp>(op) || isa<pyc::SyncMemOp>(op) ||
+          isa<pyc::SyncMemDPOp>(op) || isa<pyc::CdcSyncOp>(op))
         return false;
-      if (!includePrims && (isa<pyc::FifoOp>(op) || isa<pyc::ByteMemOp>(op)))
+      if (!includePrims && (isa<pyc::FifoOp>(op) || isa<pyc::AsyncFifoOp>(op) || isa<pyc::ByteMemOp>(op)))
         return false;
       return true;
     };
@@ -556,6 +758,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
     }
     if (isa<pyc::ConstantOp,
             pyc::AddOp,
+            pyc::SubOp,
+            pyc::MulOp,
+            pyc::UdivOp,
+            pyc::UremOp,
+            pyc::SdivOp,
+            pyc::SremOp,
             pyc::MuxOp,
             pyc::AndOp,
             pyc::OrOp,
@@ -564,17 +772,27 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
             pyc::ConcatOp,
             pyc::AliasOp,
             pyc::EqOp,
+            pyc::UltOp,
+            pyc::SltOp,
             pyc::TruncOp,
             pyc::ZextOp,
             pyc::SextOp,
             pyc::ExtractOp,
             pyc::ShliOp,
+            pyc::LshriOp,
+            pyc::AshriOp,
             arith::SelectOp>(*op)) {
       if (failed(emitCombAssign(*op, os, nt)))
         return failure();
       continue;
     }
-    if (isa<pyc::FifoOp, pyc::ByteMemOp, pyc::RegOp>(*op)) {
+    if (isa<pyc::FifoOp,
+            pyc::AsyncFifoOp,
+            pyc::ByteMemOp,
+            pyc::SyncMemOp,
+            pyc::SyncMemDPOp,
+            pyc::CdcSyncOp,
+            pyc::RegOp>(*op)) {
       // Primitives are evaluated in eval(), and regs only tick.
       continue;
     }
@@ -596,6 +814,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
         os << "    " << nt.get(fifo.getInReady()) << "_inst.eval();\n";
         continue;
       }
+      if (auto fifo = dyn_cast<pyc::AsyncFifoOp>(*op)) {
+        os << "    " << nt.get(fifo.getInReady()) << "_inst.eval();\n";
+        continue;
+      }
       if (auto mem = dyn_cast<pyc::ByteMemOp>(*op)) {
         os << "    " << byteMemInstName.lookup(mem.getOperation()) << ".eval();\n";
         continue;
@@ -610,6 +832,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
       }
       if (isa<pyc::ConstantOp,
               pyc::AddOp,
+              pyc::SubOp,
+              pyc::MulOp,
+              pyc::UdivOp,
+              pyc::UremOp,
+              pyc::SdivOp,
+              pyc::SremOp,
               pyc::MuxOp,
               pyc::AndOp,
               pyc::OrOp,
@@ -618,11 +846,15 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
               pyc::ConcatOp,
               pyc::AliasOp,
               pyc::EqOp,
+              pyc::UltOp,
+              pyc::SltOp,
               pyc::TruncOp,
               pyc::ZextOp,
               pyc::SextOp,
               pyc::ExtractOp,
               pyc::ShliOp,
+              pyc::LshriOp,
+              pyc::AshriOp,
               arith::SelectOp>(*op)) {
         if (failed(emitCombAssign(*op, os, nt)))
           return failure();
@@ -633,10 +865,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
   } else {
     os << "    eval_comb_pass();\n";
 
-    unsigned numPrims = static_cast<unsigned>(fifos.size() + byteMems.size());
+    unsigned numPrims = static_cast<unsigned>(fifos.size() + asyncFifos.size() + byteMems.size());
     if (numPrims > 0) {
       os << "    for (unsigned _i = 0; _i < " << numPrims << "u; ++_i) {\n";
       for (auto fifo : fifos)
+        os << "      " << nt.get(fifo.getInReady()) << "_inst.eval();\n";
+      for (auto fifo : asyncFifos)
         os << "      " << nt.get(fifo.getInReady()) << "_inst.eval();\n";
       for (auto mem : byteMems)
         os << "      " << byteMemInstName.lookup(mem.getOperation()) << ".eval();\n";
@@ -665,6 +899,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
     os << "    " << nt.get(fifo.getInReady()) << "_inst.tick_compute();\n";
   for (auto mem : byteMems)
     os << "    " << byteMemInstName.lookup(mem.getOperation()) << ".tick_compute();\n";
+  for (auto mem : syncMems)
+    os << "    " << syncMemInstName.lookup(mem.getOperation()) << ".tick_compute();\n";
+  for (auto mem : syncMemDPs)
+    os << "    " << syncMemDPInstName.lookup(mem.getOperation()) << ".tick_compute();\n";
+  for (auto fifo : asyncFifos)
+    os << "    " << nt.get(fifo.getInReady()) << "_inst.tick_compute();\n";
+  for (auto s : cdcSyncs)
+    os << "    " << nt.get(s.getOut()) << "_inst.tick_compute();\n";
   os << "    // Phase 2: commit.\n";
   for (auto r : regs)
     os << "    " << nt.get(r.getQ()) << "_inst.tick_commit();\n";
@@ -672,6 +914,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
     os << "    " << nt.get(fifo.getInReady()) << "_inst.tick_commit();\n";
   for (auto mem : byteMems)
     os << "    " << byteMemInstName.lookup(mem.getOperation()) << ".tick_commit();\n";
+  for (auto mem : syncMems)
+    os << "    " << syncMemInstName.lookup(mem.getOperation()) << ".tick_commit();\n";
+  for (auto mem : syncMemDPs)
+    os << "    " << syncMemDPInstName.lookup(mem.getOperation()) << ".tick_commit();\n";
+  for (auto fifo : asyncFifos)
+    os << "    " << nt.get(fifo.getInReady()) << "_inst.tick_commit();\n";
+  for (auto s : cdcSyncs)
+    os << "    " << nt.get(s.getOut()) << "_inst.tick_commit();\n";
   os << "  }\n";
 
   os << "};\n\n";

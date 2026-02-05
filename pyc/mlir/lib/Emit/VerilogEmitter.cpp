@@ -41,6 +41,14 @@ static std::string vLiteral(IntegerAttr a, Type dstTy) {
   return std::to_string(w) + "'d" + std::to_string(a.getValue().getZExtValue());
 }
 
+static std::string vZero(Type dstTy) {
+  auto intTy = dyn_cast<IntegerType>(dstTy);
+  if (!intTy)
+    return "0";
+  unsigned w = intTy.getWidth();
+  return std::to_string(w) + "'d0";
+}
+
 static std::string sanitizeId(llvm::StringRef s) {
   std::string out;
   out.reserve(s.size() + 1);
@@ -141,6 +149,40 @@ static LogicalResult emitComb(pyc::CombOp comb, raw_ostream &os, NameTable &nt) 
          << ");\n";
       continue;
     }
+    if (auto s = dyn_cast<pyc::SubOp>(op)) {
+      os << "assign " << nt.get(s.getResult()) << " = (" << nt.get(s.getLhs()) << " - " << nt.get(s.getRhs())
+         << ");\n";
+      continue;
+    }
+    if (auto m = dyn_cast<pyc::MulOp>(op)) {
+      os << "assign " << nt.get(m.getResult()) << " = (" << nt.get(m.getLhs()) << " * " << nt.get(m.getRhs())
+         << ");\n";
+      continue;
+    }
+    if (auto d = dyn_cast<pyc::UdivOp>(op)) {
+      os << "assign " << nt.get(d.getResult()) << " = (" << nt.get(d.getRhs()) << " == " << vZero(d.getRhs().getType())
+         << " ? " << vZero(d.getResult().getType()) << " : (" << nt.get(d.getLhs()) << " / " << nt.get(d.getRhs())
+         << "));\n";
+      continue;
+    }
+    if (auto r = dyn_cast<pyc::UremOp>(op)) {
+      os << "assign " << nt.get(r.getResult()) << " = (" << nt.get(r.getRhs()) << " == " << vZero(r.getRhs().getType())
+         << " ? " << vZero(r.getResult().getType()) << " : (" << nt.get(r.getLhs()) << " % " << nt.get(r.getRhs())
+         << "));\n";
+      continue;
+    }
+    if (auto d = dyn_cast<pyc::SdivOp>(op)) {
+      os << "assign " << nt.get(d.getResult()) << " = (" << nt.get(d.getRhs()) << " == " << vZero(d.getRhs().getType())
+         << " ? " << vZero(d.getResult().getType()) << " : ($signed(" << nt.get(d.getLhs()) << ") / $signed("
+         << nt.get(d.getRhs()) << ")));\n";
+      continue;
+    }
+    if (auto r = dyn_cast<pyc::SremOp>(op)) {
+      os << "assign " << nt.get(r.getResult()) << " = (" << nt.get(r.getRhs()) << " == " << vZero(r.getRhs().getType())
+         << " ? " << vZero(r.getResult().getType()) << " : ($signed(" << nt.get(r.getLhs()) << ") % $signed("
+         << nt.get(r.getRhs()) << ")));\n";
+      continue;
+    }
     if (auto m = dyn_cast<pyc::MuxOp>(op)) {
       os << "assign " << nt.get(m.getResult()) << " = (" << nt.get(m.getSel()) << " ? " << nt.get(m.getA())
          << " : " << nt.get(m.getB()) << ");\n";
@@ -175,6 +217,16 @@ static LogicalResult emitComb(pyc::CombOp comb, raw_ostream &os, NameTable &nt) 
     if (auto e = dyn_cast<pyc::EqOp>(op)) {
       os << "assign " << nt.get(e.getResult()) << " = (" << nt.get(e.getLhs()) << " == " << nt.get(e.getRhs())
          << ");\n";
+      continue;
+    }
+    if (auto u = dyn_cast<pyc::UltOp>(op)) {
+      os << "assign " << nt.get(u.getResult()) << " = (" << nt.get(u.getLhs()) << " < " << nt.get(u.getRhs())
+         << ");\n";
+      continue;
+    }
+    if (auto s = dyn_cast<pyc::SltOp>(op)) {
+      os << "assign " << nt.get(s.getResult()) << " = ($signed(" << nt.get(s.getLhs()) << ") < $signed("
+         << nt.get(s.getRhs()) << "));\n";
       continue;
     }
     if (auto t = dyn_cast<pyc::TruncOp>(op)) {
@@ -238,6 +290,16 @@ static LogicalResult emitComb(pyc::CombOp comb, raw_ostream &os, NameTable &nt) 
          << sh.getAmountAttr().getInt() << ");\n";
       continue;
     }
+    if (auto sh = dyn_cast<pyc::LshriOp>(op)) {
+      os << "assign " << nt.get(sh.getResult()) << " = (" << nt.get(sh.getIn()) << " >> "
+         << sh.getAmountAttr().getInt() << ");\n";
+      continue;
+    }
+    if (auto sh = dyn_cast<pyc::AshriOp>(op)) {
+      os << "assign " << nt.get(sh.getResult()) << " = ($signed(" << nt.get(sh.getIn()) << ") >>> "
+         << sh.getAmountAttr().getInt() << ");\n";
+      continue;
+    }
     if (auto c = dyn_cast<pyc::ConcatOp>(op)) {
       os << "assign " << nt.get(c.getResult()) << " = {";
       for (auto [i, v] : llvm::enumerate(c.getInputs())) {
@@ -277,6 +339,16 @@ static std::string opSortKey(Operation *op, NameTable &nt) {
     if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
       return sanitizeId(nameAttr.getValue());
     return nt.get(mem.getRdata());
+  }
+  if (auto mem = dyn_cast<pyc::SyncMemOp>(op)) {
+    if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
+      return sanitizeId(nameAttr.getValue());
+    return nt.get(mem.getRdata());
+  }
+  if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op)) {
+    if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
+      return sanitizeId(nameAttr.getValue());
+    return nt.get(mem.getRdata0());
   }
   if (!op->getResults().empty())
     return nt.get(op->getResult(0));
@@ -458,6 +530,12 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
       if (isa<pyc::ConstantOp,
               pyc::AliasOp,
               pyc::AddOp,
+              pyc::SubOp,
+              pyc::MulOp,
+              pyc::UdivOp,
+              pyc::UremOp,
+              pyc::SdivOp,
+              pyc::SremOp,
               pyc::MuxOp,
               pyc::AndOp,
               pyc::OrOp,
@@ -467,16 +545,24 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
               pyc::CombOp,
               arith::SelectOp,
               pyc::EqOp,
+              pyc::UltOp,
+              pyc::SltOp,
               pyc::TruncOp,
               pyc::ZextOp,
               pyc::SextOp,
               pyc::ExtractOp,
               pyc::ShliOp,
+              pyc::LshriOp,
+              pyc::AshriOp,
               pyc::ConcatOp>(op)) {
         combAssignOps.push_back(&op);
         continue;
       }
       if (isa<pyc::RegOp, pyc::FifoOp, pyc::ByteMemOp>(op)) {
+        seqInstOps.push_back(&op);
+        continue;
+      }
+      if (isa<pyc::SyncMemOp, pyc::SyncMemDPOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op)) {
         seqInstOps.push_back(&op);
         continue;
       }
@@ -506,6 +592,40 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
       if (auto a = dyn_cast<pyc::AddOp>(op)) {
         os << "assign " << nt.get(a.getResult()) << " = (" << nt.get(a.getLhs()) << " + " << nt.get(a.getRhs())
            << ");\n";
+        continue;
+      }
+      if (auto s = dyn_cast<pyc::SubOp>(op)) {
+        os << "assign " << nt.get(s.getResult()) << " = (" << nt.get(s.getLhs()) << " - " << nt.get(s.getRhs())
+           << ");\n";
+        continue;
+      }
+      if (auto m = dyn_cast<pyc::MulOp>(op)) {
+        os << "assign " << nt.get(m.getResult()) << " = (" << nt.get(m.getLhs()) << " * " << nt.get(m.getRhs())
+           << ");\n";
+        continue;
+      }
+      if (auto d = dyn_cast<pyc::UdivOp>(op)) {
+        os << "assign " << nt.get(d.getResult()) << " = (" << nt.get(d.getRhs()) << " == "
+           << vZero(d.getRhs().getType()) << " ? " << vZero(d.getResult().getType()) << " : (" << nt.get(d.getLhs())
+           << " / " << nt.get(d.getRhs()) << "));\n";
+        continue;
+      }
+      if (auto r = dyn_cast<pyc::UremOp>(op)) {
+        os << "assign " << nt.get(r.getResult()) << " = (" << nt.get(r.getRhs()) << " == "
+           << vZero(r.getRhs().getType()) << " ? " << vZero(r.getResult().getType()) << " : (" << nt.get(r.getLhs())
+           << " % " << nt.get(r.getRhs()) << "));\n";
+        continue;
+      }
+      if (auto d = dyn_cast<pyc::SdivOp>(op)) {
+        os << "assign " << nt.get(d.getResult()) << " = (" << nt.get(d.getRhs()) << " == "
+           << vZero(d.getRhs().getType()) << " ? " << vZero(d.getResult().getType()) << " : ($signed("
+           << nt.get(d.getLhs()) << ") / $signed(" << nt.get(d.getRhs()) << ")));\n";
+        continue;
+      }
+      if (auto r = dyn_cast<pyc::SremOp>(op)) {
+        os << "assign " << nt.get(r.getResult()) << " = (" << nt.get(r.getRhs()) << " == "
+           << vZero(r.getRhs().getType()) << " ? " << vZero(r.getResult().getType()) << " : ($signed("
+           << nt.get(r.getLhs()) << ") % $signed(" << nt.get(r.getRhs()) << ")));\n";
         continue;
       }
       if (auto m = dyn_cast<pyc::MuxOp>(op)) {
@@ -551,6 +671,16 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
       if (auto e = dyn_cast<pyc::EqOp>(op)) {
         os << "assign " << nt.get(e.getResult()) << " = (" << nt.get(e.getLhs()) << " == " << nt.get(e.getRhs())
            << ");\n";
+        continue;
+      }
+      if (auto u = dyn_cast<pyc::UltOp>(op)) {
+        os << "assign " << nt.get(u.getResult()) << " = (" << nt.get(u.getLhs()) << " < " << nt.get(u.getRhs())
+           << ");\n";
+        continue;
+      }
+      if (auto s = dyn_cast<pyc::SltOp>(op)) {
+        os << "assign " << nt.get(s.getResult()) << " = ($signed(" << nt.get(s.getLhs()) << ") < $signed("
+           << nt.get(s.getRhs()) << "));\n";
         continue;
       }
       if (auto t = dyn_cast<pyc::TruncOp>(op)) {
@@ -611,6 +741,16 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
       }
       if (auto sh = dyn_cast<pyc::ShliOp>(op)) {
         os << "assign " << nt.get(sh.getResult()) << " = (" << nt.get(sh.getIn()) << " << "
+           << sh.getAmountAttr().getInt() << ");\n";
+        continue;
+      }
+      if (auto sh = dyn_cast<pyc::LshriOp>(op)) {
+        os << "assign " << nt.get(sh.getResult()) << " = (" << nt.get(sh.getIn()) << " >> "
+           << sh.getAmountAttr().getInt() << ");\n";
+        continue;
+      }
+      if (auto sh = dyn_cast<pyc::AshriOp>(op)) {
+        os << "assign " << nt.get(sh.getResult()) << " = ($signed(" << nt.get(sh.getIn()) << ") >>> "
            << sh.getAmountAttr().getInt() << ");\n";
         continue;
       }
@@ -692,6 +832,103 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << ");\n";
         continue;
       }
+      if (auto mem = dyn_cast<pyc::SyncMemOp>(op)) {
+        auto addrTy = dyn_cast<IntegerType>(mem.getRaddr().getType());
+        auto dataTy = dyn_cast<IntegerType>(mem.getRdata().getType());
+        if (!addrTy || !dataTy)
+          return mem.emitError("verilog emitter only supports integer sync_mem types");
+
+        auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
+        if (!depthAttr)
+          return mem.emitError("missing integer attribute `depth`");
+        auto depth = depthAttr.getValue().getZExtValue();
+
+        std::string inst = nt.get(mem.getRdata()) + "_inst";
+        if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
+          inst = sanitizeId(nameAttr.getValue());
+
+        os << "pyc_sync_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
+           << "), .DEPTH(" << depth << ")) " << inst << " (\n";
+        os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
+        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
+        os << "  .ren(" << nt.get(mem.getRen()) << "),\n";
+        os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
+        os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
+        os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
+        os << "  .waddr(" << nt.get(mem.getWaddr()) << "),\n";
+        os << "  .wdata(" << nt.get(mem.getWdata()) << "),\n";
+        os << "  .wstrb(" << nt.get(mem.getWstrb()) << ")\n";
+        os << ");\n";
+        continue;
+      }
+      if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op)) {
+        auto addrTy = dyn_cast<IntegerType>(mem.getRaddr0().getType());
+        auto dataTy = dyn_cast<IntegerType>(mem.getRdata0().getType());
+        if (!addrTy || !dataTy)
+          return mem.emitError("verilog emitter only supports integer sync_mem_dp types");
+
+        auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
+        if (!depthAttr)
+          return mem.emitError("missing integer attribute `depth`");
+        auto depth = depthAttr.getValue().getZExtValue();
+
+        std::string inst = nt.get(mem.getRdata0()) + "_inst";
+        if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
+          inst = sanitizeId(nameAttr.getValue());
+
+        os << "pyc_sync_mem_dp #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
+           << "), .DEPTH(" << depth << ")) " << inst << " (\n";
+        os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
+        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
+        os << "  .ren0(" << nt.get(mem.getRen0()) << "),\n";
+        os << "  .raddr0(" << nt.get(mem.getRaddr0()) << "),\n";
+        os << "  .rdata0(" << nt.get(mem.getRdata0()) << "),\n";
+        os << "  .ren1(" << nt.get(mem.getRen1()) << "),\n";
+        os << "  .raddr1(" << nt.get(mem.getRaddr1()) << "),\n";
+        os << "  .rdata1(" << nt.get(mem.getRdata1()) << "),\n";
+        os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
+        os << "  .waddr(" << nt.get(mem.getWaddr()) << "),\n";
+        os << "  .wdata(" << nt.get(mem.getWdata()) << "),\n";
+        os << "  .wstrb(" << nt.get(mem.getWstrb()) << ")\n";
+        os << ");\n";
+        continue;
+      }
+      if (auto fifo = dyn_cast<pyc::AsyncFifoOp>(op)) {
+        auto inDataTy = dyn_cast<IntegerType>(fifo.getInData().getType());
+        if (!inDataTy)
+          return fifo.emitError("verilog emitter only supports integer async_fifo data type");
+        auto depth = fifo->getAttrOfType<IntegerAttr>("depth").getValue().getZExtValue();
+        os << "pyc_async_fifo #(.WIDTH(" << inDataTy.getWidth() << "), .DEPTH(" << depth << ")) "
+           << nt.get(fifo.getInReady()) << "_inst (\n";
+        os << "  .in_clk(" << nt.get(fifo.getInClk()) << "),\n";
+        os << "  .in_rst(" << nt.get(fifo.getInRst()) << "),\n";
+        os << "  .in_valid(" << nt.get(fifo.getInValid()) << "),\n";
+        os << "  .in_ready(" << nt.get(fifo.getInReady()) << "),\n";
+        os << "  .in_data(" << nt.get(fifo.getInData()) << "),\n";
+        os << "  .out_clk(" << nt.get(fifo.getOutClk()) << "),\n";
+        os << "  .out_rst(" << nt.get(fifo.getOutRst()) << "),\n";
+        os << "  .out_valid(" << nt.get(fifo.getOutValid()) << "),\n";
+        os << "  .out_ready(" << nt.get(fifo.getOutReady()) << "),\n";
+        os << "  .out_data(" << nt.get(fifo.getOutData()) << ")\n";
+        os << ");\n";
+        continue;
+      }
+      if (auto s = dyn_cast<pyc::CdcSyncOp>(op)) {
+        auto ty = dyn_cast<IntegerType>(s.getIn().getType());
+        if (!ty)
+          return s.emitError("verilog emitter only supports integer cdc_sync types");
+        std::uint64_t stages = 2;
+        if (auto st = s->getAttrOfType<IntegerAttr>("stages"))
+          stages = st.getValue().getZExtValue();
+        os << "pyc_cdc_sync #(.WIDTH(" << ty.getWidth() << "), .STAGES(" << stages << ")) " << nt.get(s.getOut())
+           << "_inst (\n";
+        os << "  .clk(" << nt.get(s.getClk()) << "),\n";
+        os << "  .rst(" << nt.get(s.getRst()) << "),\n";
+        os << "  .in(" << nt.get(s.getIn()) << "),\n";
+        os << "  .out(" << nt.get(s.getOut()) << ")\n";
+        os << ");\n";
+        continue;
+      }
       return op->emitError("internal error: missing verilog sequential primitive emission handler");
     }
     os << "\n";
@@ -718,6 +955,10 @@ LogicalResult emitVerilog(ModuleOp module, llvm::raw_ostream &os, const VerilogE
     os << "`include \"pyc_reg.v\"\n";
     os << "`include \"pyc_fifo.v\"\n\n";
     os << "`include \"pyc_byte_mem.v\"\n\n";
+    os << "`include \"pyc_sync_mem.v\"\n";
+    os << "`include \"pyc_sync_mem_dp.v\"\n";
+    os << "`include \"pyc_async_fifo.v\"\n";
+    os << "`include \"pyc_cdc_sync.v\"\n\n";
   }
 
   for (auto f : module.getOps<func::FuncOp>()) {

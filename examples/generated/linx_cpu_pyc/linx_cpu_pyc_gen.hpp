@@ -2704,7 +2704,7 @@ struct linx_cpu_pyc {
     pyc_extract_310 = pyc::cpp::extract<7, 32>(ID__insn32__decode__L60, 25u);
     ID__swi_hi7__decode__L82 = pyc_extract_310;
     pyc_zext_311 = pyc::cpp::zext<12, 5>(ID__swi_lo5__decode__L81);
-    pyc_shli_312 = pyc::cpp::Wire<12>(pyc_zext_311.value() << 7ull);
+    pyc_shli_312 = pyc::cpp::shl<12>(pyc_zext_311, 7u);
     pyc_zext_313 = pyc::cpp::zext<12, 7>(ID__swi_hi7__decode__L82);
     pyc_or_314 = (pyc_shli_312 | pyc_zext_313);
     ID__simm12_raw__decode__L83 = pyc_or_314;
@@ -2722,7 +2722,7 @@ struct linx_cpu_pyc {
     pyc_extract_321 = pyc::cpp::extract<20, 32>(ID__main32__decode__L90, 12u);
     ID__imm_lo20__decode__L92 = pyc_extract_321;
     pyc_zext_322 = pyc::cpp::zext<32, 12>(ID__imm_hi12__decode__L91);
-    pyc_shli_323 = pyc::cpp::Wire<32>(pyc_zext_322.value() << 20ull);
+    pyc_shli_323 = pyc::cpp::shl<32>(pyc_zext_322, 20u);
     pyc_zext_324 = pyc::cpp::zext<32, 20>(ID__imm_lo20__decode__L92);
     pyc_or_325 = (pyc_shli_323 | pyc_zext_324);
     ID__imm32__decode__L93 = pyc_or_325;
@@ -2774,7 +2774,7 @@ struct linx_cpu_pyc {
     arith_select_347 = (ID__cond__decode__L126.toBool() ? pyc_comb_154 : ID__op__decode__L120);
     arith_select_348 = (ID__cond__decode__L126.toBool() ? pyc_comb_153 : ID__regdst__decode__L120);
     pyc_zext_349 = pyc::cpp::zext<6, 5>(ID__uimm5__decode__L107);
-    pyc_shli_350 = pyc::cpp::Wire<6>(pyc_zext_349.value() << 1ull);
+    pyc_shli_350 = pyc::cpp::shl<6>(pyc_zext_349, 1u);
     ID__imm__decode__L131 = pyc_shli_350;
     pyc_zext_351 = pyc::cpp::zext<64, 6>(ID__imm__decode__L131);
     pyc_mux_352 = (ID__cond__decode__L126.toBool() ? pyc_zext_351 : ID__imm__decode__L120);
@@ -2859,7 +2859,7 @@ struct linx_cpu_pyc {
     ID__cond__decode__L168 = pyc_and_392;
     arith_select_393 = (ID__cond__decode__L168.toBool() ? pyc_comb_166 : ID__len_bytes__decode__L163);
     arith_select_394 = (ID__cond__decode__L168.toBool() ? pyc_comb_140 : ID__op__decode__L163);
-    pyc_shli_395 = pyc::cpp::Wire<64>(ID__simm12_s64_c__decode__L106.value() << 1ull);
+    pyc_shli_395 = pyc::cpp::shl<64>(ID__simm12_s64_c__decode__L106, 1u);
     ID__imm__decode__L172 = pyc_shli_395;
     pyc_mux_396 = (ID__cond__decode__L168.toBool() ? ID__imm__decode__L172 : ID__imm__decode__L142);
     ID__imm__decode__L169 = pyc_mux_396;
@@ -3130,7 +3130,7 @@ struct linx_cpu_pyc {
     arith_select_537 = (ID__cond__decode__L288.toBool() ? pyc_comb_164 : ID__len_bytes__decode__L284);
     arith_select_538 = (ID__cond__decode__L288.toBool() ? pyc_comb_106 : ID__op__decode__L284);
     ID__regdst__decode__L292 = ID__rd32__decode__L70;
-    pyc_shli_539 = pyc::cpp::Wire<64>(ID__imm20_s64__decode__L78.value() << 12ull);
+    pyc_shli_539 = pyc::cpp::shl<64>(ID__imm20_s64__decode__L78, 12u);
     ID__imm__decode__L293 = pyc_shli_539;
     pyc_zext_540 = pyc::cpp::zext<6, 5>(ID__regdst__decode__L292);
     pyc_mux_541 = (ID__cond__decode__L288.toBool() ? ID__imm__decode__L293 : ID__imm__decode__L268);
@@ -3145,7 +3145,7 @@ struct linx_cpu_pyc {
     ID__cond__decode__L295 = pyc_and_545;
     arith_select_546 = (ID__cond__decode__L295.toBool() ? pyc_comb_164 : ID__len_bytes__decode__L289);
     arith_select_547 = (ID__cond__decode__L295.toBool() ? pyc_comb_103 : ID__op__decode__L289);
-    pyc_shli_548 = pyc::cpp::Wire<64>(ID__simm17_s64__decode__L85.value() << 1ull);
+    pyc_shli_548 = pyc::cpp::shl<64>(ID__simm17_s64__decode__L85, 1u);
     ID__imm__decode__L299 = pyc_shli_548;
     pyc_mux_549 = (ID__cond__decode__L295.toBool() ? ID__imm__decode__L299 : ID__imm__decode__L289);
     ID__imm__decode__L296 = pyc_mux_549;
@@ -3622,7 +3622,7 @@ struct linx_cpu_pyc {
     EX__op_c_swi__ex_stage__L74 = pyc_eq_786;
     pyc_eq_787 = pyc::cpp::Wire<1>((EX__op__ex_stage__L44 == pyc_comb_122) ? 1u : 0u);
     EX__op_sdi__ex_stage__L75 = pyc_eq_787;
-    pyc_shli_788 = pyc::cpp::Wire<64>(EX__imm__ex_stage__L50.value() << 2ull);
+    pyc_shli_788 = pyc::cpp::shl<64>(EX__imm__ex_stage__L50, 2u);
     EX__off__ex_stage__L77 = pyc_shli_788;
     EX__alu__ex_stage__L79 = EX__z64__ex_stage__L40;
     EX__is_load__ex_stage__L80 = EX__z1__ex_stage__L38;
@@ -4024,7 +4024,7 @@ struct linx_cpu_pyc {
     EX__is_store__ex_stage__L260 = arith_select_931;
     EX__size__ex_stage__L260 = arith_select_932;
     EX__wdata__ex_stage__L260 = pyc_mux_936;
-    pyc_shli_937 = pyc::cpp::Wire<64>(EX__imm__ex_stage__L50.value() << 3ull);
+    pyc_shli_937 = pyc::cpp::shl<64>(EX__imm__ex_stage__L50, 3u);
     EX__sdi_off__ex_stage__L269 = pyc_shli_937;
     pyc_add_938 = (EX__srcr_val__ex_stage__L48 + EX__sdi_off__ex_stage__L269);
     EX__sdi_addr__ex_stage__L270 = pyc_add_938;

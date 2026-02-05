@@ -181,7 +181,7 @@ class _Compiler:
         if w.ty.startswith("i") and expected_ty.startswith("i"):
             ew = self._ty_width(expected_ty)
             if w.width < ew:
-                return w.zext(width=ew)
+                return w.sext(width=ew) if w.signed else w.zext(width=ew)
             if w.width > ew:
                 return w.trunc(width=ew)
             return w
@@ -211,9 +211,9 @@ class _Compiler:
     def _alias_if_wire(self, v: Any, *, base_name: str, node: ast.AST) -> Any:
         n = self._scoped_name(self._name_with_loc(base_name, node))
         if isinstance(v, Wire):
-            return Wire(self.m, self.m.alias(v.sig, name=n))
+            return Wire(self.m, self.m.alias(v.sig, name=n), signed=v.signed)
         if isinstance(v, Reg):
-            q_named = Wire(self.m, self.m.alias(v.q.sig, name=n))
+            q_named = Wire(self.m, self.m.alias(v.q.sig, name=n), signed=v.q.signed)
             return Reg(q=q_named, clk=v.clk, rst=v.rst, en=v.en, next=v.next, init=v.init)
         return v
 
@@ -246,6 +246,8 @@ class _Compiler:
             if isinstance(node.op, ast.Mult):
                 return a * b
             if isinstance(node.op, ast.FloorDiv):
+                return a // b
+            if isinstance(node.op, ast.Div):
                 return a // b
             if isinstance(node.op, ast.Mod):
                 return a % b
@@ -326,6 +328,34 @@ class _Compiler:
                 if isinstance(rhs, (Wire, Reg)):
                     return rhs + lhs
                 return int(lhs) + int(rhs)
+            if isinstance(node.op, ast.Sub):
+                if isinstance(lhs, (Wire, Reg)):
+                    return _expect_wire(lhs, ctx="-") - rhs
+                if isinstance(rhs, (Wire, Reg)):
+                    return int(lhs) - _expect_wire(rhs, ctx="-")
+                return int(lhs) - int(rhs)
+            if isinstance(node.op, ast.Mult):
+                if isinstance(lhs, (Wire, Reg)):
+                    return _expect_wire(lhs, ctx="*") * rhs
+                if isinstance(rhs, (Wire, Reg)):
+                    return _expect_wire(rhs, ctx="*") * lhs
+                return int(lhs) * int(rhs)
+            if isinstance(node.op, ast.FloorDiv) or isinstance(node.op, ast.Div):
+                if isinstance(lhs, (Wire, Reg)):
+                    return _expect_wire(lhs, ctx="/") // rhs
+                if isinstance(rhs, (Wire, Reg)):
+                    w = _expect_wire(rhs, ctx="/")
+                    lhs_w = w._as_wire(int(lhs), width=w.width)
+                    return lhs_w // w
+                return int(lhs) // int(rhs)
+            if isinstance(node.op, ast.Mod):
+                if isinstance(lhs, (Wire, Reg)):
+                    return _expect_wire(lhs, ctx="%") % rhs
+                if isinstance(rhs, (Wire, Reg)):
+                    w = _expect_wire(rhs, ctx="%")
+                    lhs_w = w._as_wire(int(lhs), width=w.width)
+                    return lhs_w % w
+                return int(lhs) % int(rhs)
             if isinstance(node.op, ast.BitAnd):
                 if isinstance(lhs, (Wire, Reg)):
                     return lhs & rhs
@@ -355,7 +385,7 @@ class _Compiler:
                 amt = rhs
                 if not isinstance(amt, int):
                     raise JitError(">> only supports constant shift amounts")
-                return w.lshr(amount=int(amt))
+                return w >> int(amt)
         if isinstance(node, ast.UnaryOp):
             v = self.eval_expr(node.operand)
             if isinstance(node.op, ast.Invert):
@@ -408,29 +438,29 @@ class _Compiler:
                 return ~eq
             if isinstance(op, ast.Lt):
                 if isinstance(lhs, (Wire, Reg)):
-                    return _expect_wire(lhs, ctx="<").ult(rhs)
+                    return _expect_wire(lhs, ctx="<").lt(rhs)
                 if isinstance(rhs, (Wire, Reg)):
                     # a < b  ==>  b > a
-                    return _expect_wire(rhs, ctx="<").ugt(lhs)
+                    return _expect_wire(rhs, ctx="<").gt(lhs)
                 return int(lhs) < int(rhs)
             if isinstance(op, ast.LtE):
                 if isinstance(lhs, (Wire, Reg)):
-                    return ~_expect_wire(lhs, ctx="<=").ugt(rhs)
+                    return _expect_wire(lhs, ctx="<=").le(rhs)
                 if isinstance(rhs, (Wire, Reg)):
-                    return ~_expect_wire(rhs, ctx="<=").ult(lhs)
+                    return _expect_wire(rhs, ctx="<=").ge(lhs)
                 return int(lhs) <= int(rhs)
             if isinstance(op, ast.Gt):
                 if isinstance(lhs, (Wire, Reg)):
-                    return _expect_wire(lhs, ctx=">").ugt(rhs)
+                    return _expect_wire(lhs, ctx=">").gt(rhs)
                 if isinstance(rhs, (Wire, Reg)):
                     # a > b  ==>  b < a
-                    return _expect_wire(rhs, ctx=">").ult(lhs)
+                    return _expect_wire(rhs, ctx=">").lt(lhs)
                 return int(lhs) > int(rhs)
             if isinstance(op, ast.GtE):
                 if isinstance(lhs, (Wire, Reg)):
-                    return ~_expect_wire(lhs, ctx=">=").ult(rhs)
+                    return _expect_wire(lhs, ctx=">=").ge(rhs)
                 if isinstance(rhs, (Wire, Reg)):
-                    return ~_expect_wire(rhs, ctx=">=").ugt(lhs)
+                    return _expect_wire(rhs, ctx=">=").le(lhs)
                 return int(lhs) >= int(rhs)
         if isinstance(node, ast.Call):
             return self.eval_call(node)

@@ -101,7 +101,7 @@ Handshake semantics:
 Notes:
 
 - This prototype FIFO is **single-clock** (one `%clk`, one `%rst`).
-- Cross-clock FIFOs (async FIFO) should be modeled explicitly in future ops/passes.
+- Cross-clock FIFOs should use `pyc.async_fifo` (dual-clock, strict ready/valid).
 
 ### 2.6 `pyc.comb` / `pyc.yield` (fused combinational regions)
 
@@ -123,6 +123,11 @@ into a single region:
 - Combinational ops become instances of primitives in `include/pyc/verilog/` (e.g. `pyc_add`, `pyc_mux`, `pyc_and`)
 - `pyc.reg` becomes an instance of `include/pyc/verilog/pyc_reg.v`
 - `pyc.fifo` becomes an instance of `include/pyc/verilog/pyc_fifo.v`
+- `pyc.async_fifo` becomes an instance of `include/pyc/verilog/pyc_async_fifo.v`
+- `pyc.byte_mem` becomes an instance of `include/pyc/verilog/pyc_byte_mem.v`
+- `pyc.sync_mem` becomes an instance of `include/pyc/verilog/pyc_sync_mem.v`
+- `pyc.sync_mem_dp` becomes an instance of `include/pyc/verilog/pyc_sync_mem_dp.v`
+- `pyc.cdc_sync` becomes an instance of `include/pyc/verilog/pyc_cdc_sync.v`
 
 `pyc-compile` also runs `pyc-fuse-comb`, which enables emission of flattened
 Verilog `assign` statements for large purely-combinational regions.

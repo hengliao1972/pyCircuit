@@ -92,7 +92,22 @@ Handshake:
 - pop when `out_valid && out_ready`
 
 Note: this is currently **single-clock**; async FIFO should be a separate
-primitive.
+primitive. See `pyc_async_fifo` below.
+
+### 3.2 `pyc_async_fifo` (dual-clock, strict ready/valid)
+
+- Verilog: `module pyc_async_fifo #(WIDTH, DEPTH) (...)` (`include/pyc/verilog/pyc_async_fifo.v`)
+- C++: `pyc::cpp::pyc_async_fifo<Width, Depth>` (`include/pyc/cpp/pyc_async_fifo.hpp`)
+
+Ports:
+
+- write domain: `in_clk`, `in_rst`, `in_valid`, `in_ready`, `in_data`
+- read domain: `out_clk`, `out_rst`, `out_valid`, `out_ready`, `out_data`
+
+Notes (prototype constraints):
+
+- `DEPTH` must be a power of two and `>= 2`.
+- No combinational cross-domain paths (strict handshake).
 
 ## 4) Memory
 
@@ -106,7 +121,47 @@ Semantics (prototype):
 - Write is synchronous on posedge: when `wvalid`, update bytes selected by `wstrb`.
 - Reset does not clear memory; testbenches can initialize contents via `memh`/poke helpers.
 
-## 5) Debugging / Testbench (C++)
+### 4.2 `pyc_sync_mem` (1R1W, synchronous read, registered output)
+
+- Verilog: `module pyc_sync_mem #(ADDR_WIDTH, DATA_WIDTH, DEPTH) (...)` (`include/pyc/verilog/pyc_sync_mem.v`)
+- C++: `pyc::cpp::pyc_sync_mem<AddrWidth, DataWidth, DepthEntries>` (`include/pyc/cpp/pyc_sync_mem.hpp`)
+
+Ports:
+
+- `clk`, `rst`
+- read: `ren`, `raddr`, `rdata` (registered)
+- write: `wvalid`, `waddr`, `wdata`, `wstrb`
+
+Semantics (prototype):
+
+- Read data updates on posedge when `ren` is asserted (registered read).
+- Write occurs on posedge when `wvalid` is asserted (byte enables via `wstrb`).
+
+### 4.3 `pyc_sync_mem_dp` (2R1W, synchronous read, registered outputs)
+
+- Verilog: `module pyc_sync_mem_dp #(ADDR_WIDTH, DATA_WIDTH, DEPTH) (...)` (`include/pyc/verilog/pyc_sync_mem_dp.v`)
+- C++: `pyc::cpp::pyc_sync_mem_dp<AddrWidth, DataWidth, DepthEntries>` (`include/pyc/cpp/pyc_sync_mem.hpp`)
+
+Ports:
+
+- `clk`, `rst`
+- read0: `ren0`, `raddr0`, `rdata0` (registered)
+- read1: `ren1`, `raddr1`, `rdata1` (registered)
+- write: `wvalid`, `waddr`, `wdata`, `wstrb`
+
+## 5) CDC
+
+### 5.1 `pyc_cdc_sync` (dst-clocked synchronizer)
+
+- Verilog: `module pyc_cdc_sync #(WIDTH, STAGES) (...)` (`include/pyc/verilog/pyc_cdc_sync.v`)
+- C++: `pyc::cpp::pyc_cdc_sync<Width, Stages>` (`include/pyc/cpp/pyc_cdc_sync.hpp`)
+
+Ports:
+
+- `clk`, `rst`
+- `in`, `out`
+
+## 6) Debugging / Testbench (C++)
 
 Prototype-only utilities to help with bring-up and debugging:
 

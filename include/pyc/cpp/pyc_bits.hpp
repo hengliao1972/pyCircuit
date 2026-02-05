@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 namespace pyc::cpp {
 
@@ -24,6 +25,8 @@ public:
   }
 
   friend constexpr Bits operator+(Bits a, Bits b) { return Bits(a.v_ + b.v_); }
+  friend constexpr Bits operator-(Bits a, Bits b) { return Bits(a.v_ - b.v_); }
+  friend constexpr Bits operator*(Bits a, Bits b) { return Bits(a.v_ * b.v_); }
   friend constexpr Bits operator&(Bits a, Bits b) { return Bits(a.v_ & b.v_); }
   friend constexpr Bits operator|(Bits a, Bits b) { return Bits(a.v_ | b.v_); }
   friend constexpr Bits operator^(Bits a, Bits b) { return Bits(a.v_ ^ b.v_); }
@@ -38,6 +41,100 @@ private:
 
 template <unsigned Width>
 using Wire = Bits<Width>;
+
+template <unsigned Width>
+constexpr std::int64_t asSigned(Wire<Width> v) {
+  static_assert(Width > 0 && Width <= 64, "asSigned supports widths 1..64");
+  if constexpr (Width == 64) {
+    return static_cast<std::int64_t>(v.value());
+  } else {
+    std::uint64_t x = v.value();
+    std::uint64_t signBit = std::uint64_t{1} << (Width - 1);
+    if (x & signBit)
+      x |= (~std::uint64_t{0}) << Width;
+    return static_cast<std::int64_t>(x);
+  }
+}
+
+template <unsigned Width>
+constexpr Wire<Width> shl(Wire<Width> v, unsigned amount) {
+  static_assert(Width > 0 && Width <= 64, "shl supports widths 1..64");
+  if (amount == 0)
+    return v;
+  if (amount >= Width)
+    return Wire<Width>(0);
+  return Wire<Width>(v.value() << amount);
+}
+
+template <unsigned Width>
+constexpr Wire<Width> lshr(Wire<Width> v, unsigned amount) {
+  static_assert(Width > 0 && Width <= 64, "lshr supports widths 1..64");
+  if (amount == 0)
+    return v;
+  if (amount >= Width)
+    return Wire<Width>(0);
+  return Wire<Width>(v.value() >> amount);
+}
+
+template <unsigned Width>
+constexpr Wire<Width> ashr(Wire<Width> v, unsigned amount) {
+  static_assert(Width > 0 && Width <= 64, "ashr supports widths 1..64");
+  if (amount == 0)
+    return v;
+  if (amount >= Width)
+    return asSigned(v) < 0 ? Wire<Width>(Wire<Width>::mask()) : Wire<Width>(0);
+  std::int64_t x = asSigned(v);
+  std::int64_t y = x >> amount;
+  return Wire<Width>(static_cast<std::uint64_t>(y));
+}
+
+template <unsigned Width>
+constexpr Wire<Width> udiv(Wire<Width> a, Wire<Width> b) {
+  static_assert(Width > 0 && Width <= 64, "udiv supports widths 1..64");
+  std::uint64_t denom = b.value();
+  if (denom == 0)
+    return Wire<Width>(0);
+  return Wire<Width>(a.value() / denom);
+}
+
+template <unsigned Width>
+constexpr Wire<Width> urem(Wire<Width> a, Wire<Width> b) {
+  static_assert(Width > 0 && Width <= 64, "urem supports widths 1..64");
+  std::uint64_t denom = b.value();
+  if (denom == 0)
+    return Wire<Width>(0);
+  return Wire<Width>(a.value() % denom);
+}
+
+template <unsigned Width>
+constexpr Wire<Width> sdiv(Wire<Width> a, Wire<Width> b) {
+  static_assert(Width > 0 && Width <= 64, "sdiv supports widths 1..64");
+  std::int64_t denom = asSigned(b);
+  if (denom == 0)
+    return Wire<Width>(0);
+  std::int64_t numer = asSigned(a);
+  if constexpr (Width == 64) {
+    if (numer == std::numeric_limits<std::int64_t>::min() && denom == -1)
+      return Wire<Width>(static_cast<std::uint64_t>(numer));
+  }
+  std::int64_t q = numer / denom;
+  return Wire<Width>(static_cast<std::uint64_t>(q));
+}
+
+template <unsigned Width>
+constexpr Wire<Width> srem(Wire<Width> a, Wire<Width> b) {
+  static_assert(Width > 0 && Width <= 64, "srem supports widths 1..64");
+  std::int64_t denom = asSigned(b);
+  if (denom == 0)
+    return Wire<Width>(0);
+  std::int64_t numer = asSigned(a);
+  if constexpr (Width == 64) {
+    if (numer == std::numeric_limits<std::int64_t>::min() && denom == -1)
+      return Wire<Width>(0);
+  }
+  std::int64_t r = numer % denom;
+  return Wire<Width>(static_cast<std::uint64_t>(r));
+}
 
 namespace detail {
 
