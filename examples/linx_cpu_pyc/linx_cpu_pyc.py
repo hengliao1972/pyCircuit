@@ -15,16 +15,16 @@ from pycircuit import (
     mux,
 )
 
-from examples.linx_cpu_pyc.isa import BK_FALL, OP_EBREAK, OP_INVALID, REG_INVALID, ST_EX, ST_ID, ST_IF, ST_MEM, ST_WB
-from examples.linx_cpu_pyc.memory import build_byte_mem
-from examples.linx_cpu_pyc.pipeline import CoreState, ExMemRegs, IdExRegs, IfIdRegs, MemWbRegs, RegFiles
-from examples.linx_cpu_pyc.regfile import make_gpr, make_regs
-from examples.linx_cpu_pyc.stages.ex_stage import build_ex_stage
-from examples.linx_cpu_pyc.stages.id_stage import build_id_stage
-from examples.linx_cpu_pyc.stages.if_stage import build_if_stage
-from examples.linx_cpu_pyc.stages.mem_stage import build_mem_stage
-from examples.linx_cpu_pyc.stages.wb_stage import build_wb_stage
-from examples.linx_cpu_pyc.util import make_consts
+from .isa import BK_FALL, OP_EBREAK, OP_INVALID, REG_INVALID, ST_EX, ST_ID, ST_IF, ST_MEM, ST_WB
+from .memory import build_byte_mem
+from .pipeline import CoreState, ExMemRegs, IdExRegs, IfIdRegs, MemWbRegs, RegFiles
+from .regfile import make_gpr, make_regs
+from .stages.ex_stage import build_ex_stage
+from .stages.id_stage import build_id_stage
+from .stages.if_stage import build_if_stage
+from .stages.mem_stage import build_mem_stage
+from .stages.wb_stage import build_wb_stage
+from .util import make_consts
 
 
 def _linx_cpu_impl(
