@@ -1275,7 +1275,7 @@ class CycleAwareSignal:
             b_sig = self.m.zext(b.sig, width=out_w) if not b.signed else self.m.sext(b.sig, width=out_w)
         
         result_sig = op_fn(a_sig, b_sig)
-        out_cycle = max(a.cycle, b.cycle)
+        out_cycle = self.domain.current_cycle
         
         return CycleAwareSignal(
             m=self.m,
@@ -1375,7 +1375,7 @@ class CycleAwareSignal:
         return CycleAwareSignal(
             m=self.m,
             sig=result_sig,
-            cycle=max(a.cycle, b.cycle),
+            cycle=self.domain.current_cycle,
             domain=self.domain,
             name=f"({self.name} == {other_sig.name})" if self.name else "",
             signed=False,
@@ -1400,7 +1400,7 @@ class CycleAwareSignal:
         return CycleAwareSignal(
             m=self.m,
             sig=result_sig,
-            cycle=max(a.cycle, b.cycle),
+            cycle=self.domain.current_cycle,
             domain=self.domain,
             name=f"({self.name} < {other_sig.name})" if self.name else "",
             signed=False,
@@ -1443,7 +1443,7 @@ class CycleAwareSignal:
         return CycleAwareSignal(
             m=self.m,
             sig=result_sig,
-            cycle=max(cond.cycle, t.cycle, f.cycle),
+            cycle=self.domain.current_cycle,
             domain=self.domain,
             name="",
             signed=(t.signed or f.signed),
@@ -1598,22 +1598,24 @@ class CycleAwareCircuit(Circuit):
         return self._default_domain
 
     def _balance_cycles(self, *signals: CycleAwareSignal) -> tuple[CycleAwareSignal, ...]:
-        """自动周期平衡：将所有信号对齐到最大周期。
+        """自动周期平衡：将所有信号对齐到 domain.current_cycle。
         
-        如果信号的周期小于最大周期，则自动插入DFF链延迟。
+        - signal.cycle < target → 插入 DFF 链延迟 (forward balancing)
+        - signal.cycle >= target → 直接使用 (feedback, no DFF)
         """
         if not signals:
             return ()
         
-        max_cycle = max(s.cycle for s in signals)
+        target_cycle = signals[0].domain.current_cycle
         result: list[CycleAwareSignal] = []
         
         for s in signals:
-            if s.cycle < max_cycle:
-                delay = max_cycle - s.cycle
+            if s.cycle < target_cycle:
+                delay = target_cycle - s.cycle
                 delayed = self._insert_dff_chain(s, delay)
                 result.append(delayed)
             else:
+                # cycle >= target: feedback or same cycle — use directly
                 result.append(s)
         
         return tuple(result)
@@ -1657,7 +1659,7 @@ class CycleAwareCircuit(Circuit):
     def cat_signals(self, *signals: CycleAwareSignal) -> CycleAwareSignal:
         """拼接多个CycleAwareSignal为一个信号 (MSB-first)。
         
-        自动进行周期平衡，输出周期为所有输入的最大周期。
+        自动进行周期平衡，输出周期为 domain.current_cycle。
         """
         if not signals:
             raise ValueError("cat_signals requires at least one signal")
@@ -1667,7 +1669,6 @@ class CycleAwareCircuit(Circuit):
         
         # 周期平衡
         balanced = self._balance_cycles(*signals)
-        max_cycle = balanced[0].cycle
         domain = balanced[0].domain
         
         # 使用底层concat拼接
@@ -1678,7 +1679,7 @@ class CycleAwareCircuit(Circuit):
         return CycleAwareSignal(
             m=self,
             sig=result_sig,
-            cycle=max_cycle,
+            cycle=domain.current_cycle,
             domain=domain,
             name="",
             signed=False,
