@@ -175,7 +175,7 @@ module tb_linx_cpu_pyc;
   task automatic pv_alloc_id(input longint unsigned pc, input int lane, output longint unsigned id);
     id = konata_next_id;
     konata_next_id++;
-    konata_insn(pc, id, 0);
+    konata_insn(id, pc, 0);
     konata_label(id, 0, $sformatf("pc=0x%016x lane=%0d", pc, lane));
   endtask
 
@@ -231,7 +231,7 @@ module tb_linx_cpu_pyc;
     // Tracing / logging (default: enabled; disable with +notrace / +nolog).
     vcd_path = "examples/generated/linx_cpu_pyc/tb_linx_cpu_pyc_sv.vcd";
     log_path = "examples/generated/linx_cpu_pyc/tb_linx_cpu_pyc_sv.log";
-    konata_path = "examples/generated/linx_cpu_pyc/tb_linx_cpu_pyc_sv.kanata";
+    konata_path = "examples/generated/linx_cpu_pyc/tb_linx_cpu_pyc_sv.konata";
     void'($value$plusargs("vcd=%s", vcd_path));
     void'($value$plusargs("log=%s", log_path));
     void'($value$plusargs("konata=%s", konata_path));

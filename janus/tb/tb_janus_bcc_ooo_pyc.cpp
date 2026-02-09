@@ -141,7 +141,7 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
   pyc::cpp::KonataWriter konata{};
   if (trace_konata) {
     std::uint64_t start = dut.cycles.value();
-    if (!konata.open(out_dir / (std::string("tb_janus_bcc_ooo_pyc_cpp_") + name + ".kanata"), start)) {
+    if (!konata.open(out_dir / (std::string("tb_janus_bcc_ooo_pyc_cpp_") + name + ".konata"), start)) {
       std::cerr << "WARN: failed to open konata trace output under " << out_dir << "\n";
     }
   }
@@ -164,22 +164,38 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
   struct PvEntry {
     std::uint64_t id = 0;
     PvStage stage = PvStage::IQ;
+    int lane = 0;
   };
   std::unordered_map<std::uint64_t, PvEntry> pvByRob{};
   std::uint64_t pvNextId = 1;
 
-  auto pvStageName = [](PvStage s) -> const char * { return (s == PvStage::IQ) ? "IQ" : "ROB"; };
+  auto pvStageName = [](PvStage s) -> const char * { return (s == PvStage::IQ) ? "S2" : "ROB"; };
 
-  auto pvAlloc = [&](std::uint64_t pc, std::uint64_t op, std::uint64_t robIdx) {
+  auto pvAlloc = [&](std::uint64_t pc, std::uint64_t op, std::uint64_t robIdx, int slot) {
     const std::uint64_t id = pvNextId++;
-    pvByRob[robIdx] = PvEntry{.id = id, .stage = PvStage::IQ};
+    pvByRob[robIdx] = PvEntry{.id = id, .stage = PvStage::IQ, .lane = slot};
     if (!konata.isOpen())
       return;
-    konata.insn(/*fileId=*/pc, /*simId=*/id, /*threadId=*/0);
+    konata.insn(/*fileId=*/id, /*simId=*/pc, /*threadId=*/0);
     std::ostringstream ss;
-    ss << "pc=0x" << std::hex << pc << " op=" << std::dec << op << " rob=" << robIdx;
+    ss << "pc=0x" << std::hex << pc << " op=" << std::dec << op << " rob=" << robIdx << " slot=" << slot;
     konata.label(id, /*type=*/0, ss.str());
-    konata.stageStart(id, /*laneId=*/0, "IQ");
+    // Janus BCC OOO stages from janus/PLAN.md:
+    // - IFU: F0..F4 (bring-up currently models a single-entry F4 bundle)
+    // - OOO: D1/D2/D3 (decode/uop/rename) then S2 (issue queue)
+    //
+    // For pipeview, dispatch_fire* is the first fully-observable per-uop event,
+    // so we attribute the decode/rename work to this cycle and then keep the
+    // uop resident in S2 until issue_fire*.
+    konata.stageStart(id, /*laneId=*/slot, "F4");
+    konata.stageEnd(id, /*laneId=*/slot, "F4");
+    konata.stageStart(id, /*laneId=*/slot, "D1");
+    konata.stageEnd(id, /*laneId=*/slot, "D1");
+    konata.stageStart(id, /*laneId=*/slot, "D2");
+    konata.stageEnd(id, /*laneId=*/slot, "D2");
+    konata.stageStart(id, /*laneId=*/slot, "D3");
+    konata.stageEnd(id, /*laneId=*/slot, "D3");
+    konata.stageStart(id, /*laneId=*/slot, "S2");
   };
 
   auto pvSquash = [&](std::uint64_t robIdx) {
@@ -187,10 +203,11 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
     if (it == pvByRob.end())
       return;
     const std::uint64_t id = it->second.id;
+    const int lane = it->second.lane;
     if (konata.isOpen()) {
-      konata.stageEnd(id, /*laneId=*/0, pvStageName(it->second.stage));
-      konata.retire(id, /*retireId=*/id, /*type=*/1);
+      konata.stageEnd(id, /*laneId=*/lane, pvStageName(it->second.stage));
       konata.label(id, /*type=*/1, "squash");
+      konata.retire(id, /*retireId=*/id, /*type=*/1);
     }
     pvByRob.erase(it);
   };
@@ -231,7 +248,7 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
         if (!fire)
           continue;
         pvSquash(robIdx);
-        pvAlloc(pc, op, robIdx);
+        pvAlloc(pc, op, robIdx, /*slot=*/slot);
       }
 
       // Issue slots: transition IQ -> ROB based on issued ROB id.
@@ -269,8 +286,9 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
         if (it->second.stage != PvStage::IQ)
           continue;
         const std::uint64_t id = it->second.id;
-        konata.stageEnd(id, /*laneId=*/0, "IQ");
-        konata.stageStart(id, /*laneId=*/0, "ROB");
+        const int lane = it->second.lane;
+        konata.stageEnd(id, /*laneId=*/lane, "S2");
+        konata.stageStart(id, /*laneId=*/lane, "ROB");
         it->second.stage = PvStage::ROB;
         std::ostringstream ss;
         ss << "issue pc=0x" << std::hex << pc << " op=" << std::dec << op << " slot=" << slot;
@@ -310,11 +328,12 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
         if (it == pvByRob.end())
           continue;
         const std::uint64_t id = it->second.id;
-        konata.stageEnd(id, /*laneId=*/0, pvStageName(it->second.stage));
-        konata.retire(id, /*retireId=*/id, /*type=*/0);
+        const int lane = it->second.lane;
+        konata.stageEnd(id, /*laneId=*/lane, pvStageName(it->second.stage));
         std::ostringstream ss;
         ss << "commit pc=0x" << std::hex << pc << " op=" << std::dec << op << " slot=" << slot;
         konata.label(id, /*type=*/1, ss.str());
+        konata.retire(id, /*retireId=*/id, /*type=*/0);
         pvByRob.erase(it);
       }
     }
@@ -359,6 +378,18 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
     } else {
       exitPcStable = 0;
     }
+  }
+  if (konata.isOpen()) {
+    // Ensure the Konata log is structurally balanced for viewers that require
+    // every stage-start to have a matching end before EOF.
+    for (const auto &kv : pvByRob) {
+      const std::uint64_t id = kv.second.id;
+      const int lane = kv.second.lane;
+      konata.stageEnd(id, /*laneId=*/lane, pvStageName(kv.second.stage));
+      konata.label(id, /*type=*/1, "end_of_sim");
+      konata.retire(id, /*retireId=*/id, /*type=*/1);
+    }
+    pvByRob.clear();
   }
   if (!done) {
     std::cerr << "FAIL " << name << ": did not halt (pc=0x" << std::hex << dut.pc.value() << " fpc=0x" << dut.fpc.value() << ")\n";

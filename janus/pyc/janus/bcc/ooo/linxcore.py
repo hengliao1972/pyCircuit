@@ -1718,18 +1718,18 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     for slot in range(max_commit_slots):
         fire = consts.zero1
         pc = consts.zero64
-        rob = c(0, width=p.rob_w)
+        rob_idx = c(0, width=p.rob_w)
         op = c(0, width=12)
         val = consts.zero64
         if slot < p.commit_w:
             fire = commit_fires[slot]
             pc = commit_pcs[slot]
-            rob = commit_idxs[slot]
+            rob_idx = commit_idxs[slot]
             op = rob_ops[slot]
             val = rob_values[slot]
         m.output(f"commit_fire{slot}", fire)
         m.output(f"commit_pc{slot}", pc)
-        m.output(f"commit_rob{slot}", rob)
+        m.output(f"commit_rob{slot}", rob_idx)
         m.output(f"commit_op{slot}", op)
         m.output(f"commit_value{slot}", val)
     m.output("rob_count", rob.count)

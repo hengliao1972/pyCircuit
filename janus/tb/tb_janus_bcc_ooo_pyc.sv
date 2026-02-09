@@ -241,6 +241,7 @@ module tb_janus_bcc_ooo_pyc;
   longint unsigned konata_next_id;
   longint unsigned konata_id_by_rob[int];
   bit konata_stage_by_rob[int];
+  int konata_lane_by_rob[int];
 
   longint unsigned max_cycles;
   longint unsigned expected_mem100;
@@ -292,60 +293,82 @@ module tb_janus_bcc_ooo_pyc;
   endtask
 
   task automatic pv_squash(input int rob);
+    longint unsigned id;
+    int lane;
     if (!konata_on)
       return;
     if (!konata_id_by_rob.exists(rob))
       return;
-    longint unsigned id = konata_id_by_rob[rob];
+    id = konata_id_by_rob[rob];
+    lane = konata_lane_by_rob.exists(rob) ? konata_lane_by_rob[rob] : 0;
     if (konata_stage_by_rob[rob] == 0)
-      konata_stage_end(id, 0, "IQ");
+      konata_stage_end(id, lane, "S2");
     else
-      konata_stage_end(id, 0, "ROB");
-    konata_retire(id, id, 1);
+      konata_stage_end(id, lane, "ROB");
     konata_label(id, 1, "squash");
+    konata_retire(id, id, 1);
     konata_id_by_rob.delete(rob);
     konata_stage_by_rob.delete(rob);
+    konata_lane_by_rob.delete(rob);
   endtask
 
   task automatic pv_dispatch(input int slot, input int rob, input logic [63:0] pc, input logic [11:0] op);
+    longint unsigned id;
     pv_squash(rob);
-    longint unsigned id = konata_next_id;
+    id = konata_next_id;
     konata_next_id++;
     konata_id_by_rob[rob] = id;
     konata_stage_by_rob[rob] = 0;
-    konata_insn(pc, id, 0);
+    konata_lane_by_rob[rob] = slot;
+    konata_insn(id, pc, 0);
     konata_label(id, 0, $sformatf("pc=0x%016x op=%0d rob=%0d disp_slot=%0d", pc, op, rob, slot));
-    konata_stage_start(id, 0, "IQ");
+    // Stage naming follows janus/PLAN.md (OOO bring-up uses dispatch/issue/commit hooks).
+    konata_stage_start(id, slot, "F4");
+    konata_stage_end(id, slot, "F4");
+    konata_stage_start(id, slot, "D1");
+    konata_stage_end(id, slot, "D1");
+    konata_stage_start(id, slot, "D2");
+    konata_stage_end(id, slot, "D2");
+    konata_stage_start(id, slot, "D3");
+    konata_stage_end(id, slot, "D3");
+    konata_stage_start(id, slot, "S2");
   endtask
 
   task automatic pv_issue(input int slot, input int rob, input logic [63:0] pc, input logic [11:0] op);
+    longint unsigned id;
+    int lane;
     if (!konata_on)
       return;
     if (!konata_id_by_rob.exists(rob))
       return;
     if (konata_stage_by_rob[rob] != 0)
       return;
-    longint unsigned id = konata_id_by_rob[rob];
-    konata_stage_end(id, 0, "IQ");
-    konata_stage_start(id, 0, "ROB");
+    id = konata_id_by_rob[rob];
+    lane = konata_lane_by_rob.exists(rob) ? konata_lane_by_rob[rob] : 0;
+    konata_stage_end(id, lane, "S2");
+    konata_stage_start(id, lane, "ROB");
     konata_stage_by_rob[rob] = 1;
     konata_label(id, 1, $sformatf("issue pc=0x%016x op=%0d slot=%0d", pc, op, slot));
   endtask
 
   task automatic pv_commit(input int slot, input int rob, input logic [63:0] pc, input logic [11:0] op);
+    longint unsigned id;
+    int lane;
     if (!konata_on)
       return;
     if (!konata_id_by_rob.exists(rob))
       return;
-    longint unsigned id = konata_id_by_rob[rob];
+    id = konata_id_by_rob[rob];
+    lane = konata_lane_by_rob.exists(rob) ? konata_lane_by_rob[rob] : 0;
     if (konata_stage_by_rob[rob] == 0)
-      konata_stage_end(id, 0, "IQ");
+      konata_stage_end(id, lane, "S2");
     else
-      konata_stage_end(id, 0, "ROB");
-    konata_retire(id, id, 0);
+      konata_stage_end(id, lane, "ROB");
     konata_label(id, 1, $sformatf("commit pc=0x%016x op=%0d slot=%0d", pc, op, slot));
+    konata_retire(id, id, 0);
     konata_id_by_rob.delete(rob);
     konata_stage_by_rob.delete(rob);
+    konata_lane_by_rob.delete(rob);
   endtask
 
   initial begin
@@ -374,7 +397,7 @@ module tb_janus_bcc_ooo_pyc;
 
     vcd_path = "janus/generated/janus_bcc_ooo_pyc/tb_janus_bcc_ooo_pyc_sv.vcd";
     log_path = "janus/generated/janus_bcc_ooo_pyc/tb_janus_bcc_ooo_pyc_sv.log";
-    konata_path = "janus/generated/janus_bcc_ooo_pyc/tb_janus_bcc_ooo_pyc_sv.kanata";
+    konata_path = "janus/generated/janus_bcc_ooo_pyc/tb_janus_bcc_ooo_pyc_sv.konata";
     void'($value$plusargs("vcd=%s", vcd_path));
     void'($value$plusargs("log=%s", log_path));
     void'($value$plusargs("konata=%s", konata_path));
@@ -631,6 +654,25 @@ module tb_janus_bcc_ooo_pyc;
     end
 
     if (konata_fd != 0) begin
+      if (konata_on) begin
+        // Ensure the Konata log is structurally balanced for viewers that
+        // require every stage-start to have a matching end before EOF.
+        foreach (konata_id_by_rob[rob]) begin
+          longint unsigned id;
+          int lane;
+          id = konata_id_by_rob[rob];
+          lane = konata_lane_by_rob.exists(rob) ? konata_lane_by_rob[rob] : 0;
+          if (konata_stage_by_rob[rob] == 0)
+            konata_stage_end(id, lane, "S2");
+          else
+            konata_stage_end(id, lane, "ROB");
+          konata_label(id, 1, "end_of_sim");
+          konata_retire(id, id, 1);
+        end
+        konata_id_by_rob.delete();
+        konata_stage_by_rob.delete();
+        konata_lane_by_rob.delete();
+      end
       $fclose(konata_fd);
     end
 

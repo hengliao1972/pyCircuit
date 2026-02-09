@@ -127,7 +127,7 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
   pyc::cpp::KonataWriter konata{};
   if (trace_konata) {
     std::uint64_t start = dut.cycles.value();
-    if (!konata.open(out_dir / (std::string("tb_linx_cpu_pyc_cpp_") + name + ".kanata"), start)) {
+    if (!konata.open(out_dir / (std::string("tb_linx_cpu_pyc_cpp_") + name + ".konata"), start)) {
       std::cerr << "WARN: failed to open konata trace output under " << out_dir << "\n";
     }
   }
@@ -158,7 +158,9 @@ static bool runProgram(const char *name, const char *memhPath, std::uint64_t boo
   auto allocId = [&](std::uint64_t pc, int lane) -> std::uint64_t {
     const std::uint64_t id = nextId++;
     if (konata.isOpen()) {
-      konata.insn(/*fileId=*/pc, /*simId=*/id, /*threadId=*/0);
+      // Kanata log: all subsequent commands (L/S/E/R/W) reference INSN_ID_IN_FILE
+      // (the first field after 'I'), which must be unique in the log.
+      konata.insn(/*fileId=*/id, /*simId=*/pc, /*threadId=*/0);
       std::ostringstream ss;
       ss << "pc=0x" << std::hex << pc << " lane=" << std::dec << lane;
       konata.label(id, /*type=*/0, ss.str());

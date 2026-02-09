@@ -70,4 +70,7 @@ Both C++ testbenches support:
 
 - `PYC_TRACE=1` (log file)
 - `PYC_VCD=1` (VCD waveform)
+- `PYC_KONATA=1` (Konata pipeview trace, `*.konata`)
 - `PYC_TRACE_DIR=/path/to/out` (override output dir; default is under `janus/generated/`)
+
+`bash janus/tools/run_janus_bcc_pyc_cpp.sh` and `bash janus/tools/run_janus_bcc_ooo_pyc_cpp.sh` enable `PYC_KONATA=1` by default (disable with `PYC_KONATA=0`).

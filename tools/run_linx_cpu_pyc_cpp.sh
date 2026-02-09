@@ -7,6 +7,9 @@ ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 source "${ROOT_DIR}/scripts/lib.sh"
 pyc_find_pyc_compile
 
+# Default to generating a Konata pipeview trace for each run (disable with: PYC_KONATA=0).
+export PYC_KONATA="${PYC_KONATA:-1}"
+
 MEMH=""
 ELF=""
 EXPECTED=""

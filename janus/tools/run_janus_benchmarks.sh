@@ -15,18 +15,32 @@ DHRY_MEMH="${BENCH_DIR}/dhrystone_lite.memh"
 CORE_OPS=4096
 DHRY_ITERS=4096
 
+MAX_CYCLES="${PYC_MAX_CYCLES:-20000000}"
+
 bash "${ROOT_DIR}/janus/tools/build_linx_memh.sh" "${CORE_SRC}" "${CORE_MEMH}" >/dev/null
 bash "${ROOT_DIR}/janus/tools/build_linx_memh.sh" "${DHRY_SRC}" "${DHRY_MEMH}" >/dev/null
 
 run_cpp() {
+  local name="$1"
+  shift
   local memh="$1"
-  bash "${ROOT_DIR}/janus/tools/run_janus_bcc_ooo_pyc_cpp.sh" "${memh}" 2>&1
+  shift || true
+  local trace_dir="${BENCH_DIR}/trace_cpp_${name}"
+  mkdir -p "${trace_dir}"
+  PYC_TRACE_DIR="${trace_dir}" PYC_MAX_CYCLES="${MAX_CYCLES}" PYC_KONATA=1 \
+    bash "${ROOT_DIR}/janus/tools/run_janus_bcc_ooo_pyc_cpp.sh" "${memh}" 2>&1
 }
 
 run_vlt() {
+  local name="$1"
+  shift
   local memh="$1"
+  shift || true
+  local konata_path="${BENCH_DIR}/trace_sv_${name}.konata"
   bash "${ROOT_DIR}/janus/tools/run_janus_bcc_ooo_pyc_verilator.sh" \
     +notrace +nolog \
+    +konata="${konata_path}" \
+    +max_cycles="${MAX_CYCLES}" \
     +memh="${memh}" 2>&1
 }
 
@@ -49,10 +63,10 @@ DHRY_CPP_LOG="${BENCH_DIR}/dhrystone_cpp.log"
 CORE_VLT_LOG="${BENCH_DIR}/coremark_verilog.log"
 DHRY_VLT_LOG="${BENCH_DIR}/dhrystone_verilog.log"
 
-run_cpp "${CORE_MEMH}" | tee "${CORE_CPP_LOG}" >/dev/null
-run_cpp "${DHRY_MEMH}" | tee "${DHRY_CPP_LOG}" >/dev/null
-run_vlt "${CORE_MEMH}" | tee "${CORE_VLT_LOG}" >/dev/null
-run_vlt "${DHRY_MEMH}" | tee "${DHRY_VLT_LOG}" >/dev/null
+run_cpp "coremark" "${CORE_MEMH}" | tee "${CORE_CPP_LOG}" >/dev/null
+run_cpp "dhrystone" "${DHRY_MEMH}" | tee "${DHRY_CPP_LOG}" >/dev/null
+run_vlt "coremark" "${CORE_MEMH}" | tee "${CORE_VLT_LOG}" >/dev/null
+run_vlt "dhrystone" "${DHRY_MEMH}" | tee "${DHRY_VLT_LOG}" >/dev/null
 
 CORE_CPP_CYCLES="$(extract_cycles < "${CORE_CPP_LOG}")"
 DHRY_CPP_CYCLES="$(extract_cycles < "${DHRY_CPP_LOG}")"
@@ -98,4 +112,3 @@ print("| Verilog model (Verilator) | {} | {:.6f} | {} | {:.6f} |".format(
 PY
 
 cat "${BENCH_DIR}/janus_bcc_report.md"
-

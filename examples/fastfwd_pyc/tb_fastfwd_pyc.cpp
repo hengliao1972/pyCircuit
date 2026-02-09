@@ -62,7 +62,7 @@ public:
     if (!isOpen())
       return;
     if (cycle < cur_cycle_) {
-      // Kanata time must be monotonic; ignore out-of-order writes.
+      // Konata time must be monotonic; ignore out-of-order writes.
       return;
     }
     if (cycle == cur_cycle_)
@@ -2164,7 +2164,7 @@ static int runFastFwd(
   KonataLog konata{};
   if (trace_konata) {
     std::uint64_t start = dut.TIME__cycle.value();
-    if (!konata.open(out_dir / "tb_fastfwd_pyc_cpp.kanata", start)) {
+    if (!konata.open(out_dir / "tb_fastfwd_pyc_cpp.konata", start)) {
       std::cerr << "WARN: failed to open konata trace output under " << out_dir << "\n";
     }
   }
