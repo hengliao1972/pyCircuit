@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""LinxISA CPU — true 5-stage parallel pipeline with cycle-aware syntax.
+"""LinxISA CPU — true 5-stage parallel pipeline with unified signal model.
 
-使用 domain.next() 推进周期，自动 DFF 插入 / 周期平衡，pipeline 寄存器
-使用 ca_reg 在正确的 cycle 创建。
+所有信号通过 domain.signal() 创建，通过 .set() 驱动。
+- reset=N → flop（DFF），声明时为 Q 输出
+- reset=None → wire（组合逻辑 / 反馈占位）
+无需 named_wire、CycleAwareReg、m.assign。
 
 Pipeline stages:
   cycle 0: IF  — instruction fetch
@@ -11,10 +13,8 @@ Pipeline stages:
   cycle 3: MEM — data memory access
   cycle 4: WB  — writeback, branch resolution
 
-反馈信号（后级 → 前级）使用 named_wire + CycleAwareSignal（标注生产/消费 cycle），
-框架的 _balance_cycles 在 target=domain.current_cycle 下自动处理：
-  signal.cycle < current  → 插入 DFF 链延迟
-  signal.cycle >= current → 直接引用（feedback）
+反馈信号：后级信号（cycle > current）在前级使用时，
+框架的 _balance_cycles 自动识别为 feedback 并直接引用（不插 DFF）。
 """
 from __future__ import annotations
 
@@ -55,70 +55,70 @@ def _linx_cpu_impl(
     # ==================================================================
     # Cycle 0 — 输入信号
     # ==================================================================
-    boot_pc = domain.create_signal("boot_pc", width=64)
-    boot_sp = domain.create_signal("boot_sp", width=64)
+    boot_pc = domain.input("boot_pc", width=64)
+    boot_sp = domain.input("boot_sp", width=64)
 
     # ==================================================================
-    # 创建所有 ca_reg，按 pipeline stage 分组到正确的 cycle
-    #   ca_reg.out() 自动带 cycle 标注
+    # 声明所有 flop 信号（pipeline regs + architectural state）
+    #   domain.signal(reset=N) → flop，声明时为 Q 输出
     # ==================================================================
     # --- Cycle 0: fetch_pc ---
-    fetch_pc_reg = m.ca_reg("fetch_pc", domain=domain, width=64, init=0)
+    fetch_pc = domain.signal("fetch_pc", width=64, reset=0)
 
     domain.push()  # save cycle 0
 
     domain.next()  # → cycle 1
-    # --- IF/ID pipeline regs (output cycle=1, consumed by ID stage) ---
-    ifid_window_r = m.ca_reg("ifid_window", domain=domain, width=64, init=0)
-    ifid_pc_r = m.ca_reg("ifid_pc", domain=domain, width=64, init=0)
-    valid_id_r = m.ca_reg("valid_id", domain=domain, width=1, init=0)
+    # --- IF/ID pipeline regs (Q at cycle 1, consumed by ID stage) ---
+    ifid_window_r = domain.signal("ifid_window", width=64, reset=0)
+    ifid_pc_r = domain.signal("ifid_pc", width=64, reset=0)
+    valid_id_r = domain.signal("valid_id", width=1, reset=0)
 
     domain.next()  # → cycle 2
-    # --- ID/EX pipeline regs (output cycle=2, consumed by EX stage) ---
-    idex_pc_r = m.ca_reg("idex_pc", domain=domain, width=64, init=0)
-    idex_op_r = m.ca_reg("idex_op", domain=domain, width=6, init=OP_INVALID)
-    idex_len_bytes_r = m.ca_reg("idex_len_bytes", domain=domain, width=3, init=0)
-    idex_regdst_r = m.ca_reg("idex_regdst", domain=domain, width=6, init=REG_INVALID)
-    idex_srcl_val_r = m.ca_reg("idex_srcl_val", domain=domain, width=64, init=0)
-    idex_srcr_val_r = m.ca_reg("idex_srcr_val", domain=domain, width=64, init=0)
-    idex_srcp_val_r = m.ca_reg("idex_srcp_val", domain=domain, width=64, init=0)
-    idex_imm_r = m.ca_reg("idex_imm", domain=domain, width=64, init=0)
-    valid_ex_r = m.ca_reg("valid_ex", domain=domain, width=1, init=0)
+    # --- ID/EX pipeline regs (Q at cycle 2, consumed by EX stage) ---
+    idex_pc_r = domain.signal("idex_pc", width=64, reset=0)
+    idex_op_r = domain.signal("idex_op", width=6, reset=OP_INVALID)
+    idex_len_bytes_r = domain.signal("idex_len_bytes", width=3, reset=0)
+    idex_regdst_r = domain.signal("idex_regdst", width=6, reset=REG_INVALID)
+    idex_srcl_val_r = domain.signal("idex_srcl_val", width=64, reset=0)
+    idex_srcr_val_r = domain.signal("idex_srcr_val", width=64, reset=0)
+    idex_srcp_val_r = domain.signal("idex_srcp_val", width=64, reset=0)
+    idex_imm_r = domain.signal("idex_imm", width=64, reset=0)
+    valid_ex_r = domain.signal("valid_ex", width=1, reset=0)
 
     domain.next()  # → cycle 3
-    # --- EX/MEM pipeline regs (output cycle=3, consumed by MEM stage) ---
-    exmem_op_r = m.ca_reg("exmem_op", domain=domain, width=6, init=OP_INVALID)
-    exmem_len_bytes_r = m.ca_reg("exmem_len_bytes", domain=domain, width=3, init=0)
-    exmem_pc_r = m.ca_reg("exmem_pc", domain=domain, width=64, init=0)
-    exmem_regdst_r = m.ca_reg("exmem_regdst", domain=domain, width=6, init=REG_INVALID)
-    exmem_alu_r = m.ca_reg("exmem_alu", domain=domain, width=64, init=0)
-    exmem_is_load_r = m.ca_reg("exmem_is_load", domain=domain, width=1, init=0)
-    exmem_is_store_r = m.ca_reg("exmem_is_store", domain=domain, width=1, init=0)
-    exmem_size_r = m.ca_reg("exmem_size", domain=domain, width=3, init=0)
-    exmem_addr_r = m.ca_reg("exmem_addr", domain=domain, width=64, init=0)
-    exmem_wdata_r = m.ca_reg("exmem_wdata", domain=domain, width=64, init=0)
-    valid_mem_r = m.ca_reg("valid_mem", domain=domain, width=1, init=0)
+    # --- EX/MEM pipeline regs (Q at cycle 3, consumed by MEM stage) ---
+    exmem_op_r = domain.signal("exmem_op", width=6, reset=OP_INVALID)
+    exmem_len_bytes_r = domain.signal("exmem_len_bytes", width=3, reset=0)
+    exmem_pc_r = domain.signal("exmem_pc", width=64, reset=0)
+    exmem_regdst_r = domain.signal("exmem_regdst", width=6, reset=REG_INVALID)
+    exmem_alu_r = domain.signal("exmem_alu", width=64, reset=0)
+    exmem_is_load_r = domain.signal("exmem_is_load", width=1, reset=0)
+    exmem_is_store_r = domain.signal("exmem_is_store", width=1, reset=0)
+    exmem_size_r = domain.signal("exmem_size", width=3, reset=0)
+    exmem_addr_r = domain.signal("exmem_addr", width=64, reset=0)
+    exmem_wdata_r = domain.signal("exmem_wdata", width=64, reset=0)
+    valid_mem_r = domain.signal("valid_mem", width=1, reset=0)
 
     domain.next()  # → cycle 4
-    # --- MEM/WB pipeline regs (output cycle=4, consumed by WB stage) ---
-    memwb_op_r = m.ca_reg("memwb_op", domain=domain, width=6, init=OP_INVALID)
-    memwb_len_bytes_r = m.ca_reg("memwb_len_bytes", domain=domain, width=3, init=0)
-    memwb_pc_r = m.ca_reg("memwb_pc", domain=domain, width=64, init=0)
-    memwb_regdst_r = m.ca_reg("memwb_regdst", domain=domain, width=6, init=REG_INVALID)
-    memwb_value_r = m.ca_reg("memwb_value", domain=domain, width=64, init=0)
-    valid_wb_r = m.ca_reg("valid_wb", domain=domain, width=1, init=0)
+    # --- MEM/WB pipeline regs (Q at cycle 4, consumed by WB stage) ---
+    memwb_op_r = domain.signal("memwb_op", width=6, reset=OP_INVALID)
+    memwb_len_bytes_r = domain.signal("memwb_len_bytes", width=3, reset=0)
+    memwb_pc_r = domain.signal("memwb_pc", width=64, reset=0)
+    memwb_regdst_r = domain.signal("memwb_regdst", width=6, reset=REG_INVALID)
+    memwb_value_r = domain.signal("memwb_value", width=64, reset=0)
+    valid_wb_r = domain.signal("valid_wb", width=1, reset=0)
 
     # --- CoreState (cycle=4, read/written in WB stage) ---
     state = CoreState(
-        stage=m.ca_reg("state_stage", domain=domain, width=3, init=0),
-        pc=m.ca_reg("state_pc", domain=domain, width=64, init=0),
-        br_kind=m.ca_reg("state_br_kind", domain=domain, width=2, init=BK_FALL),
-        br_base_pc=m.ca_reg("state_br_base_pc", domain=domain, width=64, init=0),
-        br_off=m.ca_reg("state_br_off", domain=domain, width=64, init=0),
-        commit_cond=m.ca_reg("state_commit_cond", domain=domain, width=1, init=0),
-        commit_tgt=m.ca_reg("state_commit_tgt", domain=domain, width=64, init=0),
-        cycles=m.ca_reg("state_cycles", domain=domain, width=64, init=0),
-        halted=m.ca_reg("state_halted", domain=domain, width=1, init=0),
+        stage=domain.signal("state_stage", width=3, reset=0),
+        pc=domain.signal("state_pc", width=64, reset=0),
+        br_kind=domain.signal("state_br_kind", width=2, reset=BK_FALL),
+        br_base_pc=domain.signal("state_br_base_pc", width=64, reset=0),
+        br_off=domain.signal("state_br_off", width=64, reset=0),
+        commit_cond=domain.signal("state_commit_cond", width=1, reset=0),
+        commit_tgt=domain.signal("state_commit_tgt", width=64, reset=0),
+        cycles=domain.signal("state_cycles", width=64, reset=0),
+        halted=domain.signal("state_halted", width=1, reset=0),
     )
 
     # --- GPR / T / U (cycle=4: written in WB, read in ID via feedback) ---
@@ -130,48 +130,45 @@ def _linx_cpu_impl(
     domain.pop()  # → back to cycle 0
 
     # ==================================================================
-    # 反馈信号声明 (named_wire + CycleAwareSignal)
-    #   cycle 标注 = 信号被生产/消费时的逻辑 cycle
+    # 反馈信号声明 (wire, 用 domain.signal() 在目标 cycle 创建)
+    #   cycle 标注 = 信号被生产的逻辑 cycle
     #   framework: signal.cycle >= domain.current_cycle → 直接引用
     # ==================================================================
 
-    def _fb(name: str, width: int, cycle: int) -> tuple:
-        """创建一个 feedback 信号：(raw_wire, CycleAwareSignal)."""
-        w = m.named_wire(name, width=width)
-        s = CycleAwareSignal(
-            m=m, sig=w.sig, cycle=cycle,
-            domain=domain, name=name,
-        )
-        return w, s
+    def _fb(name: str, width: int, cycle: int) -> CycleAwareSignal:
+        """创建一个 feedback wire 信号。"""
+        domain.push()
+        domain._current_cycle = cycle
+        s = domain.signal(name, width=width)
+        domain.pop()
+        return s
 
-    # Control (WB → all)
-    _fb_flush_w, fb_flush = _fb("fb_flush", 1, cycle=4)
-    _fb_redirect_pc_w, fb_redirect_pc = _fb("fb_redirect_pc", 64, cycle=4)
-    _fb_stop_w, fb_stop = _fb("fb_stop", 1, cycle=4)
-    _fb_do_wb_arch_w, fb_do_wb_arch = _fb("fb_do_wb_arch", 1, cycle=4)
+    # Control (WB → all, cycle=4)
+    fb_flush = _fb("fb_flush", 1, cycle=4)
+    fb_redirect_pc = _fb("fb_redirect_pc", 64, cycle=4)
+    fb_stop = _fb("fb_stop", 1, cycle=4)
+    fb_do_wb_arch = _fb("fb_do_wb_arch", 1, cycle=4)
 
     # Forwarding data (EX → ID, MEM → ID)
-    _fb_ex_alu_w, fb_ex_alu = _fb("fb_ex_alu", 64, cycle=2)
-    _fb_mem_value_w, fb_mem_value = _fb("fb_mem_value", 64, cycle=3)
+    fb_ex_alu = _fb("fb_ex_alu", 64, cycle=2)
+    fb_mem_value = _fb("fb_mem_value", 64, cycle=3)
 
     # Stall sources (各级 → stall chain at cycle 0)
-    _fb_stall_id_w, fb_stall_id = _fb("fb_stall_id", 1, cycle=1)
-    _fb_stall_ex_w, fb_stall_ex = _fb("fb_stall_ex", 1, cycle=2)
-    _fb_stall_mem_w, fb_stall_mem = _fb("fb_stall_mem", 1, cycle=3)
-    _fb_stall_wb_w, fb_stall_wb = _fb("fb_stall_wb", 1, cycle=4)
+    fb_stall_id = _fb("fb_stall_id", 1, cycle=1)
+    fb_stall_ex = _fb("fb_stall_ex", 1, cycle=2)
+    fb_stall_mem = _fb("fb_stall_mem", 1, cycle=3)
+    fb_stall_wb = _fb("fb_stall_wb", 1, cycle=4)
 
     # Freeze chain (stall chain → 各前级)
-    _fb_freeze_if_w, fb_freeze_if = _fb("fb_freeze_if", 1, cycle=0)
-    _fb_freeze_id_w, fb_freeze_id = _fb("fb_freeze_id", 1, cycle=1)
-    _fb_freeze_ex_w, fb_freeze_ex = _fb("fb_freeze_ex", 1, cycle=2)
-    _fb_freeze_mem_w, fb_freeze_mem = _fb("fb_freeze_mem", 1, cycle=3)
+    fb_freeze_if = _fb("fb_freeze_if", 1, cycle=0)
+    fb_freeze_id = _fb("fb_freeze_id", 1, cycle=1)
+    fb_freeze_ex = _fb("fb_freeze_ex", 1, cycle=2)
+    fb_freeze_mem = _fb("fb_freeze_mem", 1, cycle=3)
 
     # ==================================================================
-    # Boot 初始化 (.set 用 raw sig，cycle 无关)
+    # Boot 初始化 (.set 内部用 raw sig，不触发 balance)
     # ==================================================================
-    # state 寄存器在 cycle 4，boot_pc 在 cycle 0
-    # .set() 内部用 raw .sig，不触发 balance
-    is_first = state.cycles.out().eq(0)
+    is_first = state.cycles.eq(0)
     state.pc.set(boot_pc, when=is_first)
     state.br_base_pc.set(boot_pc, when=is_first)
     gpr[1].set(boot_sp, when=is_first)
@@ -179,26 +176,25 @@ def _linx_cpu_impl(
     # ==================================================================
     # Cycle 0 — Stall chain + IF stage
     # ==================================================================
-    c = lambda v, w: m.ca_const(v, width=w, domain=domain)
+    c = lambda v, w: domain.const(v, width=w)
 
     # 驱动暂未使用的 stall 源为 0
-    m.assign(_fb_stall_ex_w, c(0, 1).sig)
-    m.assign(_fb_stall_mem_w, c(0, 1).sig)
-    m.assign(_fb_stall_wb_w, c(0, 1).sig)
+    fb_stall_ex.set(0)
+    fb_stall_mem.set(0)
+    fb_stall_wb.set(0)
 
     # 累积停顿链（所有 fb_stall_* cycle > 0 → feedback at cycle 0）
     cum_stall_mem = fb_stall_wb
     cum_stall_ex = fb_stall_mem | cum_stall_mem
     cum_stall_id = fb_stall_ex | cum_stall_ex
     cum_stall_if = fb_stall_id | cum_stall_id
-    m.assign(_fb_freeze_if_w, (cum_stall_if & ~fb_flush).sig)
-    m.assign(_fb_freeze_id_w, (cum_stall_id & ~fb_flush).sig)
-    m.assign(_fb_freeze_ex_w, (cum_stall_ex & ~fb_flush).sig)
-    m.assign(_fb_freeze_mem_w, (cum_stall_mem & ~fb_flush).sig)
+    fb_freeze_if.set(cum_stall_if & ~fb_flush)
+    fb_freeze_id.set(cum_stall_id & ~fb_flush)
+    fb_freeze_ex.set(cum_stall_ex & ~fb_flush)
+    fb_freeze_mem.set(cum_stall_mem & ~fb_flush)
 
     # --- IF stage ---
-    # fetch_pc_reg.out() cycle=0 (current), state feedback cycle=4 → feedback
-    current_fetch_pc = mux(is_first, boot_pc, fetch_pc_reg.out())
+    current_fetch_pc = mux(is_first, boot_pc, fetch_pc)
     imem_rdata = build_byte_mem(
         m, domain,
         raddr=current_fetch_pc,
@@ -218,14 +214,14 @@ def _linx_cpu_impl(
     valid_if = ~fb_stop & ~fb_flush & ~fb_freeze_if
 
     # --- 写 IF 级流水线寄存器 ---
-    fetch_pc_reg.set(fetch_pc_reg.out())                     # 默认：保持
-    fetch_pc_reg.set(next_pc, when=~fb_stop & ~fb_freeze_if) # 正常推进
+    fetch_pc.set(fetch_pc)                                   # 默认：保持
+    fetch_pc.set(next_pc, when=~fb_stop & ~fb_freeze_if)     # 正常推进
 
-    ifid_window_r.set(ifid_window_r.out())                   # 默认：保持
+    ifid_window_r.set(ifid_window_r)                         # 默认：保持
     ifid_window_r.set(window, when=~fb_freeze_if)
-    ifid_pc_r.set(ifid_pc_r.out())
+    ifid_pc_r.set(ifid_pc_r)
     ifid_pc_r.set(current_fetch_pc, when=~fb_freeze_if)
-    valid_id_r.set(valid_id_r.out())
+    valid_id_r.set(valid_id_r)
     valid_id_r.set(valid_if, when=~fb_freeze_if)
 
     # ==================================================================
@@ -233,12 +229,12 @@ def _linx_cpu_impl(
     # ==================================================================
     # Cycle 1 — ID stage
     # ==================================================================
-    c = lambda v, w: m.ca_const(v, width=w, domain=domain)
+    c = lambda v, w: domain.const(v, width=w)
 
-    # IF/ID reg 输出 cycle=1 (current → 无 DFF)
-    ifid_window = ifid_window_r.out()
-    ifid_pc = ifid_pc_r.out()
-    valid_id_raw = valid_id_r.out()
+    # IF/ID reg Q at cycle 1 (current → no DFF insertion)
+    ifid_window = ifid_window_r
+    ifid_pc = ifid_pc_r
+    valid_id_raw = valid_id_r
     valid_id = valid_id_raw & ~fb_flush   # fb_flush cycle=4 → feedback
 
     # --- 译码 ---
@@ -255,20 +251,19 @@ def _linx_cpu_impl(
     srcp_val_rf = read_reg(m, srcp, gpr=rf.gpr, t=rf.t, u=rf.u, default=c(0, 64))
 
     # --- 前递（优先级：EX > MEM > WB > RF）---
-    # 流水线寄存器的 .out() cycle>1 → feedback at cycle 1
-    valid_ex_eff = valid_ex_r.out() & ~fb_flush
-    valid_mem_eff = valid_mem_r.out() & ~fb_flush
+    valid_ex_eff = valid_ex_r & ~fb_flush
+    valid_mem_eff = valid_mem_r & ~fb_flush
 
-    ex_is_load = idex_op_r.out().eq(c(OP_LWI, 6)) | idex_op_r.out().eq(c(OP_C_LWI, 6))
-    fwd_ex_ok = valid_ex_eff & idex_regdst_r.out().ne(c(REG_INVALID, 6)) & (~ex_is_load)
-    fwd_mem_ok = valid_mem_eff & exmem_regdst_r.out().ne(c(REG_INVALID, 6))
+    ex_is_load = idex_op_r.eq(c(OP_LWI, 6)) | idex_op_r.eq(c(OP_C_LWI, 6))
+    fwd_ex_ok = valid_ex_eff & idex_regdst_r.ne(c(REG_INVALID, 6)) & (~ex_is_load)
+    fwd_mem_ok = valid_mem_eff & exmem_regdst_r.ne(c(REG_INVALID, 6))
 
-    # WB forwarding: pipeline reg outputs at cycle 4 → feedback
-    wb_op_fb = memwb_op_r.out()
-    wb_pc_fb = memwb_pc_r.out()
-    wb_regdst_fb = memwb_regdst_r.out()
-    wb_value_fb = memwb_value_r.out()
-    valid_wb_fb = valid_wb_r.out()
+    # WB forwarding: pipeline reg Q at cycle 4 → feedback
+    wb_op_fb = memwb_op_r
+    wb_pc_fb = memwb_pc_r
+    wb_regdst_fb = memwb_regdst_r
+    wb_value_fb = memwb_value_r
+    valid_wb_fb = valid_wb_r
     wb_valid_fb = wb_op_fb.ne(c(OP_INVALID, 6)) & wb_pc_fb.ne(c(0, 64))
     do_wb_arch_local = valid_wb_fb & wb_valid_fb
     fwd_wb_ok = do_wb_arch_local & wb_regdst_fb.ne(c(REG_INVALID, 6))
@@ -277,8 +272,8 @@ def _linx_cpu_impl(
         """对单个源寄存器应用前递链。"""
         v = rf_val
         v = mux(fwd_wb_ok & src.eq(wb_regdst_fb), wb_value_fb, v)
-        v = mux(fwd_mem_ok & src.eq(exmem_regdst_r.out()), fb_mem_value, v)
-        v = mux(fwd_ex_ok & src.eq(idex_regdst_r.out()), fb_ex_alu, v)
+        v = mux(fwd_mem_ok & src.eq(exmem_regdst_r), fb_mem_value, v)
+        v = mux(fwd_ex_ok & src.eq(idex_regdst_r), fb_ex_alu, v)
         return v
 
     srcl_val = fwd(srcl, srcl_val_rf)
@@ -286,8 +281,8 @@ def _linx_cpu_impl(
     srcp_val = fwd(srcp, srcp_val_rf)
 
     # --- Load-use 互锁：EX 为 load 且 ID 需要其结果 → stall 1 拍 ---
-    load_use = valid_ex_eff & ex_is_load & idex_regdst_r.out().ne(c(REG_INVALID, 6)) & (
-        srcl.eq(idex_regdst_r.out()) | srcr.eq(idex_regdst_r.out()) | srcp.eq(idex_regdst_r.out()))
+    load_use = valid_ex_eff & ex_is_load & idex_regdst_r.ne(c(REG_INVALID, 6)) & (
+        srcl.eq(idex_regdst_r) | srcr.eq(idex_regdst_r) | srcp.eq(idex_regdst_r))
 
     # --- T/U 栈 hazard ---
     def _writes_tu(rd, op):
@@ -298,8 +293,8 @@ def _linx_cpu_impl(
                 op.eq(c(OP_BSTART_STD_CALL, 6)))
 
     inflight_tu_write = (
-        (valid_ex_eff & _writes_tu(idex_regdst_r.out(), idex_op_r.out())) |
-        (valid_mem_eff & _writes_tu(exmem_regdst_r.out(), exmem_op_r.out())) |
+        (valid_ex_eff & _writes_tu(idex_regdst_r, idex_op_r)) |
+        (valid_mem_eff & _writes_tu(exmem_regdst_r, exmem_op_r)) |
         (do_wb_arch_local & _writes_tu(wb_regdst_fb, wb_op_fb))
     )
 
@@ -313,27 +308,27 @@ def _linx_cpu_impl(
     tu_hazard = inflight_tu_write & id_reads_tu
 
     stall_id = (load_use | tu_hazard) & valid_id
-    m.assign(_fb_stall_id_w, stall_id.sig)
+    fb_stall_id.set(stall_id)
 
     # --- 写 ID/EX 流水线寄存器 ---
     id_to_ex_valid = valid_id & ~stall_id & ~fb_flush
-    idex_pc_r.set(idex_pc_r.out())
+    idex_pc_r.set(idex_pc_r)
     idex_pc_r.set(ifid_pc, when=~fb_freeze_id)
-    idex_op_r.set(idex_op_r.out())
+    idex_op_r.set(idex_op_r)
     idex_op_r.set(mux(id_to_ex_valid, op_id, c(OP_INVALID, 6)), when=~fb_freeze_id)
-    idex_len_bytes_r.set(idex_len_bytes_r.out())
+    idex_len_bytes_r.set(idex_len_bytes_r)
     idex_len_bytes_r.set(mux(id_to_ex_valid, len_bytes_id, c(0, 3)), when=~fb_freeze_id)
-    idex_regdst_r.set(idex_regdst_r.out())
+    idex_regdst_r.set(idex_regdst_r)
     idex_regdst_r.set(mux(id_to_ex_valid, regdst_id, c(REG_INVALID, 6)), when=~fb_freeze_id)
-    idex_srcl_val_r.set(idex_srcl_val_r.out())
+    idex_srcl_val_r.set(idex_srcl_val_r)
     idex_srcl_val_r.set(srcl_val, when=~fb_freeze_id)
-    idex_srcr_val_r.set(idex_srcr_val_r.out())
+    idex_srcr_val_r.set(idex_srcr_val_r)
     idex_srcr_val_r.set(srcr_val, when=~fb_freeze_id)
-    idex_srcp_val_r.set(idex_srcp_val_r.out())
+    idex_srcp_val_r.set(idex_srcp_val_r)
     idex_srcp_val_r.set(srcp_val, when=~fb_freeze_id)
-    idex_imm_r.set(idex_imm_r.out())
+    idex_imm_r.set(idex_imm_r)
     idex_imm_r.set(imm_id, when=~fb_freeze_id)
-    valid_ex_r.set(valid_ex_r.out())
+    valid_ex_r.set(valid_ex_r)
     valid_ex_r.set(id_to_ex_valid, when=~fb_freeze_id)
 
     # ==================================================================
@@ -341,18 +336,18 @@ def _linx_cpu_impl(
     # ==================================================================
     # Cycle 2 — EX stage
     # ==================================================================
-    c = lambda v, w: m.ca_const(v, width=w, domain=domain)
+    c = lambda v, w: domain.const(v, width=w)
     consts_ex = make_consts(m, domain)
 
-    # ID/EX reg 输出 cycle=2 (current → 无 DFF)
-    idex_pc = idex_pc_r.out()
-    idex_op = idex_op_r.out()
-    idex_len_bytes = idex_len_bytes_r.out()
-    idex_regdst = idex_regdst_r.out()
-    idex_srcl_val = idex_srcl_val_r.out()
-    idex_srcr_val = idex_srcr_val_r.out()
-    idex_srcp_val = idex_srcp_val_r.out()
-    idex_imm = idex_imm_r.out()
+    # ID/EX reg Q at cycle 2 (current → no DFF insertion)
+    idex_pc = idex_pc_r
+    idex_op = idex_op_r
+    idex_len_bytes = idex_len_bytes_r
+    idex_regdst = idex_regdst_r
+    idex_srcl_val = idex_srcl_val_r
+    idex_srcr_val = idex_srcr_val_r
+    idex_srcp_val = idex_srcp_val_r
+    idex_imm = idex_imm_r
 
     ex_out = ex_stage_logic(
         m, domain,
@@ -362,31 +357,31 @@ def _linx_cpu_impl(
     )
 
     # 驱动 fb_ex_alu feedback
-    m.assign(_fb_ex_alu_w, ex_out["alu"].sig)
+    fb_ex_alu.set(ex_out["alu"])
 
     # --- 写 EX/MEM 流水线寄存器 ---
-    ex_to_mem_valid = valid_ex_r.out() & ~fb_flush
-    exmem_op_r.set(exmem_op_r.out())
+    ex_to_mem_valid = valid_ex_r & ~fb_flush
+    exmem_op_r.set(exmem_op_r)
     exmem_op_r.set(ex_out["op"], when=~fb_freeze_ex)
-    exmem_len_bytes_r.set(exmem_len_bytes_r.out())
+    exmem_len_bytes_r.set(exmem_len_bytes_r)
     exmem_len_bytes_r.set(ex_out["len_bytes"], when=~fb_freeze_ex)
-    exmem_pc_r.set(exmem_pc_r.out())
+    exmem_pc_r.set(exmem_pc_r)
     exmem_pc_r.set(ex_out["pc"], when=~fb_freeze_ex)
-    exmem_regdst_r.set(exmem_regdst_r.out())
+    exmem_regdst_r.set(exmem_regdst_r)
     exmem_regdst_r.set(ex_out["regdst"], when=~fb_freeze_ex)
-    exmem_alu_r.set(exmem_alu_r.out())
+    exmem_alu_r.set(exmem_alu_r)
     exmem_alu_r.set(ex_out["alu"], when=~fb_freeze_ex)
-    exmem_is_load_r.set(exmem_is_load_r.out())
+    exmem_is_load_r.set(exmem_is_load_r)
     exmem_is_load_r.set(ex_out["is_load"], when=~fb_freeze_ex)
-    exmem_is_store_r.set(exmem_is_store_r.out())
+    exmem_is_store_r.set(exmem_is_store_r)
     exmem_is_store_r.set(ex_out["is_store"], when=~fb_freeze_ex)
-    exmem_size_r.set(exmem_size_r.out())
+    exmem_size_r.set(exmem_size_r)
     exmem_size_r.set(ex_out["size"], when=~fb_freeze_ex)
-    exmem_addr_r.set(exmem_addr_r.out())
+    exmem_addr_r.set(exmem_addr_r)
     exmem_addr_r.set(ex_out["addr"], when=~fb_freeze_ex)
-    exmem_wdata_r.set(exmem_wdata_r.out())
+    exmem_wdata_r.set(exmem_wdata_r)
     exmem_wdata_r.set(ex_out["wdata"], when=~fb_freeze_ex)
-    valid_mem_r.set(valid_mem_r.out())
+    valid_mem_r.set(valid_mem_r)
     valid_mem_r.set(ex_to_mem_valid, when=~fb_freeze_ex)
 
     # ==================================================================
@@ -394,20 +389,20 @@ def _linx_cpu_impl(
     # ==================================================================
     # Cycle 3 — MEM stage
     # ==================================================================
-    c = lambda v, w: m.ca_const(v, width=w, domain=domain)
+    c = lambda v, w: domain.const(v, width=w)
 
-    # EX/MEM reg 输出 cycle=3 (current → 无 DFF)
-    exmem_op = exmem_op_r.out()
-    exmem_len_bytes = exmem_len_bytes_r.out()
-    exmem_pc = exmem_pc_r.out()
-    exmem_regdst = exmem_regdst_r.out()
-    exmem_alu = exmem_alu_r.out()
-    exmem_is_load = exmem_is_load_r.out()
-    exmem_is_store = exmem_is_store_r.out()
-    exmem_size = exmem_size_r.out()
-    exmem_addr = exmem_addr_r.out()
-    exmem_wdata = exmem_wdata_r.out()
-    valid_mem_now = valid_mem_r.out() & ~fb_flush
+    # EX/MEM reg Q at cycle 3 (current → no DFF insertion)
+    exmem_op = exmem_op_r
+    exmem_len_bytes = exmem_len_bytes_r
+    exmem_pc = exmem_pc_r
+    exmem_regdst = exmem_regdst_r
+    exmem_alu = exmem_alu_r
+    exmem_is_load = exmem_is_load_r
+    exmem_is_store = exmem_is_store_r
+    exmem_size = exmem_size_r
+    exmem_addr = exmem_addr_r
+    exmem_wdata = exmem_wdata_r
+    valid_mem_now = valid_mem_r & ~fb_flush
 
     ex_out_d = {
         "op": exmem_op, "len_bytes": exmem_len_bytes, "pc": exmem_pc,
@@ -427,24 +422,24 @@ def _linx_cpu_impl(
         wdata=exmem_wdata, wstrb=wstrb,
         depth_bytes=mem_bytes, name="mem",
     )
-    mem_out = mem_stage_logic(m, ex_out_d, mem_rdata)
+    mem_out = mem_stage_logic(m, domain, ex_out_d, mem_rdata)
 
     # 驱动 fb_mem_value feedback
-    m.assign(_fb_mem_value_w, mem_out["value"].sig)
+    fb_mem_value.set(mem_out["value"])
 
     # --- 写 MEM/WB 流水线寄存器 ---
     mem_to_wb_valid = valid_mem_now
-    memwb_op_r.set(memwb_op_r.out())
+    memwb_op_r.set(memwb_op_r)
     memwb_op_r.set(mem_out["op"], when=~fb_freeze_mem)
-    memwb_len_bytes_r.set(memwb_len_bytes_r.out())
+    memwb_len_bytes_r.set(memwb_len_bytes_r)
     memwb_len_bytes_r.set(mem_out["len_bytes"], when=~fb_freeze_mem)
-    memwb_pc_r.set(memwb_pc_r.out())
+    memwb_pc_r.set(memwb_pc_r)
     memwb_pc_r.set(mem_out["pc"], when=~fb_freeze_mem)
-    memwb_regdst_r.set(memwb_regdst_r.out())
+    memwb_regdst_r.set(memwb_regdst_r)
     memwb_regdst_r.set(mem_out["regdst"], when=~fb_freeze_mem)
-    memwb_value_r.set(memwb_value_r.out())
+    memwb_value_r.set(memwb_value_r)
     memwb_value_r.set(mem_out["value"], when=~fb_freeze_mem)
-    valid_wb_r.set(valid_wb_r.out())
+    valid_wb_r.set(valid_wb_r)
     valid_wb_r.set(mem_to_wb_valid, when=~fb_freeze_mem)
 
     # ==================================================================
@@ -452,22 +447,22 @@ def _linx_cpu_impl(
     # ==================================================================
     # Cycle 4 — WB stage
     # ==================================================================
-    c = lambda v, w: m.ca_const(v, width=w, domain=domain)
+    c = lambda v, w: domain.const(v, width=w)
 
-    # MEM/WB reg 输出 cycle=4 (current → 无 DFF)
-    wb_op = memwb_op_r.out()
-    wb_len_bytes = memwb_len_bytes_r.out()
-    wb_pc = memwb_pc_r.out()
-    wb_regdst = memwb_regdst_r.out()
-    wb_value = memwb_value_r.out()
-    valid_wb = valid_wb_r.out()
+    # MEM/WB reg Q at cycle 4 (current → no DFF insertion)
+    wb_op = memwb_op_r
+    wb_len_bytes = memwb_len_bytes_r
+    wb_pc = memwb_pc_r
+    wb_regdst = memwb_regdst_r
+    wb_value = memwb_value_r
+    valid_wb = valid_wb_r
 
     wb_valid = wb_op.ne(c(OP_INVALID, 6)) & wb_pc.ne(c(0, 64))
     do_wb_arch = valid_wb & wb_valid
 
-    halt_set = (~state.halted.out()) & do_wb_arch & wb_op.eq(c(OP_EBREAK, 6))
+    halt_set = (~state.halted) & do_wb_arch & wb_op.eq(c(OP_EBREAK, 6))
     state.halted.set(c(1, 1), when=halt_set)
-    stop = state.halted.out() | halt_set
+    stop = state.halted | halt_set
 
     wb_result = wb_stage_updates(
         m, state=state, rf=rf, domain=domain,
@@ -477,48 +472,48 @@ def _linx_cpu_impl(
     )
 
     # 驱动 WB 反馈信号
-    m.assign(_fb_flush_w, wb_result["flush"].sig)
-    m.assign(_fb_redirect_pc_w, wb_result["redirect_pc"].sig)
-    m.assign(_fb_stop_w, stop.sig)
-    m.assign(_fb_do_wb_arch_w, do_wb_arch.sig)
+    fb_flush.set(wb_result["flush"])
+    fb_redirect_pc.set(wb_result["redirect_pc"])
+    fb_stop.set(stop)
+    fb_do_wb_arch.set(do_wb_arch)
 
     # 周期计数器
-    state.cycles.set(state.cycles.out() + 1)
+    state.cycles.set(state.cycles + 1)
 
     # ==================================================================
-    # 输出
+    # 输出 — 直接传 CycleAwareSignal，无需 .sig
     # ==================================================================
     active = ~stop
-    m.output("halted", state.halted.out().sig)
-    m.output("pc", state.pc.out().sig)
-    m.output("stage", state.stage.out().sig)
-    m.output("cycles", state.cycles.out().sig)
-    m.output("br_kind", state.br_kind.out().sig)
-    m.output("br_base_pc", state.br_base_pc.out().sig)
-    m.output("br_off", state.br_off.out().sig)
-    m.output("commit_cond", state.commit_cond.out().sig)
-    m.output("commit_tgt", state.commit_tgt.out().sig)
-    m.output("active", active.sig)
-    m.output("pc_if", current_fetch_pc.sig)
-    m.output("pc_id", ifid_pc.sig)
-    m.output("pc_ex", idex_pc.sig)
-    m.output("pc_mem", exmem_pc.sig)
-    m.output("pc_wb", wb_pc.sig)
-    m.output("if_window", ifid_window.sig)
-    m.output("a0", rf.gpr[2].out().sig)
-    m.output("a1", rf.gpr[3].out().sig)
-    m.output("ra", rf.gpr[10].out().sig)
-    m.output("sp", rf.gpr[1].out().sig)
-    m.output("flush", wb_result["flush"].sig)
-    m.output("valid_wb", valid_wb.sig)
+    m.output("halted", state.halted)
+    m.output("pc", state.pc)
+    m.output("stage", state.stage)
+    m.output("cycles", state.cycles)
+    m.output("br_kind", state.br_kind)
+    m.output("br_base_pc", state.br_base_pc)
+    m.output("br_off", state.br_off)
+    m.output("commit_cond", state.commit_cond)
+    m.output("commit_tgt", state.commit_tgt)
+    m.output("active", active)
+    m.output("pc_if", current_fetch_pc)
+    m.output("pc_id", ifid_pc)
+    m.output("pc_ex", idex_pc)
+    m.output("pc_mem", exmem_pc)
+    m.output("pc_wb", wb_pc)
+    m.output("if_window", ifid_window)
+    m.output("a0", rf.gpr[2])
+    m.output("a1", rf.gpr[3])
+    m.output("ra", rf.gpr[10])
+    m.output("sp", rf.gpr[1])
+    m.output("flush", wb_result["flush"])
+    m.output("valid_wb", valid_wb)
     # DEBUG: pipeline internals
-    m.output("dbg_idex_srcl", idex_srcl_val.sig)
-    m.output("dbg_idex_op", idex_op.sig)
-    m.output("dbg_ex_alu", ex_out["alu"].sig)
-    m.output("dbg_stall", stall_id.sig)
-    m.output("dbg_valid_id", valid_id.sig)
-    m.output("dbg_valid_ex", valid_ex_eff.sig)
-    m.output("dbg_valid_mem", valid_mem_now.sig)
+    m.output("dbg_idex_srcl", idex_srcl_val)
+    m.output("dbg_idex_op", idex_op)
+    m.output("dbg_ex_alu", ex_out["alu"])
+    m.output("dbg_stall", stall_id)
+    m.output("dbg_valid_id", valid_id)
+    m.output("dbg_valid_ex", valid_ex_eff)
+    m.output("dbg_valid_mem", valid_mem_now)
 
 
 def linx_cpu_pyc(m: CycleAwareCircuit, domain: CycleAwareDomain) -> None:

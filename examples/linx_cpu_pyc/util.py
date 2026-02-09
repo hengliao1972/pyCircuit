@@ -18,16 +18,16 @@ class Consts:
 
 
 def make_consts(m: CycleAwareCircuit, domain: CycleAwareDomain) -> Consts:
-    c = m.ca_const
+    c = domain.const
     return Consts(
-        one1=c(1, width=1, domain=domain),
-        zero1=c(0, width=1, domain=domain),
-        zero3=c(0, width=3, domain=domain),
-        zero6=c(0, width=6, domain=domain),
-        zero8=c(0, width=8, domain=domain),
-        zero32=c(0, width=32, domain=domain),
-        zero64=c(0, width=64, domain=domain),
-        one64=c(1, width=64, domain=domain),
+        one1=c(1, width=1),
+        zero1=c(0, width=1),
+        zero3=c(0, width=3),
+        zero6=c(0, width=6),
+        zero8=c(0, width=8),
+        zero32=c(0, width=32),
+        zero64=c(0, width=64),
+        one64=c(1, width=64),
     )
 
 

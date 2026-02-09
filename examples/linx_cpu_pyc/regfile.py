@@ -3,7 +3,6 @@ from __future__ import annotations
 from pycircuit import (
     CycleAwareCircuit,
     CycleAwareDomain,
-    CycleAwareReg,
     CycleAwareSignal,
     mux,
 )
@@ -16,14 +15,11 @@ def make_gpr(
     domain: CycleAwareDomain,
     *,
     boot_sp: CycleAwareSignal,
-) -> list[CycleAwareReg]:
+) -> list[CycleAwareSignal]:
     """24-entry GPR file (r0 forced to 0, r1 initialized to boot_sp)."""
-    regs: list[CycleAwareReg] = []
+    regs: list[CycleAwareSignal] = []
     for i in range(24):
-        # r0 is always 0, r1 is initialized to boot_sp
-        # Note: init value must be int, so we use 0 for all and handle boot_sp in main
-        init = 0
-        regs.append(m.ca_reg(f"r{i}", domain=domain, width=64, init=init))
+        regs.append(domain.signal(f"r{i}", width=64, reset=0))
     return regs
 
 
@@ -34,10 +30,10 @@ def make_regs(
     count: int,
     width: int,
     init: int = 0,
-) -> list[CycleAwareReg]:
-    regs: list[CycleAwareReg] = []
+) -> list[CycleAwareSignal]:
+    regs: list[CycleAwareSignal] = []
     for i in range(count):
-        regs.append(m.ca_reg(f"r{i}", domain=domain, width=width, init=init))
+        regs.append(domain.signal(f"r{i}", width=width, reset=init))
     return regs
 
 
@@ -45,42 +41,43 @@ def read_reg(
     m: CycleAwareCircuit,
     code: CycleAwareSignal,
     *,
-    gpr: list[CycleAwareReg],
-    t: list[CycleAwareReg],
-    u: list[CycleAwareReg],
+    gpr: list[CycleAwareSignal],
+    t: list[CycleAwareSignal],
+    u: list[CycleAwareSignal],
     default: CycleAwareSignal,
 ) -> CycleAwareSignal:
     """Mux-based regfile read with strict defaulting (out-of-range -> default)."""
     v: CycleAwareSignal = default
 
     for i in range(24):
-        vv = default if i == 0 else gpr[i].out()
+        vv = default if i == 0 else gpr[i]
         cond = code.eq(i)
         v = mux(cond, vv, v)
     for i in range(4):
         cond = code.eq(24 + i)
-        v = mux(cond, t[i].out(), v)
+        v = mux(cond, t[i], v)
     for i in range(4):
         cond = code.eq(28 + i)
-        v = mux(cond, u[i].out(), v)
+        v = mux(cond, u[i], v)
     return v
 
 
 def stack_next(
     m: CycleAwareCircuit,
-    arr: list[CycleAwareReg],
+    domain: CycleAwareDomain,
+    arr: list[CycleAwareSignal],
     *,
     do_push: CycleAwareSignal,
     do_clear: CycleAwareSignal,
     value: CycleAwareSignal,
 ) -> list[CycleAwareSignal]:
     """Compute next values for a 4-entry stack."""
-    n0 = arr[0].out()
-    n1 = arr[1].out()
-    n2 = arr[2].out()
-    n3 = arr[3].out()
+    n0 = arr[0]
+    n1 = arr[1]
+    n2 = arr[2]
+    n3 = arr[3]
 
-    zero64 = m.ca_const(0, width=64)
+    zero64 = domain.const(0, width=64)
 
     # Push: shift down and insert at top
     n0_push = value
@@ -104,13 +101,14 @@ def stack_next(
 
 def commit_gpr(
     m: CycleAwareCircuit,
-    gpr: list[CycleAwareReg],
+    domain: CycleAwareDomain,
+    gpr: list[CycleAwareSignal],
     *,
     do_reg_write: CycleAwareSignal,
     regdst: CycleAwareSignal,
     value: CycleAwareSignal,
 ) -> None:
-    zero64 = m.ca_const(0, width=64)
+    zero64 = domain.const(0, width=64)
     for i in range(24):
         if i == 0:
             gpr[i].set(zero64)
@@ -121,7 +119,7 @@ def commit_gpr(
 
 def commit_stack(
     m: CycleAwareCircuit,
-    arr: list[CycleAwareReg],
+    arr: list[CycleAwareSignal],
     next_vals: list[CycleAwareSignal],
 ) -> None:
     for i in range(4):

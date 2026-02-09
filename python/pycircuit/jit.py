@@ -1581,6 +1581,6 @@ def compile_cycle_aware(
     if returned:
         for i, v in enumerate(returned):
             if isinstance(v, CycleAwareSignal):
-                m.output(f"out{i}" if len(returned) > 1 else "out", v.sig)
+                m.output(f"out{i}" if len(returned) > 1 else "out", v)
 
     return m

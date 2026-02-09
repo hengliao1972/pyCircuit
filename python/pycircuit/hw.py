@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator, Union, overload
 
 from .dsl import Module, Signal
@@ -502,8 +502,11 @@ class Circuit(Module):
             return Wire(self, self.alias(v.sig, name=self.scoped_name(name)), signed=v.signed)
         return Wire(self, self.alias(v, name=self.scoped_name(name)))
 
-    def assign(self, dst: Union[Wire, Reg, Signal], src: Union[Wire, Reg, Signal, int]) -> None:  # type: ignore[override]
-        def as_sig(v: Union[Wire, Reg, Signal]) -> Signal:
+    def assign(self, dst: Union[Wire, Reg, Signal, "CycleAwareSignal"], src: Union[Wire, Reg, Signal, "CycleAwareSignal", int]) -> None:  # type: ignore[override]
+        def as_sig(v: Union[Wire, Reg, Signal, "CycleAwareSignal"]) -> Signal:
+            if hasattr(v, '_placeholder') and hasattr(v, 'domain'):
+                # CycleAwareSignal — extract raw Signal
+                return v.sig
             if isinstance(v, Reg):
                 return v.q.sig
             if isinstance(v, Wire):
@@ -1139,18 +1142,77 @@ class CycleAwareDomain:
             raise RuntimeError("pop() without matching push()")
         self._current_cycle = self._cycle_stack.pop()
 
-    def create_signal(self, name: str, *, width: int, init_value: int = 0) -> "CycleAwareSignal":
-        """创建输入信号，周期为当前周期。"""
+    # -----------------------------------------------------------------
+    # 信号创建 API
+    # -----------------------------------------------------------------
+
+    def signal(
+        self,
+        name: str,
+        *,
+        width: int,
+        reset: int | None = None,
+    ) -> "CycleAwareSignal":
+        """统一信号定义 — 唯一的信号创建 API。
+
+        Args:
+            name: 信号名称
+            width: 位宽
+            reset: 复位值。不为 None → flop（DFF），None → wire
+
+        Returns:
+            CycleAwareSignal，cycle = domain.current_cycle
+
+        用法::
+
+            # wire（组合逻辑 / 反馈占位）
+            x = domain.signal("x", width=8)
+
+            # flop（DFF，Q 输出在声明 cycle）
+            count = domain.signal("count", width=8, reset=0)
+        """
         self._ensure_clk_rst()
-        sig = self.m.input(name, width=width)
+        placeholder = self.m.named_wire(name, width=width)
+        sig = CycleAwareSignal(
+            m=self.m,
+            sig=placeholder.sig,
+            cycle=self._current_cycle,
+            domain=self,
+            name=name,
+            signed=False,
+            _placeholder=placeholder,
+            _reset=reset,
+        )
+        self.m.add_finalizer(sig._finalize)
+        return sig
+
+    def input(self, name: str, *, width: int) -> "CycleAwareSignal":
+        """创建输入端口信号。
+
+        输入由外部环境驱动，不支持 .set()。
+        """
+        self._ensure_clk_rst()
+        port = self.m.input(name, width=width)
         return CycleAwareSignal(
             m=self.m,
-            sig=sig,
+            sig=port,
             cycle=self._current_cycle,
             domain=self,
             name=name,
             signed=False,
         )
+
+    def const(self, value: int, *, width: int) -> "CycleAwareSignal":
+        """创建常量信号，cycle = domain.current_cycle。"""
+        return self.create_const(value, width=width)
+
+    # -----------------------------------------------------------------
+    # 向后兼容（内部使用）
+    # -----------------------------------------------------------------
+
+    def create_signal(self, name: str, *, width: int, init_value: int = 0) -> "CycleAwareSignal":
+        """创建输入信号（向后兼容，推荐使用 domain.input()）。"""
+        return self.input(name, width=width)
 
     def create_const(self, value: int, *, width: int, name: str = "") -> "CycleAwareSignal":
         """创建常量信号，周期为当前周期。"""
@@ -1202,14 +1264,25 @@ class CycleAwareDomain:
 
 @dataclass
 class CycleAwareSignal:
-    """周期感知信号。
-    
+    """周期感知信号 — PyCircuit 的统一硬件信号类型。
+
     每个信号携带：
-    - sig: 底层MLIR信号
+    - sig: 底层MLIR信号（对于 domain.signal() 创建的信号，指向内部占位导线）
     - cycle: 当前周期
     - domain: 所属时钟域
     - name: 调试名称
     - signed: 符号性
+
+    通过 domain.signal() 创建的信号还具备：
+    - _placeholder: 内部占位导线（Wire），用于延迟赋值
+    - _reset: 复位值（不为 None 时为 flop，否则为 wire）
+    - _updates: .set() 调用累积的 (value, condition) 列表
+    - _finalized: 是否已完成最终化
+
+    类型推导：
+    - reset is not None → flop（DFF），_finalize 时创建寄存器
+    - reset is None 且有 .set() → wire（组合逻辑），_finalize 时直接连线
+    - reset is None 且无 .set() 且无 _placeholder → 输入端口（无需 finalize）
     """
     m: "CycleAwareCircuit"
     sig: Signal
@@ -1217,6 +1290,10 @@ class CycleAwareSignal:
     domain: CycleAwareDomain
     name: str = ""
     signed: bool = False
+    _placeholder: Any = field(default=None, repr=False, compare=False)
+    _reset: int | None = field(default=None, repr=False, compare=False)
+    _updates: list = field(default_factory=list, repr=False, compare=False)
+    _finalized: bool = field(default=False, repr=False, compare=False)
 
     @property
     def ref(self) -> str:
@@ -1566,6 +1643,97 @@ class CycleAwareSignal:
             signed=False,
         )
 
+    # -----------------------------------------------------------------
+    # 统一赋值 API
+    # -----------------------------------------------------------------
+
+    def set(
+        self,
+        value: "CycleAwareSignal | int",
+        *,
+        when: "CycleAwareSignal | int" = 1,
+    ) -> None:
+        """条件赋值（等价于 ``if when: signal = value``）。
+
+        对 wire 信号：驱动组合逻辑值。
+        对 flop 信号：提供 DFF 的 D 端输入。
+        多次调用遵循 last-write-wins 优先级。
+        """
+        if self._placeholder is None:
+            raise TypeError(
+                f"Signal '{self.name}' was not created via domain.signal() "
+                "and cannot be .set(). Use domain.signal() to create a signal "
+                "that supports .set()."
+            )
+        self._updates.append((value, when))
+
+    def _finalize(self) -> None:
+        """最终化：根据 _reset 和 _updates 构建硬件。
+
+        - Flop（_reset is not None）：构建 mux 链 → DFF → 连接 Q 到占位导线
+        - Wire（_reset is None）：构建 mux 链 → 直接连接到占位导线
+        """
+        if self._finalized or self._placeholder is None:
+            return
+        self._finalized = True
+
+        def to_sig(v: "CycleAwareSignal | int", w: int) -> Signal:
+            if isinstance(v, CycleAwareSignal):
+                return v.sig
+            return self.m.const(int(v), width=w)
+
+        if self._reset is not None:
+            # ── Flop 模式 ──
+            # 默认保持当前值（占位导线 = Q 输出）
+            current = self._placeholder  # Wire, duck-types as Signal
+            next_val: Any = current
+
+            for val, cond in self._updates:
+                val_sig = to_sig(val, self.width)
+                cond_sig = to_sig(cond, 1)
+                next_val = self.m.mux(cond_sig, val_sig, next_val)
+
+            # 创建 DFF
+            self.domain._ensure_clk_rst()
+            assert self.domain.clk is not None and self.domain.rst is not None
+            en = self.m.const(1, width=1)
+            init_sig = self.m.const(self._reset, width=self.width)
+            q = self.m.reg(self.domain.clk, self.domain.rst, en, next_val, init_sig)
+
+            # 将 Q 连接到占位导线
+            self.m.assign(self._placeholder, q)
+        else:
+            # ── Wire 模式 ──
+            if not self._updates:
+                # 无 .set() 调用 — 可能是仅声明未驱动的 wire，跳过
+                return
+
+            if len(self._updates) == 1:
+                val, cond = self._updates[0]
+                val_sig = to_sig(val, self.width)
+                if isinstance(cond, int) and cond == 1:
+                    # 无条件赋值
+                    self.m.assign(self._placeholder, val_sig)
+                    return
+                # 单条件赋值，默认 0
+                cond_sig = to_sig(cond, 1)
+                default = self.m.const(0, width=self.width)
+                result = self.m.mux(cond_sig, val_sig, default)
+                self.m.assign(self._placeholder, result)
+                return
+
+            # 多条件赋值：构建优先级 mux 链
+            default = self.m.const(0, width=self.width)
+            next_val = default
+            for val, cond in self._updates:
+                val_sig = to_sig(val, self.width)
+                cond_sig = to_sig(cond, 1)
+                if isinstance(cond, int) and cond == 1:
+                    next_val = val_sig
+                else:
+                    next_val = self.m.mux(cond_sig, val_sig, next_val)
+            self.m.assign(self._placeholder, next_val)
+
 
 class CycleAwareCircuit(Circuit):
     """支持周期感知的电路模块。
@@ -1596,6 +1764,15 @@ class CycleAwareCircuit(Circuit):
         if self._default_domain is None:
             self._default_domain = self.create_domain("default")
         return self._default_domain
+
+    def output(self, name: str, value: Any) -> None:
+        """声明模块输出端口，直接接受 CycleAwareSignal。"""
+        if isinstance(value, CycleAwareSignal):
+            super().output(name, value.sig)
+        elif isinstance(value, Wire):
+            super().output(name, value.sig)
+        else:
+            super().output(name, value)
 
     def _balance_cycles(self, *signals: CycleAwareSignal) -> tuple[CycleAwareSignal, ...]:
         """自动周期平衡：将所有信号对齐到 domain.current_cycle。
@@ -1732,27 +1909,9 @@ class CycleAwareCircuit(Circuit):
         return CycleAwareBundle(fields)
 
     def ca_const(self, value: int, *, width: int, domain: CycleAwareDomain | None = None) -> CycleAwareSignal:
-        """创建常量信号的便捷方法。"""
+        """创建常量信号（向后兼容，推荐使用 domain.const()）。"""
         dom = domain or self.get_default_domain()
         return dom.create_const(value, width=width)
-
-    def ca_reg(
-        self,
-        name: str,
-        *,
-        domain: CycleAwareDomain,
-        width: int,
-        init: int = 0,
-    ) -> "CycleAwareReg":
-        """创建周期感知寄存器。
-        
-        Args:
-            name: 寄存器名称
-            domain: 时钟域
-            width: 位宽
-            init: 复位值
-        """
-        return CycleAwareReg(self, name, domain=domain, width=width, init=init)
 
 
 def ca_cat(*signals: CycleAwareSignal) -> CycleAwareSignal:
@@ -2279,102 +2438,4 @@ def ca_bundle(**fields: CycleAwareSignal) -> CycleAwareBundle:
     return CycleAwareBundle(fields)
 
 
-class CycleAwareReg:
-    """周期感知寄存器，支持条件更新。
-    
-    用法:
-        reg = m.ca_reg("counter", domain=dom, width=8, init=0)
-        reg.set(reg.out() + 1, when=enable)
-        val = reg.out()
-    """
-
-    def __init__(
-        self,
-        m: CycleAwareCircuit,
-        name: str,
-        *,
-        domain: CycleAwareDomain,
-        width: int,
-        init: int = 0,
-    ) -> None:
-        self.m = m
-        self.name = str(name)
-        self.width = int(width)
-        self.init = int(init)
-        self.domain = domain
-
-        if self.width <= 0:
-            raise ValueError("Reg width must be > 0")
-
-        domain._ensure_clk_rst()
-        assert domain.clk is not None and domain.rst is not None
-        self.clk = domain.clk
-        self.rst = domain.rst
-
-        # 条件更新列表: [(value, condition), ...]
-        self._updates: list[tuple[CycleAwareSignal | int, CycleAwareSignal | int]] = []
-        
-        # 输出信号占位符
-        self._out_wire = m.named_wire(f"{self.name}__q", width=self.width)
-        self._out_sig = CycleAwareSignal(
-            m=m,
-            sig=self._out_wire,
-            cycle=domain.current_cycle,
-            domain=domain,
-            name=f"{self.name}_q",
-        )
-        
-        self._finalized = False
-        m.add_finalizer(self._finalize)
-
-    def out(self) -> CycleAwareSignal:
-        """获取寄存器当前值。"""
-        return self._out_sig
-
-    def set(
-        self,
-        value: CycleAwareSignal | int,
-        *,
-        when: CycleAwareSignal | int = 1,
-    ) -> None:
-        """条件更新寄存器。
-        
-        多个 set() 调用形成优先级链：后调用的优先级更高。
-        """
-        self._updates.append((value, when))
-
-    def _finalize(self) -> None:
-        """最终化：构建 mux 树和寄存器。"""
-        if self._finalized:
-            return
-        self._finalized = True
-
-        # 构建 mux 树: 从 init 开始，每个 update 覆盖
-        # next_val = mux(cond_n, val_n, mux(cond_n-1, val_n-1, ... mux(cond_1, val_1, current)))
-        
-        def to_sig(v: CycleAwareSignal | int, w: int) -> Signal:
-            if isinstance(v, CycleAwareSignal):
-                return v.sig
-            return self.m.const(int(v), width=w)
-
-        # 当前值（即寄存器输出）
-        current = self._out_wire
-        
-        if self._updates:
-            # 从第一个 update 开始构建 mux 树
-            next_val = current  # 默认保持当前值
-            for val, cond in self._updates:
-                val_sig = to_sig(val, self.width)
-                cond_sig = to_sig(cond, 1)
-                next_val = self.m.mux(cond_sig, val_sig, next_val)
-        else:
-            # 无更新，保持当前值
-            next_val = current
-
-        # 创建寄存器
-        en = self.m.const(1, width=1)
-        init_sig = self.m.const(self.init, width=self.width)
-        q = self.m.reg(self.clk, self.rst, en, next_val, init_sig)
-        
-        # 连接输出
-        self.m.assign(self._out_wire, q)
+    # CycleAwareReg 已被 CycleAwareSignal.set()/_finalize() 替代，不再需要。

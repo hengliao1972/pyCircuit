@@ -16,7 +16,7 @@ __all__ = [
     "cat",
     "jit_inline",
     "jit_compile",
-    # Cycle-Aware API (New)
+    # Cycle-Aware API
     "CycleAwareCircuit",
     "CycleAwareDomain",
     "CycleAwareModule",
@@ -25,7 +25,6 @@ __all__ = [
     "CycleAwareByteMem",
     "CycleAwareBundle",
     "CycleAwarePop",
-    "CycleAwareReg",
     "SignalFactory",
     "ca_cat",
     "ca_bundle",
@@ -45,7 +44,6 @@ from .hw import (
     CycleAwareModule,
     CycleAwarePop,
     CycleAwareQueue,
-    CycleAwareReg,
     CycleAwareSignal,
     Pop,
     Queue,
