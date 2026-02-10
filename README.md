@@ -166,6 +166,7 @@ See `docs/VERILOG_FLOW.md`.
 ## LinxISA CPU bring-up (example)
 
 - pyCircuit source: `examples/linx_cpu_pyc/`
+- Cycle-aware variant: `examples/linx_cpu_pyc_cycle_aware/`
 - SV testbench + program images: `examples/linx_cpu/`
 - Generated outputs (checked in): `examples/generated/linx_cpu_pyc/`
 
@@ -175,10 +176,27 @@ Run the self-checking C++ regression:
 bash tools/run_linx_cpu_pyc_cpp.sh
 ```
 
+Run the cycle-aware variant (same memh fixtures, simpler core model):
+
+```bash
+bash tools/run_linx_cpu_pyc_cycle_aware_cpp.sh
+```
+
 Optional debug artifacts:
 - `PYC_TRACE=1` enables a WB/commit log
 - `PYC_VCD=1` enables VCD dumping
 - `PYC_TRACE_DIR=/path/to/out` overrides the output directory
+- `PYC_KONATA=1` writes a Konata pipeview trace (`*.konata`)
+- `PYC_COMMIT_TRACE=/path/to/trace.jsonl` writes a JSONL commit trace (for diffing)
+
+QEMU vs pyCircuit commit-trace diff (requires Linx QEMU + an LLVM `llvm-mc` build):
+
+```bash
+# Optional env overrides:
+#   QEMU_BIN=/path/to/qemu-system-linx64
+#   LLVM_BUILD=/path/to/llvm-build (must contain bin/llvm-mc)
+bash tools/run_linx_qemu_vs_pyc.sh /path/to/test.s
+```
 
 ## Packaging (release tarball)
 

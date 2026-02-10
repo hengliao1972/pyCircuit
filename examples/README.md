@@ -65,6 +65,7 @@ FASTFWD_N_FE=8 bash examples/update_generated.sh
   - `PYC_TRACE=1` writes a commit log under `examples/generated/linx_cpu_pyc/`.
   - `PYC_VCD=1` writes a VCD waveform under `examples/generated/linx_cpu_pyc/`.
   - `PYC_KONATA=1` writes a Konata trace (`*.konata`) under `examples/generated/linx_cpu_pyc/` for viewing in Konata.
+  - `PYC_COMMIT_TRACE=/path/to/trace.jsonl` writes a JSONL commit trace (useful for diffing against QEMU traces).
   - Optional: set `PYC_TRACE_DIR=/path/to/dir` to override the output directory.
 - C++ FastFwd TB (`examples/fastfwd_pyc/tb_fastfwd_pyc.cpp`):
   - `PYC_TRACE=1` writes a text log under `examples/generated/fastfwd_pyc/`.
@@ -80,3 +81,30 @@ FASTFWD_N_FE=8 bash examples/update_generated.sh
 - SystemVerilog issue-queue TB (`examples/issue_queue_2picker/tb_issue_queue_2picker.sv`):
   - Dumps to `examples/generated/tb_issue_queue_2picker/` by default (override with `+trace_dir=<path>`).
   - Disable with `+notrace` (VCD) and/or `+nolog` (log). Add `+logcycles` to log per-cycle CSV rows.
+
+## True RTL simulation UIs (C++ shared-lib + Python emulator)
+
+These examples build a C++ shared library that wraps the generated C++ model, then drive it from Python via `ctypes`:
+
+- Calculator:
+  - Build: `(cd examples/calculator && clang++ -std=c++17 -O2 -shared -fPIC -I../../include -o libcalculator_sim.dylib calculator_capi.cpp)`
+  - Run: `python3 examples/calculator/emulate_calculator.py`
+- Digital clock:
+  - Build: `(cd examples/digital_clock && clang++ -std=c++17 -O2 -shared -fPIC -I../../include -o libdigital_clock_sim.dylib digital_clock_capi.cpp)`
+  - Run: `python3 examples/digital_clock/emulate_digital_clock.py`
+
+## Optional: cycle-aware Linx CPU
+
+The cycle-aware Linx CPU variant lives in `examples/linx_cpu_pyc_cycle_aware/`:
+
+```bash
+bash tools/run_linx_cpu_pyc_cycle_aware_cpp.sh
+```
+
+## Optional: QEMU vs pyCircuit trace diff
+
+If you have Linx QEMU (`qemu-system-linx64`) and an LLVM build with `llvm-mc`, you can generate and diff commit traces:
+
+```bash
+bash tools/run_linx_qemu_vs_pyc.sh /path/to/test.s
+```

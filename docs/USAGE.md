@@ -119,6 +119,26 @@ pyc-compile design.pyc --emit=verilog --out-dir out/
 pyc-compile design.pyc --emit=cpp --out-dir out/
 ```
 
+### 2.4 Cycle-aware designs (optional API)
+
+pyCircuit also provides a **cycle-aware** API (`CycleAwareCircuit` / `CycleAwareDomain`) that tracks the
+cycle of each signal and can automatically balance cycles when values are combined.
+
+For CLI compatibility, the recommended pattern is:
+
+- Keep your “design function” as `fn(m: CycleAwareCircuit, domain: CycleAwareDomain, ...) -> None`
+- Provide a zero-arg `build()` wrapper that calls `compile_cycle_aware(fn, ...)` and returns the circuit.
+
+Examples:
+
+- `examples/digital_clock/digital_clock.py`
+- `examples/calculator/calculator.py`
+- `examples/multiclock_regs.py`
+
+Reference:
+
+- `docs/CYCLE_AWARE_API.md`
+
 This writes one file per module plus an `out/manifest.json`.
 
 FPGA-first Verilog emission enables inference-friendly attributes in primitives:
