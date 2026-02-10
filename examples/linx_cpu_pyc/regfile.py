@@ -1,126 +1,108 @@
 from __future__ import annotations
 
-from pycircuit import (
-    CycleAwareCircuit,
-    CycleAwareDomain,
-    CycleAwareSignal,
-    mux,
-)
+from pycircuit import Circuit, Reg, Vec, Wire, jit_inline
+from pycircuit.dsl import Signal
 
 from .isa import REG_INVALID
 
 
-def make_gpr(
-    m: CycleAwareCircuit,
-    domain: CycleAwareDomain,
-    *,
-    boot_sp: CycleAwareSignal,
-) -> list[CycleAwareSignal]:
+def make_gpr(m: Circuit, clk: Signal, rst: Signal, *, boot_sp: Wire, en: Wire) -> list[Reg]:
     """24-entry GPR file (r0 forced to 0, r1 initialized to boot_sp)."""
-    regs: list[CycleAwareSignal] = []
+    zero64 = m.const(0, width=64)
+    regs: list[Reg] = []
     for i in range(24):
-        regs.append(domain.signal(f"r{i}", width=64, reset=0))
+        init = boot_sp if i == 1 else zero64
+        regs.append(m.out(f"r{i}", clk=clk, rst=rst, width=64, init=init, en=en))
     return regs
 
 
-def make_regs(
-    m: CycleAwareCircuit,
-    domain: CycleAwareDomain,
-    *,
-    count: int,
-    width: int,
-    init: int = 0,
-) -> list[CycleAwareSignal]:
-    regs: list[CycleAwareSignal] = []
+def make_regs(m: Circuit, clk: Signal, rst: Signal, *, count: int, width: int, init: Wire, en: Wire) -> list[Reg]:
+    regs: list[Reg] = []
     for i in range(count):
-        regs.append(domain.signal(f"r{i}", width=width, reset=init))
+        regs.append(m.out(f"r{i}", clk=clk, rst=rst, width=width, init=init, en=en))
     return regs
 
 
-def read_reg(
-    m: CycleAwareCircuit,
-    code: CycleAwareSignal,
-    *,
-    gpr: list[CycleAwareSignal],
-    t: list[CycleAwareSignal],
-    u: list[CycleAwareSignal],
-    default: CycleAwareSignal,
-) -> CycleAwareSignal:
+def read_reg(m: Circuit, code: Wire, *, gpr: list[Reg], t: list[Reg], u: list[Reg], default: Wire) -> Wire:
     """Mux-based regfile read with strict defaulting (out-of-range -> default)."""
-    v: CycleAwareSignal = default
+    c = m.const
+    v: Wire = default
 
     for i in range(24):
         vv = default if i == 0 else gpr[i]
-        cond = code.eq(i)
-        v = mux(cond, vv, v)
+        v = code.eq(c(i, width=6)).select(vv, v)
     for i in range(4):
-        cond = code.eq(24 + i)
-        v = mux(cond, t[i], v)
+        v = code.eq(c(24 + i, width=6)).select(t[i], v)
     for i in range(4):
-        cond = code.eq(28 + i)
-        v = mux(cond, u[i], v)
+        v = code.eq(c(28 + i, width=6)).select(u[i], v)
     return v
 
 
-def stack_next(
-    m: CycleAwareCircuit,
-    domain: CycleAwareDomain,
-    arr: list[CycleAwareSignal],
-    *,
-    do_push: CycleAwareSignal,
-    do_clear: CycleAwareSignal,
-    value: CycleAwareSignal,
-) -> list[CycleAwareSignal]:
-    """Compute next values for a 4-entry stack."""
-    n0 = arr[0]
-    n1 = arr[1]
-    n2 = arr[2]
-    n3 = arr[3]
+@jit_inline
+def stack_next(m: Circuit, arr: list[Reg], *, do_push: Wire, do_clear: Wire, value: Wire) -> Vec:
+    n0 = arr[0].out()
+    n1 = arr[1].out()
+    n2 = arr[2].out()
+    n3 = arr[3].out()
 
-    zero64 = domain.const(0, width=64)
+    if do_push:
+        n3 = n2
+        n2 = n1
+        n1 = n0
+        n0 = value
 
-    # Push: shift down and insert at top
-    n0_push = value
-    n1_push = n0
-    n2_push = n1
-    n3_push = n2
+    # Clear overrides push (matches previous priority).
+    if do_clear:
+        n0 = 0
+        n1 = 0
+        n2 = 0
+        n3 = 0
 
-    n0 = mux(do_push, n0_push, n0)
-    n1 = mux(do_push, n1_push, n1)
-    n2 = mux(do_push, n2_push, n2)
-    n3 = mux(do_push, n3_push, n3)
-
-    # Clear overrides push
-    n0 = mux(do_clear, zero64, n0)
-    n1 = mux(do_clear, zero64, n1)
-    n2 = mux(do_clear, zero64, n2)
-    n3 = mux(do_clear, zero64, n3)
-
-    return [n0, n1, n2, n3]
+    return m.vec(n0, n1, n2, n3)
 
 
 def commit_gpr(
-    m: CycleAwareCircuit,
-    domain: CycleAwareDomain,
-    gpr: list[CycleAwareSignal],
+    m: Circuit,
+    gpr: list[Reg],
     *,
-    do_reg_write: CycleAwareSignal,
-    regdst: CycleAwareSignal,
-    value: CycleAwareSignal,
+    do_reg_write0: Wire,
+    regdst0: Wire | Reg,
+    value0: Wire | Reg,
+    do_reg_write1: Wire | None = None,
+    regdst1: Wire | Reg | None = None,
+    value1: Wire | Reg | None = None,
+    macro_do_reg_write: Wire | None = None,
+    macro_regdst: Wire | Reg | None = None,
+    macro_value: Wire | Reg | None = None,
 ) -> None:
-    zero64 = domain.const(0, width=64)
+    c = m.const
+    zero64 = m.const(0, width=64)
+    if do_reg_write1 is None:
+        do_reg_write1 = m.const(0, width=1)
+    if regdst1 is None:
+        regdst1 = m.const(REG_INVALID, width=6)
+    if value1 is None:
+        value1 = zero64
+    if macro_do_reg_write is None:
+        macro_do_reg_write = m.const(0, width=1)
+    if macro_regdst is None:
+        macro_regdst = m.const(REG_INVALID, width=6)
+    if macro_value is None:
+        macro_value = zero64
     for i in range(24):
         if i == 0:
             gpr[i].set(zero64)
             continue
-        we = do_reg_write & regdst.eq(i)
-        gpr[i].set(value, when=we)
+        we_pipe0 = do_reg_write0 & regdst0.eq(c(i, width=6))
+        we_pipe1 = do_reg_write1 & regdst1.eq(c(i, width=6))
+        we_macro = macro_do_reg_write & macro_regdst.eq(c(i, width=6))
+        we = we_pipe0 | we_pipe1 | we_macro
+        # Priority: macro (highest), then younger pipe lane (1), then older (0).
+        wdata_pipe = we_pipe1.select(value1, value0)
+        wdata = we_macro.select(macro_value, wdata_pipe)
+        gpr[i].set(wdata, when=we)
 
 
-def commit_stack(
-    m: CycleAwareCircuit,
-    arr: list[CycleAwareSignal],
-    next_vals: list[CycleAwareSignal],
-) -> None:
+def commit_stack(m: Circuit, arr: list[Reg], next_vals: list[Wire]) -> None:
     for i in range(4):
         arr[i].set(next_vals[i])

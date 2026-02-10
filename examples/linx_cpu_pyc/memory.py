@@ -1,26 +1,20 @@
 from __future__ import annotations
 
-from pycircuit import (
-    CycleAwareByteMem,
-    CycleAwareCircuit,
-    CycleAwareDomain,
-    CycleAwareSignal,
-)
+from pycircuit import Circuit, Reg, Wire
+from pycircuit.dsl import Signal
 
 
 def build_byte_mem(
-    m: CycleAwareCircuit,
-    domain: CycleAwareDomain,
+    m: Circuit,
+    clk: Signal,
+    rst: Signal,
     *,
-    raddr: CycleAwareSignal,
-    wvalid: CycleAwareSignal,
-    waddr: CycleAwareSignal,
-    wdata: CycleAwareSignal,
-    wstrb: CycleAwareSignal,
+    raddr: Wire | Reg | Signal,
+    wvalid: Wire | Reg | Signal,
+    waddr: Wire | Reg | Signal,
+    wdata: Wire | Reg | Signal,
+    wstrb: Wire | Reg | Signal,
     depth_bytes: int,
     name: str,
-) -> CycleAwareSignal:
-    mem = m.ca_byte_mem(name, domain=domain, depth=depth_bytes, data_width=64)
-    rdata = mem.read(raddr)
-    mem.write(waddr, wdata, wstrb, when=wvalid)
-    return rdata
+) -> Wire:
+    return m.byte_mem(clk, rst, raddr=raddr, wvalid=wvalid, waddr=waddr, wdata=wdata, wstrb=wstrb, depth=depth_bytes, name=name)
