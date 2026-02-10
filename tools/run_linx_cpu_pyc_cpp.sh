@@ -7,6 +7,9 @@ ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 source "${ROOT_DIR}/scripts/lib.sh"
 pyc_find_pyc_compile
 
+# Default to generating a Konata pipeview trace for each run (disable with: PYC_KONATA=0).
+export PYC_KONATA="${PYC_KONATA:-1}"
+
 MEMH=""
 ELF=""
 EXPECTED=""
@@ -71,24 +74,102 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 
 cd "${ROOT_DIR}"
 
+EMIT_PARAMS=()
+
 if [[ -n "${ELF}" ]]; then
   MEMH="${WORK_DIR}/program.memh"
-  START_PC="$(PYTHONDONTWRITEBYTECODE=1 python3 tools/linxisa/elf_to_memh.py "${ELF}" --text-base "${ELF_TEXT_BASE}" --data-base "${ELF_DATA_BASE}" --page-align "${ELF_PAGE_ALIGN}" -o "${MEMH}" --print-start)"
+  META="$(PYTHONDONTWRITEBYTECODE=1 python3 tools/linxisa/elf_to_memh.py "${ELF}" --text-base "${ELF_TEXT_BASE}" --data-base "${ELF_DATA_BASE}" --page-align "${ELF_PAGE_ALIGN}" -o "${MEMH}" --print-start --print-max)"
+  START_PC="$(printf "%s\n" "${META}" | sed -n '1p')"
+  MAX_END="$(printf "%s\n" "${META}" | sed -n '2p')"
   if [[ -z "${PYC_BOOT_PC:-}" ]]; then
     export PYC_BOOT_PC="${START_PC}"
   fi
+  if [[ -z "${PYC_MEM_BYTES:-}" ]]; then
+    MEM_BYTES="$(
+      PYTHONDONTWRITEBYTECODE=1 python3 - "${MAX_END}" <<'PY'
+import sys
+
+end = int(sys.argv[1], 0)
+min_size = 1 << 20
+size = min_size
+while size < end:
+    size <<= 1
+print(size)
+PY
+    )"
+    export PYC_MEM_BYTES="${MEM_BYTES}"
+  fi
 fi
 
-# linx_cpu_pyc uses cycle-aware API and emits MLIR via __main__ (not pycircuit emit).
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$(pyc_pythonpath):${ROOT_DIR}/examples" \
-  python3 -m linx_cpu_pyc.linx_cpu_pyc > "${WORK_DIR}/linx_cpu_pyc.pyc"
+if [[ -n "${MEMH}" ]]; then
+  # If the user didn't provide a memory size, compute the minimum power-of-two
+  # depth that covers the memh image.
+  if [[ -z "${PYC_MEM_BYTES:-}" ]]; then
+    MAX_END="$(
+      PYTHONDONTWRITEBYTECODE=1 python3 - "${MEMH}" <<'PY'
+import sys
+
+path = sys.argv[1]
+max_end = 0
+addr = 0
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        if line[0] == "@":
+            addr = int(line[1:], 16)
+            if addr > max_end:
+                max_end = addr
+            continue
+        # One byte token per line.
+        addr += 1
+        if addr > max_end:
+            max_end = addr
+print(hex(max_end))
+PY
+    )"
+    MEM_BYTES="$(
+      PYTHONDONTWRITEBYTECODE=1 python3 - "${MAX_END}" <<'PY'
+import sys
+
+end = int(sys.argv[1], 0)
+min_size = 1 << 20
+size = min_size
+while size < end:
+    size <<= 1
+print(size)
+PY
+    )"
+    export PYC_MEM_BYTES="${MEM_BYTES}"
+  fi
+
+  # Default the boot SP to the top of the modeled RAM so stack doesn't overlap
+  # large .bss reservations used by benchmarks.
+  if [[ -z "${PYC_BOOT_SP:-}" ]]; then
+    export PYC_BOOT_SP="$(
+      PYTHONDONTWRITEBYTECODE=1 python3 - "${PYC_MEM_BYTES}" <<'PY'
+import sys
+
+mem = int(sys.argv[1], 0)
+print(hex(max(0, mem - 0x100)))
+PY
+    )"
+  fi
+
+  # Benchmarks can run longer than tiny bring-up tests. Allow override.
+  if [[ -z "${PYC_MAX_CYCLES:-}" ]]; then
+    export PYC_MAX_CYCLES="10000000"
+  fi
+
+  EMIT_PARAMS+=(--param "mem_bytes=${PYC_MEM_BYTES}")
+fi
+
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$(pyc_pythonpath)" \
+  python3 -m pycircuit.cli emit ${EMIT_PARAMS[@]+"${EMIT_PARAMS[@]}"} examples/linx_cpu_pyc/linx_cpu_pyc.py -o "${WORK_DIR}/linx_cpu_pyc.pyc"
 
 "${PYC_COMPILE}" "${WORK_DIR}/linx_cpu_pyc.pyc" --emit=cpp -o "${WORK_DIR}/linx_cpu_pyc_gen.hpp"
 
-# Use system C++ compiler for the testbench to avoid Homebrew LLVM's SDK mismatch on macOS.
-if [[ -z "${CXX:-}" && "$(uname -s)" == Darwin && -x /usr/bin/clang++ ]]; then
-  CXX=/usr/bin/clang++
-fi
 "${CXX:-clang++}" -std=c++17 -O2 \
   -I "${ROOT_DIR}/include" \
   -I "${WORK_DIR}" \
@@ -96,15 +177,6 @@ fi
   "${ROOT_DIR}/examples/linx_cpu_pyc/tb_linx_cpu_pyc.cpp"
 
 if [[ -n "${MEMH}" ]]; then
-  # Use absolute path for memh so the binary finds the file regardless of cwd (e.g. when PYC_VCD=1).
-  if [[ "${MEMH}" != /* ]]; then
-    MEMH="${ROOT_DIR}/${MEMH}"
-  fi
-  # Use same boot PC as regression for known fixtures (so single-run matches regression, e.g. with PYC_VCD=1).
-  case "${MEMH}" in
-    *test_branch2.memh)   export PYC_BOOT_PC="${PYC_BOOT_PC:-0x1000a}" ;;
-    *test_call_simple.memh) export PYC_BOOT_PC="${PYC_BOOT_PC:-0x1001c}" ;;
-  esac
   if [[ -n "${EXPECTED}" ]]; then
     "${WORK_DIR}/tb_linx_cpu_pyc" "${MEMH}" "${EXPECTED}"
   else

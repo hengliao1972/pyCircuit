@@ -58,7 +58,7 @@ def _ex_apply(m: Circuit, ex: ExBundle, cond: Wire, *, alu: Wire, is_load: Wire,
 @jit_inline
 def build_ex_stage(m: Circuit, *, do_ex: Wire, pc: Wire, idex: IdExRegs, exmem: ExMemRegs, consts: Consts) -> None:
     with m.scope("EX"):
-        c = m.const_wire
+        c = m.const
 
         # Stage inputs.
         pc = pc.out()
@@ -184,4 +184,3 @@ def build_ex_stage(m: Circuit, *, do_ex: Wire, pc: Wire, idex: IdExRegs, exmem: 
         exmem.size.set(ex.size, when=do_ex)
         exmem.addr.set(ex.addr, when=do_ex)
         exmem.wdata.set(ex.wdata, when=do_ex)
-

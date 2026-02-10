@@ -1,80 +1,40 @@
-# -*- coding: utf-8 -*-
-"""JIT pipeline with vector example using cycle-aware API.
+from __future__ import annotations
 
-Demonstrates multi-stage pipeline with signal packing and unpacking.
-"""
-from pycircuit import (
-    CycleAwareCircuit,
-    CycleAwareDomain,
-    CycleAwareSignal,
-    ca_cat,
-    compile_cycle_aware,
-    mux,
-)
+from pycircuit import Circuit
 
 
-def _pipe_stage(
-    domain: CycleAwareDomain,
-    bus: CycleAwareSignal,
-    stage_idx: int,
-) -> CycleAwareSignal:
-    """Create a single pipeline stage (register)."""
-    domain.next()
-    return domain.cycle(bus, reset_value=0, name="bus_stage")
+def _pipe_bus(m: Circuit, *, bus, dom, stages: int):
+    """Pipeline a packed bus through `stages` flops (python-unrolled)."""
+    for i in range(int(stages)):
+        with m.scope(f"PIPE{i}"):
+            bus_r = m.out(f"bus_s{i}", domain=dom, width=bus.width)
+            bus_r.set(bus)
+            bus = bus_r.out()
+    return bus
 
 
-def build(
-    m: CycleAwareCircuit,
-    domain: CycleAwareDomain,
-    STAGES: int = 3,
-) -> None:
-    """Build a multi-stage pipeline with packed bus.
-    
-    Args:
-        m: Cycle-aware circuit builder
-        domain: Clock domain
-        STAGES: Number of pipeline stages (JIT-time parameter)
-    """
-    # Cycle 0: Inputs
-    a = domain.create_signal("a", width=16)
-    b = domain.create_signal("b", width=16)
-    sel = domain.create_signal("sel", width=1)
-    
-    # Combinational logic
+def build(m: Circuit, STAGES: int = 3) -> None:
+    dom = m.domain("sys")
+
+    a = m.input("a", width=16)
+    b = m.input("b", width=16)
+    sel = m.input("sel", width=1)
+
+    # Some combinational logic feeding a multi-field pipeline bus.
     sum_ = a + b
     x = a ^ b
-    
-    # Conditional: data = sum if sel else x
-    data = mux(sel, sum_, x)
-    
-    # Comparison
-    tag = a.eq(b)  # 1-bit
-    
-    # Extract low 8 bits
+    data = x
+    if sel:
+        data = sum_
+    tag = a == b
     lo8 = data[0:8]
-    
-    # Pack into bus: {tag[0], data[15:0], lo8[7:0]} = 1+16+8 = 25 bits
-    # Using ca_cat (MSB-first concatenation)
-    bus = ca_cat(tag, data, lo8)
-    bus = bus.named("packed_bus")
-    
-    # Pipeline stages (Python-unrolled)
-    for i in range(STAGES):
-        bus = _pipe_stage(domain, bus, i)
-    
-    # Unpack: extract fields from bus
-    # Layout: tag (bit 24), data (bits 23:8), lo8 (bits 7:0)
-    out_lo8 = bus[0:8]
-    out_data = bus[8:24]
-    out_tag = bus[24:25]
-    
-    # Outputs
-    m.output("tag", out_tag.sig)
-    m.output("data", out_data.sig)
-    m.output("lo8", out_lo8.sig)
 
+    pkt = m.bundle(tag=tag, data=data, lo8=lo8)
+    bus = pkt.pack()
 
-# Entry point for JIT compilation
-if __name__ == "__main__":
-    circuit = compile_cycle_aware(build, name="jit_pipeline_vec", STAGES=3)
-    print(circuit.emit_mlir())
+    bus = _pipe_bus(m, bus=bus, dom=dom, stages=STAGES)
+
+    out = pkt.unpack(bus)
+    m.output("tag", out["tag"])
+    m.output("data", out["data"])
+    m.output("lo8", out["lo8"])

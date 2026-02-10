@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build python3 python3-pip clang
+          sudo apt-get install -y cmake ninja-build python3 python3-pip clang iverilog verilator
 
           # Install a compatible LLVM+MLIR dev set. Try versioned packages first,
           # then fall back to unversioned names.
@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euxo pipefail
           brew update
-          brew install ninja cmake llvm python@3 || brew install ninja cmake llvm
+          brew install ninja cmake llvm python@3 icarus-verilog verilator || brew install ninja cmake llvm icarus-verilog verilator
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Configure
@@ -91,3 +91,16 @@ jobs:
           set -euxo pipefail
           bash janus/tools/run_janus_bcc_pyc_cpp.sh
           bash janus/tools/run_janus_bcc_ooo_pyc_cpp.sh
+
+      - name: Run Verilog sims (open-source flow)
+        run: |
+          set -euxo pipefail
+          python3 tools/pyc_flow.py verilog-sim fastfwd_pyc +max_cycles=200 +max_pkts=400 +seed=1 +notrace +nolog
+          python3 tools/pyc_flow.py verilog-sim issue_queue_2picker +notrace +nolog
+          python3 tools/pyc_flow.py verilog-sim linx_cpu_pyc --tool verilator \
+            +memh=examples/linx_cpu/programs/test_or.memh +expected=0000ff00 +notrace +nolog
+
+      - name: FastFwd cross-check (C++ vs Verilog)
+        run: |
+          set -euxo pipefail
+          python3 tools/pyc_flow.py fastfwd-crosscheck --tool iverilog --seed 1 --cycles 200 --packets 400

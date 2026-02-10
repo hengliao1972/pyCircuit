@@ -1,4 +1,6 @@
 // pyCircuit C++ emission (prototype)
+#include <cstdlib>
+#include <iostream>
 #include <pyc/cpp/pyc_sim.hpp>
 
 namespace pyc::gen {
@@ -34,7 +36,7 @@ struct WireOps {
   pyc::cpp::pyc_reg<8> pyc_reg_9_inst;
 
   WireOps() :
-      pyc_reg_9_inst(sys_clk, sys_rst, pyc_comb_7, y_reg__next, pyc_comb_6, pyc_reg_9) {
+      pyc_reg_9_inst(sys_clk, sys_rst, pyc_comb_7, pyc_comb_8, pyc_comb_6, pyc_reg_9) {
     eval();
   }
 
@@ -56,31 +58,36 @@ struct WireOps {
     COMB__y__wire_ops__L16 = pyc_and_4;
     pyc_mux_5 = (sel__wire_ops__L11.toBool() ? COMB__y__wire_ops__L16 : COMB__y__wire_ops__L14);
     COMB__y__wire_ops__L15 = pyc_mux_5;
+    y_reg__next = COMB__y__wire_ops__L15;
     pyc_comb_6 = pyc_constant_1;
     pyc_comb_7 = pyc_constant_2;
-    pyc_comb_8 = COMB__y__wire_ops__L15;
+    pyc_comb_8 = y_reg__next;
   }
 
   inline void eval_comb_pass() {
     eval_comb_0();
     eval_comb_1();
-    y_reg__next = pyc_comb_8;
   }
 
   void eval() {
     eval_comb_0();
     eval_comb_1();
-    y_reg__next = pyc_comb_8;
     y = pyc_comb_10;
   }
 
-  void tick() {
-    // Two-phase update: compute next state for all sequential elements,
-    // then commit together. This avoids ordering artifacts between regs.
-    // Phase 1: compute.
+  void tick_compute() {
+    // Local sequential primitives.
     pyc_reg_9_inst.tick_compute();
-    // Phase 2: commit.
+  }
+
+  void tick_commit() {
+    // Local sequential primitives.
     pyc_reg_9_inst.tick_commit();
+  }
+
+  void tick() {
+    tick_compute();
+    tick_commit();
   }
 };
 

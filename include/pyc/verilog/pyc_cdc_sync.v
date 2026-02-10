@@ -21,7 +21,12 @@ module pyc_cdc_sync #(
   end
   `endif
 
+  `ifdef PYC_TARGET_FPGA
+  (* async_reg = "true" *)
   reg [WIDTH-1:0] pipe [0:STAGES-1];
+  `else
+  reg [WIDTH-1:0] pipe [0:STAGES-1];
+  `endif
 
   integer i;
   always @(posedge clk) begin
@@ -37,4 +42,3 @@ module pyc_cdc_sync #(
 
   assign out = pipe[STAGES-1];
 endmodule
-

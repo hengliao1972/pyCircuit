@@ -1,4 +1,6 @@
 // pyCircuit C++ emission (prototype)
+#include <cstdlib>
+#include <iostream>
 #include <pyc/cpp/pyc_sim.hpp>
 
 namespace pyc::gen {
@@ -427,10 +429,8 @@ struct issue_queue_2picker {
     out1_data = pyc_comb_63;
   }
 
-  void tick() {
-    // Two-phase update: compute next state for all sequential elements,
-    // then commit together. This avoids ordering artifacts between regs.
-    // Phase 1: compute.
+  void tick_compute() {
+    // Local sequential primitives.
     pyc_reg_11_inst.tick_compute();
     pyc_reg_13_inst.tick_compute();
     pyc_reg_15_inst.tick_compute();
@@ -439,7 +439,10 @@ struct issue_queue_2picker {
     pyc_reg_21_inst.tick_compute();
     pyc_reg_23_inst.tick_compute();
     pyc_reg_25_inst.tick_compute();
-    // Phase 2: commit.
+  }
+
+  void tick_commit() {
+    // Local sequential primitives.
     pyc_reg_11_inst.tick_commit();
     pyc_reg_13_inst.tick_commit();
     pyc_reg_15_inst.tick_commit();
@@ -448,6 +451,11 @@ struct issue_queue_2picker {
     pyc_reg_21_inst.tick_commit();
     pyc_reg_23_inst.tick_commit();
     pyc_reg_25_inst.tick_commit();
+  }
+
+  void tick() {
+    tick_compute();
+    tick_commit();
   }
 };
 

@@ -13,7 +13,7 @@
 //   c++ -std=c++17 -O2 -shared -fPIC -I include -I . \
 //       -o examples/calculator/libcalculator_sim.dylib \
 //       examples/calculator/calculator_capi.cpp
-#include "examples/generated/calculator/calculator_gen.hpp"
+#include "../generated/calculator/calculator_gen.hpp"
 
 using pyc::cpp::Wire;
 

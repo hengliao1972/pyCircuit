@@ -23,6 +23,16 @@ class CoreCtrlRegs:
     commit_tgt: Reg
     flush_pending: Reg
     flush_pc: Reg
+    macro_active: Reg
+    macro_wait_commit: Reg
+    macro_phase: Reg
+    macro_op: Reg
+    macro_begin: Reg
+    macro_end: Reg
+    macro_stacksize: Reg
+    macro_reg: Reg
+    macro_i: Reg
+    macro_sp_base: Reg
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,8 @@ class RobRegs:
     store_data: list[Reg]
     store_size: list[Reg]
     is_store: list[Reg]
+    macro_begin: list[Reg]
+    macro_end: list[Reg]
 
 
 @dataclass(frozen=True)
@@ -71,13 +83,15 @@ class IqRegs:
     imm: list[Reg]
     srcl: list[Reg]
     srcr: list[Reg]
+    srcr_type: list[Reg]
+    shamt: list[Reg]
     srcp: list[Reg]
     pdst: list[Reg]
     has_dst: list[Reg]
 
 
 def make_core_ctrl_regs(m: Circuit, clk: Signal, rst: Signal, *, boot_pc: Wire, consts: Consts) -> CoreCtrlRegs:
-    c = m.const_wire
+    c = m.const
     with m.scope("state"):
         halted = m.out("halted", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1)
         cycles = m.out("cycles", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1)
@@ -88,7 +102,8 @@ def make_core_ctrl_regs(m: Circuit, clk: Signal, rst: Signal, *, boot_pc: Wire, 
         # Fetch PC (fall-through only; redirected on commit-time boundary).
         fpc = m.out("fpc", clk=clk, rst=rst, width=64, init=boot_pc, en=consts.one1)
 
-        br_kind = m.out("br_kind", clk=clk, rst=rst, width=2, init=c(BK_FALL, width=2), en=consts.one1)
+        # Block transition kind (must cover BK_DIRECT/BK_IND/BK_ICALL).
+        br_kind = m.out("br_kind", clk=clk, rst=rst, width=3, init=c(BK_FALL, width=3), en=consts.one1)
         br_base_pc = m.out("br_base_pc", clk=clk, rst=rst, width=64, init=boot_pc, en=consts.one1)
         br_off = m.out("br_off", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1)
         commit_cond = m.out("commit_cond", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1)
@@ -97,6 +112,18 @@ def make_core_ctrl_regs(m: Circuit, clk: Signal, rst: Signal, *, boot_pc: Wire, 
         # Redirect handling (one-cycle "bubble flush" after a taken boundary).
         flush_pending = m.out("flush_pending", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1)
         flush_pc = m.out("flush_pc", clk=clk, rst=rst, width=64, init=boot_pc, en=consts.one1)
+
+        # Template macro blocks (FENTRY/FEXIT/FRET.*) microcode.
+        macro_active = m.out("macro_active", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1)
+        macro_wait_commit = m.out("macro_wait_commit", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1)
+        macro_phase = m.out("macro_phase", clk=clk, rst=rst, width=2, init=consts.zero1.zext(width=2), en=consts.one1)
+        macro_op = m.out("macro_op", clk=clk, rst=rst, width=12, init=c(0, width=12), en=consts.one1)
+        macro_begin = m.out("macro_begin", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1)
+        macro_end = m.out("macro_end", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1)
+        macro_stacksize = m.out("macro_stacksize", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1)
+        macro_reg = m.out("macro_reg", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1)
+        macro_i = m.out("macro_i", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1)
+        macro_sp_base = m.out("macro_sp_base", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1)
 
     return CoreCtrlRegs(
         halted=halted,
@@ -110,6 +137,16 @@ def make_core_ctrl_regs(m: Circuit, clk: Signal, rst: Signal, *, boot_pc: Wire, 
         commit_tgt=commit_tgt,
         flush_pending=flush_pending,
         flush_pc=flush_pc,
+        macro_active=macro_active,
+        macro_wait_commit=macro_wait_commit,
+        macro_phase=macro_phase,
+        macro_op=macro_op,
+        macro_begin=macro_begin,
+        macro_end=macro_end,
+        macro_stacksize=macro_stacksize,
+        macro_reg=macro_reg,
+        macro_i=macro_i,
+        macro_sp_base=macro_sp_base,
     )
 
 
@@ -134,7 +171,7 @@ def make_prf(m: Circuit, clk: Signal, rst: Signal, *, boot_sp: Wire, consts: Con
 
 
 def make_rename_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p: OooParams) -> RenameRegs:
-    c = m.const_wire
+    c = m.const
     with m.scope("rename"):
         smap: list[Reg] = []
         cmap: list[Reg] = []
@@ -150,7 +187,7 @@ def make_rename_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p:
 
 
 def make_rob_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p: OooParams) -> RobRegs:
-    c = m.const_wire
+    c = m.const
     tag0 = c(0, width=p.ptag_w)
 
     with m.scope("rob"):
@@ -170,11 +207,13 @@ def make_rob_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p: Oo
         store_data: list[Reg] = []
         store_size: list[Reg] = []
         is_store: list[Reg] = []
+        macro_begin: list[Reg] = []
+        macro_end: list[Reg] = []
 
         for i in range(p.rob_depth):
             valid.append(m.out(f"v{i}", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1))
             done.append(m.out(f"done{i}", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1))
-            op.append(m.out(f"op{i}", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1))
+            op.append(m.out(f"op{i}", clk=clk, rst=rst, width=12, init=c(0, width=12), en=consts.one1))
             len_bytes.append(m.out(f"len{i}", clk=clk, rst=rst, width=3, init=consts.zero3, en=consts.one1))
             dst_kind.append(m.out(f"dk{i}", clk=clk, rst=rst, width=2, init=c(0, width=2), en=consts.one1))
             dst_areg.append(m.out(f"da{i}", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1))
@@ -182,8 +221,10 @@ def make_rob_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p: Oo
             value.append(m.out(f"val{i}", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1))
             store_addr.append(m.out(f"sta{i}", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1))
             store_data.append(m.out(f"std{i}", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1))
-            store_size.append(m.out(f"sts{i}", clk=clk, rst=rst, width=3, init=consts.zero3, en=consts.one1))
+            store_size.append(m.out(f"sts{i}", clk=clk, rst=rst, width=4, init=consts.zero4, en=consts.one1))
             is_store.append(m.out(f"isst{i}", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1))
+            macro_begin.append(m.out(f"mb{i}", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1))
+            macro_end.append(m.out(f"me{i}", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1))
 
     return RobRegs(
         head=head,
@@ -201,11 +242,13 @@ def make_rob_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p: Oo
         store_data=store_data,
         store_size=store_size,
         is_store=is_store,
+        macro_begin=macro_begin,
+        macro_end=macro_end,
     )
 
 
 def make_iq_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p: OooParams, name: str = "iq") -> IqRegs:
-    c = m.const_wire
+    c = m.const
     tag0 = c(0, width=p.ptag_w)
 
     with m.scope(name):
@@ -216,19 +259,36 @@ def make_iq_regs(m: Circuit, clk: Signal, rst: Signal, *, consts: Consts, p: Ooo
         imm: list[Reg] = []
         srcl: list[Reg] = []
         srcr: list[Reg] = []
+        srcr_type: list[Reg] = []
+        shamt: list[Reg] = []
         srcp: list[Reg] = []
         pdst: list[Reg] = []
         has_dst: list[Reg] = []
         for i in range(p.iq_depth):
             valid.append(m.out(f"v{i}", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1))
             rob.append(m.out(f"rob{i}", clk=clk, rst=rst, width=p.rob_w, init=c(0, width=p.rob_w), en=consts.one1))
-            op.append(m.out(f"op{i}", clk=clk, rst=rst, width=6, init=c(0, width=6), en=consts.one1))
+            op.append(m.out(f"op{i}", clk=clk, rst=rst, width=12, init=c(0, width=12), en=consts.one1))
             pc.append(m.out(f"pc{i}", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1))
             imm.append(m.out(f"imm{i}", clk=clk, rst=rst, width=64, init=consts.zero64, en=consts.one1))
             srcl.append(m.out(f"sl{i}", clk=clk, rst=rst, width=p.ptag_w, init=tag0, en=consts.one1))
             srcr.append(m.out(f"sr{i}", clk=clk, rst=rst, width=p.ptag_w, init=tag0, en=consts.one1))
+            srcr_type.append(m.out(f"st{i}", clk=clk, rst=rst, width=2, init=consts.zero1.zext(width=2), en=consts.one1))
+            shamt.append(m.out(f"sh{i}", clk=clk, rst=rst, width=6, init=consts.zero6, en=consts.one1))
             srcp.append(m.out(f"sp{i}", clk=clk, rst=rst, width=p.ptag_w, init=tag0, en=consts.one1))
             pdst.append(m.out(f"pd{i}", clk=clk, rst=rst, width=p.ptag_w, init=tag0, en=consts.one1))
             has_dst.append(m.out(f"hd{i}", clk=clk, rst=rst, width=1, init=consts.zero1, en=consts.one1))
 
-    return IqRegs(valid=valid, rob=rob, op=op, pc=pc, imm=imm, srcl=srcl, srcr=srcr, srcp=srcp, pdst=pdst, has_dst=has_dst)
+    return IqRegs(
+        valid=valid,
+        rob=rob,
+        op=op,
+        pc=pc,
+        imm=imm,
+        srcl=srcl,
+        srcr=srcr,
+        srcr_type=srcr_type,
+        shamt=shamt,
+        srcp=srcp,
+        pdst=pdst,
+        has_dst=has_dst,
+    )

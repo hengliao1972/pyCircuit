@@ -1,8 +1,8 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pyc_bits.hpp"
 
@@ -28,7 +28,8 @@ public:
                Wire<AddrWidth> &waddr,
                Wire<DataWidth> &wdata,
                Wire<StrbWidth> &wstrb)
-      : clk(clk), rst(rst), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb) {
+      : clk(clk), rst(rst), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
+        mem_(DepthBytes, 0u) {
     eval();
   }
 
@@ -113,8 +114,7 @@ public:
   std::uint64_t latchedData = 0;
   std::uint64_t latchedStrb = 0;
 
-  std::array<std::uint8_t, DepthBytes> mem_{};
+  std::vector<std::uint8_t> mem_;
 };
 
 } // namespace pyc::cpp
-

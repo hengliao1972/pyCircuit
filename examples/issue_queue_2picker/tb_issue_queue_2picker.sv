@@ -106,10 +106,6 @@ module tb_issue_queue_2picker;
     void'($value$plusargs("log=%s", log_path));
     log_cycles = $test$plusargs("logcycles");
 
-    if (!$test$plusargs("nomkdir")) begin
-      void'($system($sformatf("mkdir -p %s", trace_dir)));
-    end
-
     if (!$test$plusargs("notrace")) begin
       $display("tb_issue_queue_2picker: dumping VCD to %s", vcd_path);
       $dumpfile(vcd_path);

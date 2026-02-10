@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+*.dylib
 
 # Distribution / packaging
 .Python
@@ -61,6 +62,9 @@ cover/
 *.vcd
 *.fst
 *.fsdb
+*.vvp
+*.kanata
+*.konata
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -209,3 +213,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Verilog tool build outputs
+examples/generated/**/verilator/
+
+# Janus generated outputs (pyc-compile, verilator builds, benchmark artifacts)
+janus/generated/

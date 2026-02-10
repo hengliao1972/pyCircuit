@@ -67,8 +67,15 @@ target_link_libraries(pyc_dialect PUBLIC
 )
 
 add_library(pyc_transforms
+  lib/Transforms/CheckFlatTypesPass.cpp
+  lib/Transforms/CheckNoDynamicPass.cpp
+  lib/Transforms/CheckCombCyclesPass.cpp
+  lib/Transforms/CombCanonicalizePass.cpp
+  lib/Transforms/EliminateWiresPass.cpp
+  lib/Transforms/PackI1RegsPass.cpp
   lib/Transforms/FuseCombPass.cpp
   lib/Transforms/LowerSCFToPYCStaticPass.cpp
+  lib/Transforms/PrunePortsPass.cpp
 )
 llvm_update_compile_flags(pyc_transforms)
 target_include_directories(pyc_transforms PUBLIC

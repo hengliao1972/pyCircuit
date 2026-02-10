@@ -39,6 +39,36 @@ static std::string sanitizeId(llvm::StringRef s) {
   return out;
 }
 
+static std::string cppStringLiteral(llvm::StringRef s) {
+  std::string out;
+  out.reserve(s.size() + 2);
+  out.push_back('"');
+  for (char c : s) {
+    switch (c) {
+    case '\\':
+      out += "\\\\\\\\";
+      break;
+    case '"':
+      out += "\\\\\"";
+      break;
+    case '\n':
+      out += "\\\\n";
+      break;
+    case '\r':
+      out += "\\\\r";
+      break;
+    case '\t':
+      out += "\\\\t";
+      break;
+    default:
+      out.push_back(c);
+      break;
+    }
+  }
+  out.push_back('"');
+  return out;
+}
+
 static std::string cppType(Type ty) {
   if (isa<pyc::ClockType>(ty) || isa<pyc::ResetType>(ty))
     return "pyc::cpp::Wire<1>";
@@ -107,6 +137,21 @@ static std::string getPortName(func::FuncOp f, unsigned idx, bool isResult) {
         return sanitizeId(s.getValue());
   }
   return "out" + std::to_string(idx);
+}
+
+static void computeUniquePortNames(func::FuncOp f, std::vector<std::string> &inNames, std::vector<std::string> &outNames) {
+  NameTable nt;
+  inNames.clear();
+  outNames.clear();
+  inNames.reserve(f.getNumArguments());
+  outNames.reserve(f.getNumResults());
+  for (auto [i, arg] : llvm::enumerate(f.getArguments())) {
+    (void)arg;
+    inNames.push_back(nt.unique(getPortName(f, static_cast<unsigned>(i), /*isResult=*/false)));
+  }
+  for (unsigned i = 0; i < f.getNumResults(); ++i) {
+    outNames.push_back(nt.unique(getPortName(f, i, /*isResult=*/true)));
+  }
 }
 
 static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTable &nt) {
@@ -382,6 +427,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
   llvm::SmallVector<pyc::SyncMemDPOp> syncMemDPs;
   llvm::SmallVector<pyc::AsyncFifoOp> asyncFifos;
   llvm::SmallVector<pyc::CdcSyncOp> cdcSyncs;
+  llvm::SmallVector<pyc::InstanceOp> instances;
   llvm::SmallVector<pyc::CombOp> combs;
 
   for (Operation &op : top) {
@@ -399,6 +445,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
       asyncFifos.push_back(fifo);
     else if (auto s = dyn_cast<pyc::CdcSyncOp>(op))
       cdcSyncs.push_back(s);
+    else if (auto inst = dyn_cast<pyc::InstanceOp>(op))
+      instances.push_back(inst);
     else if (auto comb = dyn_cast<pyc::CombOp>(op))
       combs.push_back(comb);
   }
@@ -433,9 +481,72 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
   auto combKey = [&](pyc::CombOp c) { return nt.get(c.getResult(0)); };
   std::sort(combs.begin(), combs.end(), [&](pyc::CombOp a, pyc::CombOp b) { return combKey(a) < combKey(b); });
 
+  auto instKey = [&](pyc::InstanceOp i) -> std::string {
+    if (auto nameAttr = i->getAttrOfType<StringAttr>("name"))
+      return sanitizeId(nameAttr.getValue());
+    if (i.getNumResults() > 0)
+      return nt.get(i.getResult(0));
+    return "inst";
+  };
+  std::sort(instances.begin(), instances.end(), [&](pyc::InstanceOp a, pyc::InstanceOp b) { return instKey(a) < instKey(b); });
+
+  struct InstInfo {
+    pyc::InstanceOp op;
+    func::FuncOp callee;
+    std::string member;
+    std::vector<std::string> inPorts;
+    std::vector<std::string> outPorts;
+  };
+  std::vector<InstInfo> instInfos;
+  instInfos.reserve(instances.size());
+  llvm::DenseMap<Operation *, unsigned> instIndex;
+
+  if (!instances.empty()) {
+    ModuleOp mod = f->getParentOfType<ModuleOp>();
+    if (!mod)
+      return f.emitError("C++ emitter: missing parent module for instance resolution");
+
+    for (auto inst : instances) {
+      auto calleeAttr = inst->getAttrOfType<FlatSymbolRefAttr>("callee");
+      if (!calleeAttr)
+        return inst.emitError("missing required FlatSymbolRefAttr `callee`");
+      auto callee = mod.lookupSymbol<func::FuncOp>(calleeAttr.getValue());
+      if (!callee)
+        return inst.emitError("callee symbol not found: ") << calleeAttr.getValue();
+
+      std::vector<std::string> inPorts;
+      std::vector<std::string> outPorts;
+      computeUniquePortNames(callee, inPorts, outPorts);
+      if (inPorts.size() != inst.getNumOperands())
+        return inst.emitError("operand count does not match callee signature");
+      if (outPorts.size() != inst.getNumResults())
+        return inst.emitError("result count does not match callee signature");
+
+      std::string base = "inst";
+      if (auto nameAttr = inst->getAttrOfType<StringAttr>("name"))
+        base = sanitizeId(nameAttr.getValue());
+      else
+        base = sanitizeId(callee.getSymName()) + std::string("_inst");
+      std::string member = nt.unique(base);
+
+      unsigned idx = static_cast<unsigned>(instInfos.size());
+      instIndex.try_emplace(inst.getOperation(), idx);
+      instInfos.push_back(InstInfo{inst, callee, std::move(member), std::move(inPorts), std::move(outPorts)});
+    }
+  }
+
   llvm::DenseMap<Operation *, std::string> byteMemInstName;
   llvm::DenseMap<Operation *, std::string> syncMemInstName;
   llvm::DenseMap<Operation *, std::string> syncMemDPInstName;
+
+  if (!instInfos.empty()) {
+    os << "  // Sub-modules.\n";
+    for (const auto &ii : instInfos) {
+      auto callee = ii.callee;
+      os << "  " << sanitizeId(callee.getSymName()) << " " << ii.member << "{};\n";
+    }
+    os << "\n";
+  }
 
   for (auto r : regs) {
     unsigned w = bitWidth(r.getQ().getType());
@@ -632,7 +743,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
       if (isa<func::ReturnOp>(op) || isa<pyc::WireOp>(op) || isa<pyc::RegOp>(op) || isa<pyc::SyncMemOp>(op) ||
           isa<pyc::SyncMemDPOp>(op) || isa<pyc::CdcSyncOp>(op))
         return false;
-      if (!includePrims && (isa<pyc::FifoOp>(op) || isa<pyc::AsyncFifoOp>(op) || isa<pyc::ByteMemOp>(op)))
+      if (!includePrims &&
+          (isa<pyc::FifoOp>(op) || isa<pyc::AsyncFifoOp>(op) || isa<pyc::ByteMemOp>(op) || isa<pyc::InstanceOp>(op)))
         return false;
       return true;
     };
@@ -765,6 +877,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
       os << "    eval_comb_" << combIndex.lookup(comb.getOperation()) << "();\n";
       continue;
     }
+    if (auto a = dyn_cast<pyc::AssertOp>(*op)) {
+      std::string msg = "pyc.assert failed";
+      if (auto m = a.getMsgAttr())
+        msg = m.getValue().str();
+      os << "    if (!" << nt.get(a.getCond()) << ".toBool()) { std::cerr << " << cppStringLiteral(msg)
+         << " << \"\\n\"; std::abort(); }\n";
+      continue;
+    }
     if (isa<pyc::ConstantOp,
             pyc::AddOp,
             pyc::SubOp,
@@ -801,6 +921,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
             pyc::SyncMemOp,
             pyc::SyncMemDPOp,
             pyc::CdcSyncOp,
+            pyc::InstanceOp,
             pyc::RegOp>(*op)) {
       // Primitives are evaluated in eval(), and regs only tick.
       continue;
@@ -829,6 +950,27 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
       }
       if (auto mem = dyn_cast<pyc::ByteMemOp>(*op)) {
         os << "    " << byteMemInstName.lookup(mem.getOperation()) << ".eval();\n";
+        continue;
+      }
+      if (auto inst = dyn_cast<pyc::InstanceOp>(*op)) {
+        auto it = instIndex.find(inst.getOperation());
+        if (it == instIndex.end())
+          return inst.emitError("internal error: missing instance metadata");
+        const auto &ii = instInfos[it->second];
+
+        for (unsigned i = 0; i < inst.getNumOperands(); ++i)
+          os << "    " << ii.member << "." << ii.inPorts[i] << " = " << nt.get(inst.getOperand(i)) << ";\n";
+        os << "    " << ii.member << ".eval();\n";
+        for (unsigned i = 0; i < inst.getNumResults(); ++i)
+          os << "    " << nt.get(inst.getResult(i)) << " = " << ii.member << "." << ii.outPorts[i] << ";\n";
+        continue;
+      }
+      if (auto a = dyn_cast<pyc::AssertOp>(*op)) {
+        std::string msg = "pyc.assert failed";
+        if (auto m = a.getMsgAttr())
+          msg = m.getValue().str();
+        os << "    if (!" << nt.get(a.getCond()) << ".toBool()) { std::cerr << " << cppStringLiteral(msg)
+           << " << \"\\n\"; std::abort(); }\n";
         continue;
       }
       if (auto a = dyn_cast<pyc::AssignOp>(*op)) {
@@ -874,9 +1016,17 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
   } else {
     os << "    eval_comb_pass();\n";
 
-    unsigned numPrims = static_cast<unsigned>(fifos.size() + asyncFifos.size() + byteMems.size());
+    unsigned numPrims = static_cast<unsigned>(instInfos.size() + fifos.size() + asyncFifos.size() + byteMems.size());
     if (numPrims > 0) {
       os << "    for (unsigned _i = 0; _i < " << numPrims << "u; ++_i) {\n";
+      for (const auto &ii : instInfos) {
+        auto inst = ii.op;
+        for (unsigned i = 0; i < inst.getNumOperands(); ++i)
+          os << "      " << ii.member << "." << ii.inPorts[i] << " = " << nt.get(inst.getOperand(i)) << ";\n";
+        os << "      " << ii.member << ".eval();\n";
+        for (unsigned i = 0; i < inst.getNumResults(); ++i)
+          os << "      " << nt.get(inst.getResult(i)) << " = " << ii.member << "." << ii.outPorts[i] << ";\n";
+      }
       for (auto fifo : fifos)
         os << "      " << nt.get(fifo.getInReady()) << "_inst.eval();\n";
       for (auto fifo : asyncFifos)
@@ -897,11 +1047,18 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
 
   os << "  }\n\n";
 
-  // tick(): tick sequential primitives (posedge detection is inside primitives).
-  os << "  void tick() {\n";
-  os << "    // Two-phase update: compute next state for all sequential elements,\n";
-  os << "    // then commit together. This avoids ordering artifacts between regs.\n";
-  os << "    // Phase 1: compute.\n";
+  // tick_compute/tick_commit: two-phase sequential update (hierarchy-aware).
+  os << "  void tick_compute() {\n";
+  if (!instInfos.empty()) {
+    os << "    // Sub-modules.\n";
+    for (const auto &ii : instInfos) {
+      auto inst = ii.op;
+      for (unsigned i = 0; i < inst.getNumOperands(); ++i)
+        os << "    " << ii.member << "." << ii.inPorts[i] << " = " << nt.get(inst.getOperand(i)) << ";\n";
+      os << "    " << ii.member << ".tick_compute();\n";
+    }
+  }
+  os << "    // Local sequential primitives.\n";
   for (auto r : regs)
     os << "    " << nt.get(r.getQ()) << "_inst.tick_compute();\n";
   for (auto fifo : fifos)
@@ -916,7 +1073,15 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
     os << "    " << nt.get(fifo.getInReady()) << "_inst.tick_compute();\n";
   for (auto s : cdcSyncs)
     os << "    " << nt.get(s.getOut()) << "_inst.tick_compute();\n";
-  os << "    // Phase 2: commit.\n";
+  os << "  }\n\n";
+
+  os << "  void tick_commit() {\n";
+  if (!instInfos.empty()) {
+    os << "    // Sub-modules.\n";
+    for (const auto &ii : instInfos)
+      os << "    " << ii.member << ".tick_commit();\n";
+  }
+  os << "    // Local sequential primitives.\n";
   for (auto r : regs)
     os << "    " << nt.get(r.getQ()) << "_inst.tick_commit();\n";
   for (auto fifo : fifos)
@@ -931,6 +1096,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
     os << "    " << nt.get(fifo.getInReady()) << "_inst.tick_commit();\n";
   for (auto s : cdcSyncs)
     os << "    " << nt.get(s.getOut()) << "_inst.tick_commit();\n";
+  os << "  }\n\n";
+
+  // tick(): back-compat wrapper.
+  os << "  void tick() {\n";
+  os << "    tick_compute();\n";
+  os << "    tick_commit();\n";
   os << "  }\n";
 
   os << "};\n\n";
@@ -941,16 +1112,78 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os) {
 
 LogicalResult emitCpp(ModuleOp module, llvm::raw_ostream &os, const CppEmitterOptions &) {
   os << "// pyCircuit C++ emission (prototype)\n";
+  os << "#include <cstdlib>\n";
+  os << "#include <iostream>\n";
   os << "#include <pyc/cpp/pyc_sim.hpp>\n\n";
   os << "namespace pyc::gen {\n\n";
 
-  for (auto f : module.getOps<func::FuncOp>()) {
-    if (failed(emitFunc(f, os)))
+  // Emit structs in dependency order so submodule types are defined before use.
+  llvm::SmallVector<func::FuncOp> funcs;
+  for (auto f : module.getOps<func::FuncOp>())
+    funcs.push_back(f);
+
+  llvm::StringMap<unsigned> indexByName;
+  for (auto [i, f] : llvm::enumerate(funcs))
+    indexByName.try_emplace(f.getSymName(), static_cast<unsigned>(i));
+
+  llvm::SmallVector<llvm::SmallVector<unsigned>> succ(funcs.size());
+  llvm::SmallVector<unsigned> indeg(funcs.size(), 0);
+
+  for (auto it : llvm::enumerate(funcs)) {
+    unsigned callerIdx = static_cast<unsigned>(it.index());
+    func::FuncOp f = it.value();
+    f.walk([&](pyc::InstanceOp inst) {
+      auto calleeAttr = inst->getAttrOfType<FlatSymbolRefAttr>("callee");
+      if (!calleeAttr)
+        return;
+      auto it = indexByName.find(calleeAttr.getValue());
+      if (it == indexByName.end())
+        return;
+      unsigned calleeIdx = it->second;
+      succ[calleeIdx].push_back(callerIdx);
+      indeg[callerIdx]++;
+    });
+  }
+
+  // Kahn topological sort; tie-break by symbol name for determinism.
+  auto cmp = [&](unsigned a, unsigned b) { return funcs[a].getSymName() > funcs[b].getSymName(); };
+  std::vector<unsigned> heap;
+  heap.reserve(funcs.size());
+  for (unsigned i = 0; i < funcs.size(); ++i)
+    if (indeg[i] == 0)
+      heap.push_back(i);
+  std::make_heap(heap.begin(), heap.end(), cmp);
+
+  llvm::SmallVector<unsigned> order;
+  order.reserve(funcs.size());
+  while (!heap.empty()) {
+    std::pop_heap(heap.begin(), heap.end(), cmp);
+    unsigned n = heap.back();
+    heap.pop_back();
+    order.push_back(n);
+    for (unsigned s : succ[n]) {
+      if (--indeg[s] == 0) {
+        heap.push_back(s);
+        std::push_heap(heap.begin(), heap.end(), cmp);
+      }
+    }
+  }
+
+  if (order.size() != funcs.size())
+    return module.emitError("C++ emitter: module instance graph has a cycle");
+
+  for (unsigned idx : order) {
+    if (failed(emitFunc(funcs[idx], os)))
       return failure();
   }
 
   os << "} // namespace pyc::gen\n";
   return success();
+}
+
+LogicalResult emitCppFunc(ModuleOp module, func::FuncOp f, llvm::raw_ostream &os, const CppEmitterOptions &) {
+  (void)module;
+  return emitFunc(f, os);
 }
 
 } // namespace pyc

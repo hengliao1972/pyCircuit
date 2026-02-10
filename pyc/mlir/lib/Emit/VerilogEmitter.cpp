@@ -122,6 +122,22 @@ static std::string getPortName(func::FuncOp f, unsigned idx, bool isResult) {
   return sanitizeId(raw);
 }
 
+static void computeUniquePortNames(func::FuncOp f, std::vector<std::string> &inNames, std::vector<std::string> &outNames) {
+  NameTable nt;
+  inNames.clear();
+  outNames.clear();
+  inNames.reserve(f.getNumArguments());
+  outNames.reserve(f.getNumResults());
+
+  for (auto [i, arg] : llvm::enumerate(f.getArguments())) {
+    (void)arg;
+    inNames.push_back(nt.unique(getPortName(f, static_cast<unsigned>(i), /*isResult=*/false)));
+  }
+  for (unsigned i = 0; i < f.getNumResults(); ++i) {
+    outNames.push_back(nt.unique(getPortName(f, i, /*isResult=*/true)));
+  }
+}
+
 static LogicalResult emitComb(pyc::CombOp comb, raw_ostream &os, NameTable &nt) {
   if (comb.getBody().empty())
     return comb.emitError("pyc.comb must have a non-empty region");
@@ -518,6 +534,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
 
   // Collect top-level ops for netlist-friendly emission.
   llvm::SmallVector<Operation *> combAssignOps;
+  llvm::SmallVector<Operation *> instOps;
   llvm::SmallVector<Operation *> seqInstOps;
 
   for (Block &b : f.getBody()) {
@@ -541,6 +558,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
               pyc::OrOp,
               pyc::XorOp,
               pyc::NotOp,
+              pyc::AssertOp,
               pyc::AssignOp,
               pyc::CombOp,
               arith::SelectOp,
@@ -558,6 +576,10 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         combAssignOps.push_back(&op);
         continue;
       }
+      if (isa<pyc::InstanceOp>(op)) {
+        instOps.push_back(&op);
+        continue;
+      }
       if (isa<pyc::RegOp, pyc::FifoOp, pyc::ByteMemOp>(op)) {
         seqInstOps.push_back(&op);
         continue;
@@ -571,6 +593,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
   }
 
   auto cmp = [&](Operation *a, Operation *b) { return opSortKey(a, nt) < opSortKey(b, nt); };
+  std::sort(instOps.begin(), instOps.end(), cmp);
   std::sort(seqInstOps.begin(), seqInstOps.end(), cmp);
   llvm::SmallVector<Operation *> orderedComb;
   if (!topoSortCombOps(combAssignOps, nt, orderedComb))
@@ -650,6 +673,24 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
       }
       if (auto n = dyn_cast<pyc::NotOp>(op)) {
         os << "assign " << nt.get(n.getResult()) << " = (~" << nt.get(n.getIn()) << ");\n";
+        continue;
+      }
+      if (auto a = dyn_cast<pyc::AssertOp>(op)) {
+        std::string msg = "pyc.assert failed";
+        if (auto m = a.getMsgAttr())
+          msg = m.getValue().str();
+        std::string esc;
+        esc.reserve(msg.size());
+        for (char c : msg) {
+          if (c == '"' || c == '\\')
+            esc.push_back('\\');
+          esc.push_back(c);
+        }
+        os << "`ifndef SYNTHESIS\n";
+        os << "always @(*) begin\n";
+        os << "  if (!(" << nt.get(a.getCond()) << ")) $fatal(1, \"" << esc << "\");\n";
+        os << "end\n";
+        os << "`endif\n";
         continue;
       }
       if (auto a = dyn_cast<pyc::AssignOp>(op)) {
@@ -765,6 +806,55 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         continue;
       }
       return op->emitError("internal error: missing verilog emission handler");
+    }
+    os << "\n";
+  }
+
+  if (!instOps.empty()) {
+    os << "// --- Submodules\n";
+    ModuleOp mod = f->getParentOfType<ModuleOp>();
+    if (!mod)
+      return f.emitError("verilog emitter: missing parent module for instance resolution");
+    for (Operation *op : instOps) {
+      auto inst = dyn_cast<pyc::InstanceOp>(op);
+      if (!inst)
+        continue;
+
+      auto calleeAttr = op->getAttrOfType<FlatSymbolRefAttr>("callee");
+      if (!calleeAttr)
+        return inst.emitError("missing required FlatSymbolRefAttr `callee`");
+      auto callee = mod.lookupSymbol<func::FuncOp>(calleeAttr.getValue());
+      if (!callee)
+        return inst.emitError("callee symbol not found: ") << calleeAttr.getValue();
+
+      std::vector<std::string> inPorts;
+      std::vector<std::string> outPorts;
+      computeUniquePortNames(callee, inPorts, outPorts);
+      if (inPorts.size() != inst.getNumOperands())
+        return inst.emitError("operand count does not match callee signature");
+      if (outPorts.size() != inst.getNumResults())
+        return inst.emitError("result count does not match callee signature");
+
+      std::string instName = "inst";
+      if (auto nameAttr = op->getAttrOfType<StringAttr>("name"))
+        instName = sanitizeId(nameAttr.getValue());
+      instName = nt.unique(instName);
+
+      os << callee.getSymName() << " " << instName << " (\n";
+      unsigned totalPorts = static_cast<unsigned>(inPorts.size() + outPorts.size());
+      unsigned emitted = 0;
+
+      for (unsigned i = 0; i < inPorts.size(); ++i) {
+        os << "  ." << inPorts[i] << "(" << nt.get(inst.getOperand(i)) << ")";
+        emitted++;
+        os << ((emitted == totalPorts) ? "\n" : ",\n");
+      }
+      for (unsigned i = 0; i < outPorts.size(); ++i) {
+        os << "  ." << outPorts[i] << "(" << nt.get(inst.getResult(i)) << ")";
+        emitted++;
+        os << ((emitted == totalPorts) ? "\n" : ",\n");
+      }
+      os << ");\n";
     }
     os << "\n";
   }
@@ -951,6 +1041,9 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
 } // namespace
 
 LogicalResult emitVerilog(ModuleOp module, llvm::raw_ostream &os, const VerilogEmitterOptions &opts) {
+  if (opts.targetFpga) {
+    os << "`define PYC_TARGET_FPGA 1\n\n";
+  }
   if (opts.includePrimitives) {
     os << "`include \"pyc_reg.v\"\n";
     os << "`include \"pyc_fifo.v\"\n\n";
@@ -966,6 +1059,11 @@ LogicalResult emitVerilog(ModuleOp module, llvm::raw_ostream &os, const VerilogE
       return failure();
   }
   return success();
+}
+
+LogicalResult emitVerilogFunc(ModuleOp module, func::FuncOp f, llvm::raw_ostream &os, const VerilogEmitterOptions &opts) {
+  (void)module;
+  return emitFunc(f, os, opts);
 }
 
 } // namespace pyc

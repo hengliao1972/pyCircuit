@@ -55,17 +55,17 @@ assign pyc_and_4 = (a__wire_ops__L9 & b__wire_ops__L10);
 assign COMB__y__wire_ops__L16 = pyc_and_4;
 assign pyc_mux_5 = (sel__wire_ops__L11 ? COMB__y__wire_ops__L16 : COMB__y__wire_ops__L14);
 assign COMB__y__wire_ops__L15 = pyc_mux_5;
+assign y_reg__next = COMB__y__wire_ops__L15;
 assign pyc_comb_6 = pyc_constant_1;
 assign pyc_comb_7 = pyc_constant_2;
-assign pyc_comb_8 = COMB__y__wire_ops__L15;
-assign y_reg__next = pyc_comb_8;
+assign pyc_comb_8 = y_reg__next;
 
 // --- Sequential primitives
 pyc_reg #(.WIDTH(8)) pyc_reg_9_inst (
   .clk(sys_clk),
   .rst(sys_rst),
   .en(pyc_comb_7),
-  .d(y_reg__next),
+  .d(pyc_comb_8),
   .init(pyc_comb_6),
   .q(pyc_reg_9)
 );

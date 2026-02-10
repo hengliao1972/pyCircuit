@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Callable
 
 
@@ -23,6 +24,24 @@ class Module:
         self._indent_level = 1
         self._finalizers: list[Callable[[], None]] = []
         self._finalized = False
+        # Extra `func.func` attributes emitted by `emit_func_mlir()`.
+        # Values are stored as MLIR attribute literals (e.g. `"foo"`).
+        self._func_attrs: dict[str, str] = {}
+
+    def set_func_attr(self, key: str, value: str) -> None:
+        """Set a `func.func` attribute (string value).
+
+        This is intended for attaching debug/metadata attributes such as:
+        - `pyc.base = "Core"`
+        - `pyc.params = "{\"WIDTH\":32}"`
+        """
+        if self._finalized:
+            raise RuntimeError("cannot set func attributes after emit_mlir()")
+        k = str(key).strip()
+        if not k:
+            raise ValueError("func attribute key must be non-empty")
+        # MLIR string attributes use double quotes; reuse JSON escaping.
+        self._func_attrs[k] = json.dumps(str(value), ensure_ascii=False)
 
     # --- types ---
     def clock(self, name: str) -> Signal:
@@ -226,6 +245,49 @@ class Module:
         self._emit(f"{tmp} = pyc.concat ({op_list}) : ({ty_list}) -> {out_ty}")
         return Signal(ref=tmp, ty=out_ty)
 
+    def instance_op(self, callee: str, *inputs: Signal, result_types: list[str], name: str | None = None) -> list[Signal]:
+        """Instantiate a sub-module by symbol (pyc.instance).
+
+        `callee` is the referenced `func.func` symbol name.
+        """
+        callee = str(callee).strip()
+        if not callee:
+            raise ValueError("instance_op callee must be non-empty")
+
+        out: list[Signal] = []
+        for ty in result_types:
+            tmp = self._tmp()
+            out.append(Signal(ref=tmp, ty=str(ty)))
+
+        lhs = ""
+        if out:
+            if len(out) == 1:
+                lhs = f"{out[0].ref} = "
+            else:
+                lhs = f"{', '.join(s.ref for s in out)} = "
+
+        ops = ", ".join(s.ref for s in inputs)
+        attrs = f"{{callee = @{callee}"
+        if name is not None:
+            attrs += f', name = {json.dumps(str(name), ensure_ascii=False)}'
+        attrs += "}"
+
+        in_ty_sig = ", ".join(s.ty for s in inputs)
+        in_sig = f"({in_ty_sig})"
+        if len(out) == 0:
+            out_sig = "()"
+        elif len(out) == 1:
+            out_sig = out[0].ty
+        else:
+            out_ty_sig = ", ".join(s.ty for s in out)
+            out_sig = f"({out_ty_sig})"
+
+        if ops:
+            self._emit(f"{lhs}pyc.instance {ops} {attrs} : {in_sig} -> {out_sig}")
+        else:
+            self._emit(f"{lhs}pyc.instance {attrs} : {in_sig} -> {out_sig}")
+        return out
+
     def alias(self, a: Signal, *, name: str | None = None) -> Signal:
         """Alias a value (pure) to attach a debug name in codegen."""
         tmp = self._tmp()
@@ -247,6 +309,19 @@ class Module:
     def assign(self, dst: Signal, src: Signal) -> None:
         self._require_same_ty(dst, src, "assign")
         self._emit(f"pyc.assign {dst.ref}, {src.ref} : {dst.ty}")
+
+    def assert_(self, cond: Signal, *, msg: str | None = None) -> None:
+        """Simulation-only assertion (prototype)."""
+        if cond.ty != "i1":
+            raise TypeError("assert_ cond must be i1")
+        if msg is None:
+            self._emit(f"pyc.assert {cond.ref}")
+            return
+        s = str(msg)
+        if not s:
+            self._emit(f"pyc.assert {cond.ref}")
+            return
+        self._emit(f"pyc.assert {cond.ref} {{msg = {json.dumps(s, ensure_ascii=False)}}}")
 
     def reg(self, clk: Signal, rst: Signal, en: Signal, next_: Signal, init: Signal) -> Signal:
         if clk.ty != "!pyc.clock":
@@ -472,7 +547,7 @@ class Module:
         return Signal(ref=tmp, ty="index")
 
     # --- emission ---
-    def emit_mlir(self) -> str:
+    def emit_func_mlir(self) -> str:
         if not self._finalized:
             self._finalized = True
             for fn in list(self._finalizers):
@@ -491,18 +566,23 @@ class Module:
             ret_ty = ", ".join(res_types)
         in_names = ", ".join(f"\"{n}\"" for n, _ in self._args)
         out_names = ", ".join(f"\"{n}\"" for n, _ in self._results)
+        extra = ""
+        if self._func_attrs:
+            extra = ", " + ", ".join(f"{k} = {v}" for k, v in self._func_attrs.items())
         header = (
-            f"module {{\n"
             f"func.func @{self.name}({arg_sig}) {res_sig} "
-            f"attributes {{arg_names = [{in_names}], result_names = [{out_names}]}} {{\n"
+            f"attributes {{arg_names = [{in_names}], result_names = [{out_names}]{extra}}} {{\n"
         )
         body = "\n".join(self._lines)
         outs = ", ".join(v.ref for _, v in self._results)
         if outs:
-            tail = f"\n  func.return {outs} : {ret_ty}\n}}\n}}\n"
+            tail = f"\n  func.return {outs} : {ret_ty}\n}}\n"
         else:
-            tail = "\n  func.return\n}\n}\n"
+            tail = "\n  func.return\n}\n"
         return header + body + tail
+
+    def emit_mlir(self) -> str:
+        return "module {\n" + self.emit_func_mlir() + "}\n"
 
     # --- finalizers ---
     def add_finalizer(self, fn: Callable[[], None]) -> None:

@@ -64,6 +64,43 @@ All examples below live inside a standard MLIR `module { ... }` and use
 Backends use the `pyc.name` attribute (not `name`) to avoid conflicts with other
 ops that legitimately use a `name` attribute (e.g. memory instances).
 
+### 2.2.2 `pyc.instance` (hierarchical instantiation)
+
+`pyc.instance` instantiates another `func.func` hardware module while preserving
+module boundaries (for big designs / readable codegen):
+
+```mlir
+%out_valid, %out_data = pyc.instance %clk, %rst, %in_valid, %in_data, %out_ready
+  {callee = @Core__pdeadbeef, name = "core0"} : (!pyc.clock, !pyc.reset, i1, i32, i1) -> (i1, i32)
+```
+
+Attributes:
+
+- `callee`: `FlatSymbolRefAttr` (required) referencing a `func.func`
+- `name`: `StringAttr` (optional) instance name for codegen
+
+Verifier contract:
+
+- Operand count/types **must** match the callee’s function type inputs.
+- Result count/types **must** match the callee’s function type results.
+
+Backends emit named port connections using the callee’s `arg_names` /
+`result_names` attributes.
+
+### 2.2.3 `pyc.assert` (simulation-only assertion)
+
+`pyc.assert` is a simulation-only check that aborts when `cond` is false.
+Backends emit it under `ifndef SYNTHESIS` in Verilog, and as a runtime check in
+the C++ model.
+
+```mlir
+pyc.assert %ok {msg = "in_ready must not be asserted while full"} 
+```
+
+Attributes:
+
+- `msg`: `StringAttr` (optional) human-readable message
+
 ### 2.3 `pyc.wire` / `pyc.assign` (netlist backedges)
 
 The prototype includes a netlist-style “wire placeholder” + explicit driver:

@@ -16,6 +16,8 @@ SHT_REL = 9
 ET_REL = 1
 ET_EXEC = 2
 
+SHF_ALLOC = 0x2
+
 
 @dataclass(frozen=True)
 class Section:
@@ -144,7 +146,7 @@ def _apply_text_relocs(
     symtab: list[Symbol],
     section_addrs: dict[int, int],
 ) -> None:
-    # Handle relocations that target .text. In linx-test, only ADDTPC and BSTART.STD CALL need patching.
+    # Handle relocations that target .text.
     for sec in sections:
         if sec.sh_type not in (SHT_RELA, SHT_REL):
             continue
@@ -167,6 +169,7 @@ def _apply_text_relocs(
             r_offset = int(r_offset)
             r_info = int(r_info)
             sym_index = (r_info >> 32) & 0xFFFFFFFF
+            r_type = int(r_info & 0xFFFFFFFF)
 
             if sym_index < 0 or sym_index >= len(symtab):
                 raise ValueError(f"reloc @{r_offset:#x}: sym index out of range: {sym_index}")
@@ -179,37 +182,166 @@ def _apply_text_relocs(
             S = section_addrs[sym.st_shndx] + sym.st_value
             P = text_addr + r_offset
 
-            if r_offset + 4 > len(text):
+            if r_offset < 0 or r_offset >= len(text):
                 raise ValueError(f"reloc @{r_offset:#x}: out of bounds for .text size {len(text)}")
 
-            insn = int.from_bytes(text[r_offset : r_offset + 4], "little", signed=False)
+            def read_u16(off: int) -> int:
+                if off + 2 > len(text):
+                    raise ValueError(f"reloc @{r_offset:#x}: out of bounds u16 read at {off:#x} (.text size {len(text)})")
+                return int.from_bytes(text[off : off + 2], "little", signed=False)
 
-            # ADDTPC: mask=0x7f match=0x07, imm20 in bits[31:12]. Base is the current 4K page.
-            if (insn & 0x7F) == 0x07:
+            def write_u16(off: int, v: int) -> None:
+                if off + 2 > len(text):
+                    raise ValueError(f"reloc @{r_offset:#x}: out of bounds u16 write at {off:#x} (.text size {len(text)})")
+                text[off : off + 2] = int(v & 0xFFFF).to_bytes(2, "little", signed=False)
+
+            def read_u32(off: int) -> int:
+                if off + 4 > len(text):
+                    raise ValueError(f"reloc @{r_offset:#x}: out of bounds u32 read at {off:#x} (.text size {len(text)})")
+                return int.from_bytes(text[off : off + 4], "little", signed=False)
+
+            def write_u32(off: int, v: int) -> None:
+                if off + 4 > len(text):
+                    raise ValueError(f"reloc @{r_offset:#x}: out of bounds u32 write at {off:#x} (.text size {len(text)})")
+                text[off : off + 4] = int(v & 0xFFFF_FFFF).to_bytes(4, "little", signed=False)
+
+            def read_hl48(off: int) -> tuple[int, int]:
+                # 48-bit HL instruction: 16-bit prefix at off, 32-bit main at off+2.
+                prefix = read_u16(off)
+                main32 = read_u32(off + 2)
+                return prefix, main32
+
+            def write_hl48(off: int, prefix: int, main32: int) -> None:
+                write_u16(off, prefix)
+                write_u32(off + 2, main32)
+
+            def masked_eq(val: int, *, mask: int, match: int) -> bool:
+                return (val & mask) == match
+
+            # R_LINX_* PC-relative address materialization for `addtpc` + `addi`:
+            #   rd = (PC & ~0xFFF) + (sext(imm20) << 12)   // addtpc
+            #   rd = rd + uimm12                          // addi
+            #
+            # Split relocation scheme:
+            #   hi20 reloc patches imm20 (allows any S; low 12 handled by lo12 reloc)
+            #   lo12 reloc patches uimm12 (0..4095)
+            #
+            # This is analogous to RISC-V AUIPC/ADDI pairs, but with a page base.
+            if r_type == 15:
+                # ADDTPC hi20 (insn opcode 0x07, imm20 at bits[31:12]).
+                insn = read_u32(r_offset)
+                if (insn & 0x7F) != 0x07:
+                    raise ValueError(f"hi20 reloc @{r_offset:#x}: expected ADDTPC, got insn=0x{insn:08x}")
                 p_page = P & ~0xFFF
-                delta = (S + addend) - p_page
-                if (delta & 0xFFF) != 0:
-                    raise ValueError(f"ADDTPC reloc @{r_offset:#x}: delta {delta:#x} not 4K-aligned (S={S:#x} Ppage={p_page:#x})")
-                imm20 = delta >> 12
+                delta = int((S + addend) - p_page)
+                imm20 = delta >> 12  # arithmetic
                 imm20_bits = imm20 & ((1 << 20) - 1)
                 patched = (insn & ~(0xFFFFF << 12)) | (imm20_bits << 12)
-                text[r_offset : r_offset + 4] = int(patched).to_bytes(4, "little", signed=False)
+                write_u32(r_offset, patched)
                 continue
 
-            # BSTART.STD CALL: mask=0x7fff match=0x4001, simm17 in bits[31:15] (offset in halfwords).
-            if (insn & 0x7FFF) == 0x4001:
-                delta = (S + addend) - P
+            if r_type == 17:
+                # ADDI lo12 (mask=0x707f match=0x0015, uimm12 at bits[31:20]).
+                insn = read_u32(r_offset)
+                if (insn & 0x707F) != 0x0015:
+                    raise ValueError(f"lo12 reloc @{r_offset:#x}: expected ADDI, got insn=0x{insn:08x}")
+                p_page = P & ~0xFFF
+                delta = int((S + addend) - p_page)
+                uimm12 = delta & 0xFFF
+                patched = (insn & ~(0xFFF << 20)) | (uimm12 << 20)
+                write_u32(r_offset, patched)
+                continue
+
+            if r_type == 5:
+                # 48-bit HL.BSTART.STD.CALL relocation (PC-relative in halfwords).
+                prefix, main32 = read_hl48(r_offset)
+                insn48 = int(prefix) | (int(main32) << 16)
+                if not masked_eq(insn48, mask=0x00007FFF000F, match=0x00004001000E):
+                    raise ValueError(f"hl_bstart_call reloc @{r_offset:#x}: unexpected insn48=0x{insn48:012x}")
+                delta = int((S + addend) - P)
                 if (delta & 0x1) != 0:
                     raise ValueError(
-                        f"BSTART.STD reloc @{r_offset:#x}: delta {delta:#x} not 2-byte aligned (S={S:#x} P={P:#x})"
+                        f"hl_bstart_call reloc @{r_offset:#x}: delta {delta:#x} not 2-byte aligned (S={S:#x} P={P:#x})"
                     )
-                simm17 = delta >> 1
-                simm17_bits = simm17 & ((1 << 17) - 1)
-                patched = (insn & ~(((1 << 17) - 1) << 15)) | (simm17_bits << 15)
-                text[r_offset : r_offset + 4] = int(patched).to_bytes(4, "little", signed=False)
+                simm = delta >> 1
+                hi12 = (simm >> 17) & 0xFFF
+                lo17 = simm & 0x1FFFF
+                prefix = (prefix & ~(0xFFF << 4)) | (hi12 << 4)
+                main32 = (main32 & ~(0x1FFFF << 15)) | (lo17 << 15)
+                write_hl48(r_offset, prefix, main32)
                 continue
 
-            raise ValueError(f"unsupported relocation at .text+0x{r_offset:x}: insn=0x{insn:08x} sym={sym.name}")
+            if r_type == 20:
+                # 48-bit HL.LW.PCR relocation (PC-relative byte offset).
+                prefix, main32 = read_hl48(r_offset)
+                insn48 = int(prefix) | (int(main32) << 16)
+                # HL.<load>.PCR class match:
+                # - prefix low nibble 0xE
+                # - opcode 0x39
+                # Ignore funct3, which encodes access width/signedness.
+                if not masked_eq(insn48, mask=0x0000007F000F, match=0x00000039000E):
+                    raise ValueError(f"hl_lw_pcr reloc @{r_offset:#x}: unexpected insn48=0x{insn48:012x}")
+                delta = int((S + addend) - P)
+                simm = delta
+                hi12 = (simm >> 17) & 0xFFF
+                lo17 = simm & 0x1FFFF
+                prefix = (prefix & ~(0xFFF << 4)) | (hi12 << 4)
+                main32 = (main32 & ~(0x1FFFF << 15)) | (lo17 << 15)
+                write_hl48(r_offset, prefix, main32)
+                continue
+
+            if r_type == 21:
+                # 48-bit HL.SW.PCR relocation (PC-relative byte offset).
+                prefix, main32 = read_hl48(r_offset)
+                insn48 = int(prefix) | (int(main32) << 16)
+                # HL.<store>.PCR class match:
+                # - prefix low nibble 0xE
+                # - opcode 0x69
+                # Ignore funct3 (width).
+                if not masked_eq(insn48, mask=0x0000007F000F, match=0x00000069000E):
+                    raise ValueError(f"hl_sw_pcr reloc @{r_offset:#x}: unexpected insn48=0x{insn48:012x}")
+                delta = int((S + addend) - P)
+                simm = delta
+                hi12 = (simm >> 17) & 0xFFF
+                mid5 = (simm >> 12) & 0x1F
+                lo12 = simm & 0xFFF
+                prefix = (prefix & ~(0xFFF << 4)) | (hi12 << 4)
+                # packed bits[23:27] => main32 bits[7:11]
+                main32 = (main32 & ~(0x1F << 7)) | (mid5 << 7)
+                # packed bits[36:47] => main32 bits[20:31]
+                main32 = (main32 & ~(0xFFF << 20)) | (lo12 << 20)
+                write_hl48(r_offset, prefix, main32)
+                continue
+
+            # Legacy / bring-up support: BSTART.STD CALL in 32-bit form.
+            # mask=0x7fff match=0x4001, simm17 in bits[31:15] (offset in halfwords).
+            if r_offset + 4 <= len(text):
+                insn = read_u32(r_offset)
+                if (insn & 0x7FFF) == 0x4001:
+                    delta = int((S + addend) - P)
+                    if (delta & 0x1) != 0:
+                        raise ValueError(
+                            f"BSTART.STD reloc @{r_offset:#x}: delta {delta:#x} not 2-byte aligned (S={S:#x} P={P:#x})"
+                        )
+                    simm17 = delta >> 1
+                    simm17_bits = simm17 & ((1 << 17) - 1)
+                    patched = (insn & ~(((1 << 17) - 1) << 15)) | (simm17_bits << 15)
+                    write_u32(r_offset, patched)
+                    continue
+
+                # Legacy ADDTPC hi20 (when r_type is unknown).
+                if (insn & 0x7F) == 0x07:
+                    p_page = P & ~0xFFF
+                    delta = int((S + addend) - p_page)
+                    imm20 = delta >> 12
+                    imm20_bits = imm20 & ((1 << 20) - 1)
+                    patched = (insn & ~(0xFFFFF << 12)) | (imm20_bits << 12)
+                    write_u32(r_offset, patched)
+                    continue
+
+            raise ValueError(
+                f"unsupported relocation at .text+0x{r_offset:x}: type={r_type} sym={sym.name!r} shndx={sym.st_shndx}"
+            )
 
 
 def main() -> int:
@@ -221,6 +353,11 @@ def main() -> int:
     ap.add_argument("--page-align", default="0x1000", help="Alignment for section placement when ET_REL (hex)")
     ap.add_argument("--start-symbol", default="_start", help="Symbol to use as boot PC when emitting metadata (default: _start)")
     ap.add_argument("--print-start", action="store_true", help="Print resolved start PC (hex) to stdout")
+    ap.add_argument(
+        "--print-max",
+        action="store_true",
+        help="Print required max address (exclusive, hex) to stdout (after any --print-start line)",
+    )
     ns = ap.parse_args()
 
     path = Path(ns.elf)
@@ -250,16 +387,20 @@ def main() -> int:
         text_addr = _align_up(text_base, page_align)
         section_addrs[text_sec.index] = text_addr
 
-        data_addr = _align_up(data_base, page_align)
-        if data_sec is not None:
-            section_addrs[data_sec.index] = data_addr
-            data_addr_end = data_addr + data_sec.sh_size
-        else:
-            data_addr_end = data_addr
-
-        bss_addr = _align_up(data_addr_end, page_align)
-        if bss_sec is not None:
-            section_addrs[bss_sec.index] = bss_addr
+        # Place all remaining SHF_ALLOC sections into the "data" region.
+        # This includes .rodata*, .data, .bss, and any other alloc sections.
+        cur = _align_up(data_base, page_align)
+        for sec in sections:
+            if sec.index == text_sec.index:
+                continue
+            if sec.sh_size == 0:
+                continue
+            if (sec.sh_flags & SHF_ALLOC) == 0:
+                continue
+            align = int(sec.sh_addralign) if sec.sh_addralign else 1
+            cur = _align_up(cur, max(1, align))
+            section_addrs[sec.index] = cur
+            cur += int(sec.sh_size)
     elif e_type == ET_EXEC:
         for sec in sections:
             if sec.sh_addr != 0 and sec.sh_size != 0 and sec.name:
@@ -281,12 +422,26 @@ def main() -> int:
 
     segments: list[tuple[int, bytes]] = [(text_addr, bytes(text_bytes))]
 
-    if data_sec is not None:
-        segments.append((section_addrs[data_sec.index], data[data_sec.sh_offset : data_sec.sh_offset + data_sec.sh_size]))
-    if bss_sec is not None:
-        segments.append((section_addrs[bss_sec.index], bytes([0] * bss_sec.sh_size)))
+    # Emit all remaining allocated sections (data/rodata/bss/etc).
+    for sec in sections:
+        if sec.index == text_sec.index:
+            continue
+        if sec.index not in section_addrs:
+            continue
+        if sec.sh_size == 0:
+            continue
+        if (sec.sh_flags & SHF_ALLOC) == 0:
+            continue
+        if sec.sh_type == SHT_NOBITS:
+            segments.append((section_addrs[sec.index], bytes([0] * sec.sh_size)))
+        else:
+            segments.append((section_addrs[sec.index], data[sec.sh_offset : sec.sh_offset + sec.sh_size]))
 
     segments.sort(key=lambda x: x[0])
+
+    max_end = 0
+    for addr, blob in segments:
+        max_end = max(max_end, int(addr) + len(blob))
 
     out_lines: list[str] = []
     for addr, blob in segments:
@@ -321,6 +476,9 @@ def main() -> int:
             raise SystemExit(f"error: start symbol {start_sym!r} not found")
 
         print(f"0x{start_pc:x}")
+
+    if ns.print_max:
+        print(f"0x{max_end:x}")
     return 0
 
 

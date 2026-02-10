@@ -39,22 +39,24 @@ wire [7:0] lo8__jit_pipeline_vec__L30; // pyc.name="lo8__jit_pipeline_vec__L30"
 wire [15:0] pyc_add_3; // op=pyc.add
 wire pyc_comb_10; // op=pyc.comb
 wire [24:0] pyc_comb_11; // op=pyc.comb
-wire [7:0] pyc_comb_18; // op=pyc.comb
-wire [15:0] pyc_comb_19; // op=pyc.comb
-wire pyc_comb_20; // op=pyc.comb
+wire [24:0] pyc_comb_13; // op=pyc.comb
+wire [24:0] pyc_comb_15; // op=pyc.comb
+wire [7:0] pyc_comb_20; // op=pyc.comb
+wire [15:0] pyc_comb_21; // op=pyc.comb
+wire pyc_comb_22; // op=pyc.comb
 wire [24:0] pyc_comb_9; // op=pyc.comb
 wire [24:0] pyc_concat_8; // op=pyc.concat
 wire [24:0] pyc_constant_1; // op=pyc.constant
 wire pyc_constant_2; // op=pyc.constant
 wire pyc_eq_6; // op=pyc.eq
-wire [7:0] pyc_extract_15; // op=pyc.extract
-wire [15:0] pyc_extract_16; // op=pyc.extract
-wire pyc_extract_17; // op=pyc.extract
+wire [7:0] pyc_extract_17; // op=pyc.extract
+wire [15:0] pyc_extract_18; // op=pyc.extract
+wire pyc_extract_19; // op=pyc.extract
 wire [7:0] pyc_extract_7; // op=pyc.extract
 wire [15:0] pyc_mux_5; // op=pyc.mux
 wire [24:0] pyc_reg_12; // op=pyc.reg
-wire [24:0] pyc_reg_13; // op=pyc.reg
 wire [24:0] pyc_reg_14; // op=pyc.reg
+wire [24:0] pyc_reg_16; // op=pyc.reg
 wire [15:0] pyc_xor_4; // op=pyc.xor
 wire sel__jit_pipeline_vec__L21; // pyc.name="sel__jit_pipeline_vec__L21"
 wire [15:0] sum___jit_pipeline_vec__L24; // pyc.name="sum___jit_pipeline_vec__L24"
@@ -63,17 +65,19 @@ wire [15:0] x__jit_pipeline_vec__L25; // pyc.name="x__jit_pipeline_vec__L25"
 
 // --- Combinational (netlist)
 assign PIPE0__bus_s0 = pyc_reg_12;
-assign PIPE1__bus_s1 = pyc_reg_13;
 assign PIPE1__bus_s1__next = PIPE0__bus_s0;
-assign PIPE2__bus_s2 = pyc_reg_14;
+assign pyc_comb_13 = PIPE1__bus_s1__next;
+assign PIPE1__bus_s1 = pyc_reg_14;
 assign PIPE2__bus_s2__next = PIPE1__bus_s1;
+assign pyc_comb_15 = PIPE2__bus_s2__next;
+assign PIPE2__bus_s2 = pyc_reg_16;
 assign bus__jit_pipeline_vec__L35 = PIPE2__bus_s2;
-assign pyc_extract_15 = bus__jit_pipeline_vec__L35[7:0];
-assign pyc_extract_16 = bus__jit_pipeline_vec__L35[23:8];
-assign pyc_extract_17 = bus__jit_pipeline_vec__L35[24];
-assign pyc_comb_18 = pyc_extract_15;
-assign pyc_comb_19 = pyc_extract_16;
+assign pyc_extract_17 = bus__jit_pipeline_vec__L35[7:0];
+assign pyc_extract_18 = bus__jit_pipeline_vec__L35[23:8];
+assign pyc_extract_19 = bus__jit_pipeline_vec__L35[24];
 assign pyc_comb_20 = pyc_extract_17;
+assign pyc_comb_21 = pyc_extract_18;
+assign pyc_comb_22 = pyc_extract_19;
 assign pyc_constant_1 = 25'd0;
 assign pyc_constant_2 = 1'd1;
 assign a__jit_pipeline_vec__L19 = a;
@@ -93,40 +97,40 @@ assign pyc_extract_7 = data__jit_pipeline_vec__L27[7:0];
 assign lo8__jit_pipeline_vec__L30 = pyc_extract_7;
 assign pyc_concat_8 = {tag__jit_pipeline_vec__L29, data__jit_pipeline_vec__L27, lo8__jit_pipeline_vec__L30};
 assign bus__jit_pipeline_vec__L33 = pyc_concat_8;
+assign PIPE0__bus_s0__next = bus__jit_pipeline_vec__L33;
 assign pyc_comb_9 = pyc_constant_1;
 assign pyc_comb_10 = pyc_constant_2;
-assign pyc_comb_11 = bus__jit_pipeline_vec__L33;
-assign PIPE0__bus_s0__next = pyc_comb_11;
+assign pyc_comb_11 = PIPE0__bus_s0__next;
 
 // --- Sequential primitives
 pyc_reg #(.WIDTH(25)) pyc_reg_12_inst (
   .clk(sys_clk),
   .rst(sys_rst),
   .en(pyc_comb_10),
-  .d(PIPE0__bus_s0__next),
+  .d(pyc_comb_11),
   .init(pyc_comb_9),
   .q(pyc_reg_12)
-);
-pyc_reg #(.WIDTH(25)) pyc_reg_13_inst (
-  .clk(sys_clk),
-  .rst(sys_rst),
-  .en(pyc_comb_10),
-  .d(PIPE1__bus_s1__next),
-  .init(pyc_comb_9),
-  .q(pyc_reg_13)
 );
 pyc_reg #(.WIDTH(25)) pyc_reg_14_inst (
   .clk(sys_clk),
   .rst(sys_rst),
   .en(pyc_comb_10),
-  .d(PIPE2__bus_s2__next),
+  .d(pyc_comb_13),
   .init(pyc_comb_9),
   .q(pyc_reg_14)
 );
+pyc_reg #(.WIDTH(25)) pyc_reg_16_inst (
+  .clk(sys_clk),
+  .rst(sys_rst),
+  .en(pyc_comb_10),
+  .d(pyc_comb_15),
+  .init(pyc_comb_9),
+  .q(pyc_reg_16)
+);
 
-assign tag = pyc_comb_20;
-assign data = pyc_comb_19;
-assign lo8 = pyc_comb_18;
+assign tag = pyc_comb_22;
+assign data = pyc_comb_21;
+assign lo8 = pyc_comb_20;
 
 endmodule
 

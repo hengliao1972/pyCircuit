@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 __all__ = [
-    # Legacy API
     "Bundle",
     "Circuit",
     "ClockDomain",
+    "Design",
+    "DesignError",
     "JitError",
     "Module",
     "Pop",
     "Queue",
     "Reg",
     "Signal",
+    "Tb",
+    "TbError",
     "Vec",
     "Wire",
     "cat",
+    "compile_design",
     "jit_inline",
     "jit_compile",
     # Cycle-Aware API
@@ -30,13 +34,22 @@ __all__ = [
     "ca_bundle",
     "mux",
     "compile_cycle_aware",
+    "module",
+    "sva",
 ]
 
+from .design import Design, DesignError, module
 from .dsl import Module, Signal
 from .hw import (
     Bundle,
     Circuit,
     ClockDomain,
+    Pop,
+    Queue,
+    Reg,
+    Vec,
+    Wire,
+    cat,
     CycleAwareBundle,
     CycleAwareByteMem,
     CycleAwareCircuit,
@@ -45,20 +58,16 @@ from .hw import (
     CycleAwarePop,
     CycleAwareQueue,
     CycleAwareSignal,
-    Pop,
-    Queue,
-    Reg,
     SignalFactory,
-    Vec,
-    Wire,
     ca_bundle,
     ca_cat,
-    cat,
     mux,
 )
+from .tb import Tb, TbError, sva
 from .jit import (
     JitError,
     compile as jit_compile,
     compile_cycle_aware,
+    compile_design,
     jit_inline,
 )

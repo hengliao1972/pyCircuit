@@ -37,24 +37,24 @@ wire q__out_ready; // pyc.name="q__out_ready"
 
 // --- Combinational (netlist)
 assign in_valid__fifo_loopback__L10 = in_valid;
+assign q__in_valid = in_valid__fifo_loopback__L10;
 assign in_data__fifo_loopback__L11 = in_data;
+assign q__in_data = in_data__fifo_loopback__L11;
 assign out_ready__fifo_loopback__L12 = out_ready;
-assign pyc_comb_1 = in_valid__fifo_loopback__L10;
-assign pyc_comb_2 = in_data__fifo_loopback__L11;
-assign pyc_comb_3 = out_ready__fifo_loopback__L12;
-assign q__in_data = pyc_comb_2;
-assign q__in_valid = pyc_comb_1;
-assign q__out_ready = pyc_comb_3;
+assign q__out_ready = out_ready__fifo_loopback__L12;
+assign pyc_comb_1 = q__in_valid;
+assign pyc_comb_2 = q__in_data;
+assign pyc_comb_3 = q__out_ready;
 
 // --- Sequential primitives
 pyc_fifo #(.WIDTH(8), .DEPTH(2)) pyc_fifo_4_inst (
   .clk(clk),
   .rst(rst),
-  .in_valid(q__in_valid),
+  .in_valid(pyc_comb_1),
   .in_ready(pyc_fifo_4),
-  .in_data(q__in_data),
+  .in_data(pyc_comb_2),
   .out_valid(pyc_fifo_5),
-  .out_ready(q__out_ready),
+  .out_ready(pyc_comb_3),
   .out_data(pyc_fifo_6)
 );
 

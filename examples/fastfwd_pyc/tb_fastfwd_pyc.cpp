@@ -2,9 +2,11 @@
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -19,8 +21,106 @@ using pyc::cpp::Wire;
 
 namespace {
 
-constexpr int kEngPerLane = 2; // Must match examples/fastfwd_pyc/fastfwd_pyc.py default.
-constexpr int kTotalEng = 4 * kEngPerLane;
+#ifndef FASTFWD_TOTAL_ENG
+#define FASTFWD_TOTAL_ENG 4
+#endif
+
+static_assert(FASTFWD_TOTAL_ENG > 0 && FASTFWD_TOTAL_ENG <= 32, "FASTFWD_TOTAL_ENG must be 1..32");
+static_assert((FASTFWD_TOTAL_ENG % 4) == 0, "FASTFWD_TOTAL_ENG must be a multiple of 4");
+
+constexpr int kTotalEng = FASTFWD_TOTAL_ENG;
+constexpr int kEngPerLane = kTotalEng / 4;
+
+#define FASTFWD_CASE_FWD(E, SUFFIX)                                                                                   \
+  case E:                                                                                                             \
+    return d.fwd##E##SUFFIX
+
+#define FASTFWD_CASE_FWDED(E, SUFFIX)                                                                                 \
+  case E:                                                                                                             \
+    return d.fwded##E##SUFFIX
+
+#define FASTFWD_CASE_ENG(E, SUFFIX)                                                                                   \
+  case E:                                                                                                             \
+    return d.eng##E##SUFFIX
+
+class KonataLog {
+public:
+  bool open(const std::filesystem::path &path, std::uint64_t startCycle) {
+    out_.open(path, std::ios::out | std::ios::trunc);
+    if (!out_.is_open())
+      return false;
+    out_ << "Kanata\t0004\n";
+    out_ << "C=\t" << startCycle << "\n";
+    cur_cycle_ = startCycle;
+    opened_ = true;
+    return true;
+  }
+
+  bool isOpen() const { return opened_ && out_.is_open(); }
+
+  void atCycle(std::uint64_t cycle) {
+    if (!isOpen())
+      return;
+    if (cycle < cur_cycle_) {
+      // Konata time must be monotonic; ignore out-of-order writes.
+      return;
+    }
+    if (cycle == cur_cycle_)
+      return;
+    out_ << "C\t" << (cycle - cur_cycle_) << "\n";
+    cur_cycle_ = cycle;
+  }
+
+  void insn(std::uint64_t fileId, std::uint64_t simId, std::uint64_t threadId) {
+    if (!isOpen())
+      return;
+    out_ << "I\t" << fileId << "\t" << simId << "\t" << threadId << "\n";
+  }
+
+  void label(std::uint64_t id, int type, const std::string &text) {
+    if (!isOpen())
+      return;
+    out_ << "L\t" << id << "\t" << type << "\t" << sanitizeText(text) << "\n";
+  }
+
+  void stageStart(std::uint64_t id, int laneId, const std::string &stage) {
+    if (!isOpen())
+      return;
+    out_ << "S\t" << id << "\t" << laneId << "\t" << stage << "\n";
+  }
+
+  void stageEnd(std::uint64_t id, int laneId, const std::string &stage) {
+    if (!isOpen())
+      return;
+    out_ << "E\t" << id << "\t" << laneId << "\t" << stage << "\n";
+  }
+
+  void retire(std::uint64_t id, std::uint64_t retireId, int type) {
+    if (!isOpen())
+      return;
+    out_ << "R\t" << id << "\t" << retireId << "\t" << type << "\n";
+  }
+
+  void dep(std::uint64_t consumerId, std::uint64_t producerId, int type) {
+    if (!isOpen())
+      return;
+    out_ << "W\t" << consumerId << "\t" << producerId << "\t" << type << "\n";
+  }
+
+private:
+  static std::string sanitizeText(const std::string &s) {
+    std::string out = s;
+    for (char &c : out) {
+      if (c == '\t' || c == '\n' || c == '\r')
+        c = ' ';
+    }
+    return out;
+  }
+
+  std::ofstream out_{};
+  bool opened_ = false;
+  std::uint64_t cur_cycle_ = 0;
+};
 
 static Wire<1> &lanePktInVld(pyc::gen::FastFwd &d, int lane) {
   switch (lane) {
@@ -104,22 +204,102 @@ static Wire<128> &lanePktOutData(pyc::gen::FastFwd &d, int lane) {
 
 static Wire<1> &fwdPktVld(pyc::gen::FastFwd &d, int e) {
   switch (e) {
-  case 0:
-    return d.fwd0_pkt_data_vld;
-  case 1:
-    return d.fwd1_pkt_data_vld;
-  case 2:
-    return d.fwd2_pkt_data_vld;
-  case 3:
-    return d.fwd3_pkt_data_vld;
-  case 4:
-    return d.fwd4_pkt_data_vld;
-  case 5:
-    return d.fwd5_pkt_data_vld;
-  case 6:
-    return d.fwd6_pkt_data_vld;
-  case 7:
-    return d.fwd7_pkt_data_vld;
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_FWD(0, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_FWD(1, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_FWD(2, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_FWD(3, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_FWD(4, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_FWD(5, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_FWD(6, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_FWD(7, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_FWD(8, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_FWD(9, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_FWD(10, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_FWD(11, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_FWD(12, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_FWD(13, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_FWD(14, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_FWD(15, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_FWD(16, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_FWD(17, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_FWD(18, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_FWD(19, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_FWD(20, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_FWD(21, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_FWD(22, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_FWD(23, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_FWD(24, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_FWD(25, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_FWD(26, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_FWD(27, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_FWD(28, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_FWD(29, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_FWD(30, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_FWD(31, _pkt_data_vld);
+#endif
   default:
     std::cerr << "ERROR: invalid engine index: " << e << "\n";
     std::exit(2);
@@ -128,22 +308,102 @@ static Wire<1> &fwdPktVld(pyc::gen::FastFwd &d, int e) {
 
 static Wire<128> &fwdPktData(pyc::gen::FastFwd &d, int e) {
   switch (e) {
-  case 0:
-    return d.fwd0_pkt_data;
-  case 1:
-    return d.fwd1_pkt_data;
-  case 2:
-    return d.fwd2_pkt_data;
-  case 3:
-    return d.fwd3_pkt_data;
-  case 4:
-    return d.fwd4_pkt_data;
-  case 5:
-    return d.fwd5_pkt_data;
-  case 6:
-    return d.fwd6_pkt_data;
-  case 7:
-    return d.fwd7_pkt_data;
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_FWD(0, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_FWD(1, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_FWD(2, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_FWD(3, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_FWD(4, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_FWD(5, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_FWD(6, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_FWD(7, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_FWD(8, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_FWD(9, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_FWD(10, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_FWD(11, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_FWD(12, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_FWD(13, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_FWD(14, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_FWD(15, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_FWD(16, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_FWD(17, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_FWD(18, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_FWD(19, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_FWD(20, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_FWD(21, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_FWD(22, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_FWD(23, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_FWD(24, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_FWD(25, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_FWD(26, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_FWD(27, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_FWD(28, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_FWD(29, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_FWD(30, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_FWD(31, _pkt_data);
+#endif
   default:
     std::cerr << "ERROR: invalid engine index: " << e << "\n";
     std::exit(2);
@@ -152,22 +412,102 @@ static Wire<128> &fwdPktData(pyc::gen::FastFwd &d, int e) {
 
 static Wire<2> &fwdPktLat(pyc::gen::FastFwd &d, int e) {
   switch (e) {
-  case 0:
-    return d.fwd0_pkt_lat;
-  case 1:
-    return d.fwd1_pkt_lat;
-  case 2:
-    return d.fwd2_pkt_lat;
-  case 3:
-    return d.fwd3_pkt_lat;
-  case 4:
-    return d.fwd4_pkt_lat;
-  case 5:
-    return d.fwd5_pkt_lat;
-  case 6:
-    return d.fwd6_pkt_lat;
-  case 7:
-    return d.fwd7_pkt_lat;
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_FWD(0, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_FWD(1, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_FWD(2, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_FWD(3, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_FWD(4, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_FWD(5, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_FWD(6, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_FWD(7, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_FWD(8, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_FWD(9, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_FWD(10, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_FWD(11, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_FWD(12, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_FWD(13, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_FWD(14, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_FWD(15, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_FWD(16, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_FWD(17, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_FWD(18, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_FWD(19, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_FWD(20, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_FWD(21, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_FWD(22, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_FWD(23, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_FWD(24, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_FWD(25, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_FWD(26, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_FWD(27, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_FWD(28, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_FWD(29, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_FWD(30, _pkt_lat);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_FWD(31, _pkt_lat);
+#endif
   default:
     std::cerr << "ERROR: invalid engine index: " << e << "\n";
     std::exit(2);
@@ -176,22 +516,102 @@ static Wire<2> &fwdPktLat(pyc::gen::FastFwd &d, int e) {
 
 static Wire<1> &fwdPktDpVld(pyc::gen::FastFwd &d, int e) {
   switch (e) {
-  case 0:
-    return d.fwd0_pkt_dp_vld;
-  case 1:
-    return d.fwd1_pkt_dp_vld;
-  case 2:
-    return d.fwd2_pkt_dp_vld;
-  case 3:
-    return d.fwd3_pkt_dp_vld;
-  case 4:
-    return d.fwd4_pkt_dp_vld;
-  case 5:
-    return d.fwd5_pkt_dp_vld;
-  case 6:
-    return d.fwd6_pkt_dp_vld;
-  case 7:
-    return d.fwd7_pkt_dp_vld;
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_FWD(0, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_FWD(1, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_FWD(2, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_FWD(3, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_FWD(4, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_FWD(5, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_FWD(6, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_FWD(7, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_FWD(8, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_FWD(9, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_FWD(10, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_FWD(11, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_FWD(12, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_FWD(13, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_FWD(14, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_FWD(15, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_FWD(16, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_FWD(17, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_FWD(18, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_FWD(19, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_FWD(20, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_FWD(21, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_FWD(22, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_FWD(23, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_FWD(24, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_FWD(25, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_FWD(26, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_FWD(27, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_FWD(28, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_FWD(29, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_FWD(30, _pkt_dp_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_FWD(31, _pkt_dp_vld);
+#endif
   default:
     std::cerr << "ERROR: invalid engine index: " << e << "\n";
     std::exit(2);
@@ -200,22 +620,102 @@ static Wire<1> &fwdPktDpVld(pyc::gen::FastFwd &d, int e) {
 
 static Wire<128> &fwdPktDpData(pyc::gen::FastFwd &d, int e) {
   switch (e) {
-  case 0:
-    return d.fwd0_pkt_dp_data;
-  case 1:
-    return d.fwd1_pkt_dp_data;
-  case 2:
-    return d.fwd2_pkt_dp_data;
-  case 3:
-    return d.fwd3_pkt_dp_data;
-  case 4:
-    return d.fwd4_pkt_dp_data;
-  case 5:
-    return d.fwd5_pkt_dp_data;
-  case 6:
-    return d.fwd6_pkt_dp_data;
-  case 7:
-    return d.fwd7_pkt_dp_data;
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_FWD(0, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_FWD(1, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_FWD(2, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_FWD(3, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_FWD(4, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_FWD(5, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_FWD(6, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_FWD(7, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_FWD(8, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_FWD(9, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_FWD(10, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_FWD(11, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_FWD(12, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_FWD(13, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_FWD(14, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_FWD(15, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_FWD(16, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_FWD(17, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_FWD(18, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_FWD(19, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_FWD(20, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_FWD(21, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_FWD(22, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_FWD(23, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_FWD(24, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_FWD(25, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_FWD(26, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_FWD(27, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_FWD(28, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_FWD(29, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_FWD(30, _pkt_dp_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_FWD(31, _pkt_dp_data);
+#endif
   default:
     std::cerr << "ERROR: invalid engine index: " << e << "\n";
     std::exit(2);
@@ -224,22 +724,102 @@ static Wire<128> &fwdPktDpData(pyc::gen::FastFwd &d, int e) {
 
 static Wire<1> &fwdedPktVld(pyc::gen::FastFwd &d, int e) {
   switch (e) {
-  case 0:
-    return d.fwded0_pkt_data_vld;
-  case 1:
-    return d.fwded1_pkt_data_vld;
-  case 2:
-    return d.fwded2_pkt_data_vld;
-  case 3:
-    return d.fwded3_pkt_data_vld;
-  case 4:
-    return d.fwded4_pkt_data_vld;
-  case 5:
-    return d.fwded5_pkt_data_vld;
-  case 6:
-    return d.fwded6_pkt_data_vld;
-  case 7:
-    return d.fwded7_pkt_data_vld;
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_FWDED(0, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_FWDED(1, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_FWDED(2, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_FWDED(3, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_FWDED(4, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_FWDED(5, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_FWDED(6, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_FWDED(7, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_FWDED(8, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_FWDED(9, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_FWDED(10, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_FWDED(11, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_FWDED(12, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_FWDED(13, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_FWDED(14, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_FWDED(15, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_FWDED(16, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_FWDED(17, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_FWDED(18, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_FWDED(19, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_FWDED(20, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_FWDED(21, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_FWDED(22, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_FWDED(23, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_FWDED(24, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_FWDED(25, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_FWDED(26, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_FWDED(27, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_FWDED(28, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_FWDED(29, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_FWDED(30, _pkt_data_vld);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_FWDED(31, _pkt_data_vld);
+#endif
   default:
     std::cerr << "ERROR: invalid engine index: " << e << "\n";
     std::exit(2);
@@ -248,22 +828,1142 @@ static Wire<1> &fwdedPktVld(pyc::gen::FastFwd &d, int e) {
 
 static Wire<128> &fwdedPktData(pyc::gen::FastFwd &d, int e) {
   switch (e) {
-  case 0:
-    return d.fwded0_pkt_data;
-  case 1:
-    return d.fwded1_pkt_data;
-  case 2:
-    return d.fwded2_pkt_data;
-  case 3:
-    return d.fwded3_pkt_data;
-  case 4:
-    return d.fwded4_pkt_data;
-  case 5:
-    return d.fwded5_pkt_data;
-  case 6:
-    return d.fwded6_pkt_data;
-  case 7:
-    return d.fwded7_pkt_data;
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_FWDED(0, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_FWDED(1, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_FWDED(2, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_FWDED(3, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_FWDED(4, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_FWDED(5, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_FWDED(6, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_FWDED(7, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_FWDED(8, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_FWDED(9, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_FWDED(10, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_FWDED(11, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_FWDED(12, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_FWDED(13, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_FWDED(14, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_FWDED(15, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_FWDED(16, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_FWDED(17, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_FWDED(18, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_FWDED(19, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_FWDED(20, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_FWDED(21, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_FWDED(22, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_FWDED(23, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_FWDED(24, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_FWDED(25, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_FWDED(26, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_FWDED(27, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_FWDED(28, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_FWDED(29, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_FWDED(30, _pkt_data);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_FWDED(31, _pkt_data);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static Wire<1> &engPipeV0(pyc::gen::FastFwd &d, int e) {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_v0);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_v0);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static Wire<1> &engPipeV1(pyc::gen::FastFwd &d, int e) {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_v1);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_v1);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static Wire<1> &engPipeV2(pyc::gen::FastFwd &d, int e) {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_v2);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_v2);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static Wire<1> &engPipeV3(pyc::gen::FastFwd &d, int e) {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_v3);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_v3);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static Wire<1> &engPipeV4(pyc::gen::FastFwd &d, int e) {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_v4);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_v4);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static auto engPipeSeq0(pyc::gen::FastFwd &d, int e) -> decltype(d.eng0__pipe_seq0) & {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_seq0);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_seq0);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static auto engPipeSeq1(pyc::gen::FastFwd &d, int e) -> decltype(d.eng0__pipe_seq1) & {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_seq1);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_seq1);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static auto engPipeSeq2(pyc::gen::FastFwd &d, int e) -> decltype(d.eng0__pipe_seq2) & {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_seq2);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_seq2);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static auto engPipeSeq3(pyc::gen::FastFwd &d, int e) -> decltype(d.eng0__pipe_seq3) & {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_seq3);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_seq3);
+#endif
+  default:
+    std::cerr << "ERROR: invalid engine index: " << e << "\n";
+    std::exit(2);
+  }
+}
+
+static auto engPipeSeq4(pyc::gen::FastFwd &d, int e) -> decltype(d.eng0__pipe_seq4) & {
+  switch (e) {
+#if FASTFWD_TOTAL_ENG > 0
+    FASTFWD_CASE_ENG(0, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 1
+    FASTFWD_CASE_ENG(1, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 2
+    FASTFWD_CASE_ENG(2, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 3
+    FASTFWD_CASE_ENG(3, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 4
+    FASTFWD_CASE_ENG(4, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 5
+    FASTFWD_CASE_ENG(5, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 6
+    FASTFWD_CASE_ENG(6, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 7
+    FASTFWD_CASE_ENG(7, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 8
+    FASTFWD_CASE_ENG(8, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 9
+    FASTFWD_CASE_ENG(9, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 10
+    FASTFWD_CASE_ENG(10, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 11
+    FASTFWD_CASE_ENG(11, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 12
+    FASTFWD_CASE_ENG(12, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 13
+    FASTFWD_CASE_ENG(13, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 14
+    FASTFWD_CASE_ENG(14, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 15
+    FASTFWD_CASE_ENG(15, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 16
+    FASTFWD_CASE_ENG(16, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 17
+    FASTFWD_CASE_ENG(17, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 18
+    FASTFWD_CASE_ENG(18, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 19
+    FASTFWD_CASE_ENG(19, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 20
+    FASTFWD_CASE_ENG(20, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 21
+    FASTFWD_CASE_ENG(21, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 22
+    FASTFWD_CASE_ENG(22, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 23
+    FASTFWD_CASE_ENG(23, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 24
+    FASTFWD_CASE_ENG(24, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 25
+    FASTFWD_CASE_ENG(25, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 26
+    FASTFWD_CASE_ENG(26, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 27
+    FASTFWD_CASE_ENG(27, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 28
+    FASTFWD_CASE_ENG(28, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 29
+    FASTFWD_CASE_ENG(29, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 30
+    FASTFWD_CASE_ENG(30, __pipe_seq4);
+#endif
+#if FASTFWD_TOTAL_ENG > 31
+    FASTFWD_CASE_ENG(31, __pipe_seq4);
+#endif
   default:
     std::cerr << "ERROR: invalid engine index: " << e << "\n";
     std::exit(2);
@@ -334,50 +2034,140 @@ private:
 
 static std::uint64_t parseU64(const char *s) { return static_cast<std::uint64_t>(std::stoull(std::string(s), nullptr, 0)); }
 
-static int runFastFwd(std::uint64_t seed, std::uint64_t maxCycles, std::uint64_t maxPackets, double pMed, double pHeavy) {
+static std::string hexU64(std::uint64_t v, int nibbles) {
+  std::ostringstream oss;
+  oss << std::hex << std::setfill('0') << std::setw(nibbles) << v;
+  return oss.str();
+}
+
+static std::string hex128(Wire<128> v) {
+  std::ostringstream oss;
+  oss << std::hex << std::setfill('0') << std::setw(16) << v.word(1) << std::setw(16) << v.word(0);
+  return oss.str();
+}
+
+static Wire<128> parseHex128(std::string s) {
+  if (s.rfind("0x", 0) == 0 || s.rfind("0X", 0) == 0)
+    s = s.substr(2);
+  if (s.size() > 32) {
+    std::cerr << "ERROR: hex128 literal too wide: " << s << "\n";
+    std::exit(2);
+  }
+  if (s.empty())
+    return Wire<128>(0);
+  if (s.size() < 32)
+    s = std::string(32 - s.size(), '0') + s;
+  const std::string hi_s = s.substr(0, 16);
+  const std::string lo_s = s.substr(16, 16);
+  std::uint64_t hi = static_cast<std::uint64_t>(std::stoull(hi_s, nullptr, 16));
+  std::uint64_t lo = static_cast<std::uint64_t>(std::stoull(lo_s, nullptr, 16));
+  return Wire<128>({lo, hi});
+}
+
+static std::uint64_t parseHexU64(std::string s) {
+  if (s.rfind("0x", 0) == 0 || s.rfind("0X", 0) == 0)
+    s = s.substr(2);
+  if (s.empty())
+    return 0;
+  return static_cast<std::uint64_t>(std::stoull(s, nullptr, 16));
+}
+
+static int runFastFwd(
+    std::uint64_t seed,
+    std::uint64_t maxCycles,
+    std::uint64_t maxPackets,
+    double pMed,
+    double pHeavy,
+    const std::string &stimPath,
+    const std::string &stimOutPath,
+    const std::string &outTracePath) {
   pyc::gen::FastFwd dut{};
   Testbench<pyc::gen::FastFwd> tb(dut);
 
   const bool trace_log = (std::getenv("PYC_TRACE") != nullptr);
   const bool trace_vcd = (std::getenv("PYC_VCD") != nullptr);
-  if (trace_log || trace_vcd) {
-    const char *trace_dir_env = std::getenv("PYC_TRACE_DIR");
-    std::filesystem::path out_dir =
-        trace_dir_env ? std::filesystem::path(trace_dir_env) : std::filesystem::path("examples/generated/fastfwd_pyc");
+  const bool trace_konata = (std::getenv("PYC_KONATA") != nullptr);
+
+  const char *trace_dir_env = std::getenv("PYC_TRACE_DIR");
+  std::filesystem::path out_dir =
+      trace_dir_env ? std::filesystem::path(trace_dir_env) : std::filesystem::path("examples/generated/fastfwd_pyc");
+  if (trace_log || trace_vcd || trace_konata)
     std::filesystem::create_directories(out_dir);
 
-    if (trace_log) {
-      tb.enableLog((out_dir / "tb_fastfwd_pyc_cpp.log").string());
-      tb.log() << "tb_fastfwd_pyc(C++): seed=" << seed << " maxCycles=" << maxCycles << " maxPackets=" << maxPackets
-               << " pMed=" << pMed << " pHeavy=" << pHeavy << " engines=" << kTotalEng << "\n";
+  std::ifstream stim_in{};
+  bool use_stim = false;
+  if (!stimPath.empty()) {
+    stim_in.open(stimPath);
+    if (!stim_in.is_open()) {
+      std::cerr << "ERROR: failed to open --stim: " << stimPath << "\n";
+      return 2;
     }
+    use_stim = true;
+  }
 
-    if (trace_vcd) {
-      tb.enableVcd((out_dir / "tb_fastfwd_pyc_cpp.vcd").string(), /*top=*/"tb_fastfwd_pyc_cpp");
-      tb.vcdTrace(dut.clk, "clk");
-      tb.vcdTrace(dut.rst, "rst");
-      tb.vcdTrace(dut.pkt_in_bkpr, "pkt_in_bkpr");
-      tb.vcdTrace(dut.TIME__cycle, "cycle");
-      tb.vcdTrace(dut.TIME__seq_alloc, "seq_alloc");
-      tb.vcdTrace(dut.commit_lane, "commit_lane");
-      for (int i = 0; i < 4; i++) {
-        tb.vcdTrace(lanePktInVld(dut, i), "lane" + std::to_string(i) + "_pkt_in_vld");
-        tb.vcdTrace(lanePktInCtrl(dut, i), "lane" + std::to_string(i) + "_pkt_in_ctrl");
-        tb.vcdTrace(lanePktInData(dut, i), "lane" + std::to_string(i) + "_pkt_in_data");
-        tb.vcdTrace(lanePktOutVld(dut, i), "lane" + std::to_string(i) + "_pkt_out_vld");
-        tb.vcdTrace(lanePktOutData(dut, i), "lane" + std::to_string(i) + "_pkt_out_data");
-      }
-      for (int e = 0; e < kTotalEng; e++) {
-        tb.vcdTrace(fwdPktVld(dut, e), "fwd" + std::to_string(e) + "_pkt_data_vld");
-        tb.vcdTrace(fwdPktLat(dut, e), "fwd" + std::to_string(e) + "_pkt_lat");
-        tb.vcdTrace(fwdPktDpVld(dut, e), "fwd" + std::to_string(e) + "_pkt_dp_vld");
-        tb.vcdTrace(fwdedPktVld(dut, e), "fwded" + std::to_string(e) + "_pkt_data_vld");
-      }
+  std::ofstream stim_out{};
+  if (!stimOutPath.empty()) {
+    std::filesystem::path p = stimOutPath;
+    if (p.has_parent_path())
+      std::filesystem::create_directories(p.parent_path());
+    stim_out.open(stimOutPath, std::ios::out | std::ios::trunc);
+    if (!stim_out.is_open()) {
+      std::cerr << "ERROR: failed to open --stim-out: " << stimOutPath << "\n";
+      return 2;
+    }
+  }
+
+  std::ofstream out_trace{};
+  if (!outTracePath.empty()) {
+    std::filesystem::path p = outTracePath;
+    if (p.has_parent_path())
+      std::filesystem::create_directories(p.parent_path());
+    out_trace.open(outTracePath, std::ios::out | std::ios::trunc);
+    if (!out_trace.is_open()) {
+      std::cerr << "ERROR: failed to open --out-trace: " << outTracePath << "\n";
+      return 2;
+    }
+  }
+
+  if (trace_log) {
+    tb.enableLog((out_dir / "tb_fastfwd_pyc_cpp.log").string());
+    tb.log() << "tb_fastfwd_pyc(C++): seed=" << seed << " maxCycles=" << maxCycles << " maxPackets=" << maxPackets
+             << " pMed=" << pMed << " pHeavy=" << pHeavy << " engines=" << kTotalEng << "\n";
+  }
+
+  if (trace_vcd) {
+    tb.enableVcd((out_dir / "tb_fastfwd_pyc_cpp.vcd").string(), /*top=*/"tb_fastfwd_pyc_cpp");
+    tb.vcdTrace(dut.clk, "clk");
+    tb.vcdTrace(dut.rst, "rst");
+    tb.vcdTrace(dut.pkt_in_bkpr, "pkt_in_bkpr");
+    tb.vcdTrace(dut.TIME__cycle, "cycle");
+    tb.vcdTrace(dut.TIME__seq_alloc, "seq_alloc");
+    tb.vcdTrace(dut.commit_lane, "commit_lane");
+    for (int i = 0; i < 4; i++) {
+      tb.vcdTrace(lanePktInVld(dut, i), "lane" + std::to_string(i) + "_pkt_in_vld");
+      tb.vcdTrace(lanePktInCtrl(dut, i), "lane" + std::to_string(i) + "_pkt_in_ctrl");
+      tb.vcdTrace(lanePktInData(dut, i), "lane" + std::to_string(i) + "_pkt_in_data");
+      tb.vcdTrace(lanePktOutVld(dut, i), "lane" + std::to_string(i) + "_pkt_out_vld");
+      tb.vcdTrace(lanePktOutData(dut, i), "lane" + std::to_string(i) + "_pkt_out_data");
+    }
+    for (int e = 0; e < kTotalEng; e++) {
+      tb.vcdTrace(fwdPktVld(dut, e), "fwd" + std::to_string(e) + "_pkt_data_vld");
+      tb.vcdTrace(fwdPktLat(dut, e), "fwd" + std::to_string(e) + "_pkt_lat");
+      tb.vcdTrace(fwdPktDpVld(dut, e), "fwd" + std::to_string(e) + "_pkt_dp_vld");
+      tb.vcdTrace(fwdedPktVld(dut, e), "fwded" + std::to_string(e) + "_pkt_data_vld");
     }
   }
 
   tb.addClock(dut.clk, /*halfPeriodSteps=*/1);
   tb.reset(dut.rst, /*cyclesAsserted=*/2, /*cyclesDeasserted=*/1);
+
+  KonataLog konata{};
+  if (trace_konata) {
+    std::uint64_t start = dut.TIME__cycle.value();
+    if (!konata.open(out_dir / "tb_fastfwd_pyc_cpp.konata", start)) {
+      std::cerr << "WARN: failed to open konata trace output under " << out_dir << "\n";
+    }
+  }
 
   FeModel fe;
   std::mt19937_64 rng(seed);
@@ -396,30 +2186,126 @@ static int runFastFwd(std::uint64_t seed, std::uint64_t maxCycles, std::uint64_t
   std::vector<Wire<128>> expectedBySeq{};
   expectedBySeq.reserve(static_cast<std::size_t>(maxPackets));
 
+  enum : std::uint8_t {
+    kPktStarted = 1u << 0,
+    kPktDispatched = 1u << 1,
+    kPktCompleted = 1u << 2,
+    kPktCommitted = 1u << 3,
+  };
+  std::vector<std::uint8_t> pktState(static_cast<std::size_t>(maxPackets), 0);
+
   std::uint64_t sent = 0;
   std::uint64_t got = 0;
   std::uint64_t bkprCycles = 0;
   int outPtr = 0; // Next expected output lane (cyclic lane0->lane3->lane0...)
+  std::uint64_t outIndex = 0;
 
   // Main loop: drive stimulus on the low phase, then take a posedge+negedge.
   std::uint64_t simCycle = 0;
+  std::vector<std::uint8_t> prevPipeV2(static_cast<std::size_t>(kTotalEng), 0);
+  std::vector<std::uint8_t> prevPipeV3(static_cast<std::size_t>(kTotalEng), 0);
+  std::vector<std::uint8_t> prevPipeV4(static_cast<std::size_t>(kTotalEng), 0);
   while (simCycle < maxCycles || !expectedOut.empty()) {
     std::uint64_t dutCycle = dut.TIME__cycle.value();
     const bool bkpr = dut.pkt_in_bkpr.toBool();
     if (bkpr)
       bkprCycles++;
 
+    if (trace_konata)
+      konata.atCycle(dutCycle);
+
     // Drive FE outputs for this cycle.
     fe.driveDue(dut, dutCycle);
 
+    // Konata: observe FE completions (stage0 + FEOUT valid) before state updates.
+    if (trace_konata && konata.isOpen()) {
+      for (int e = 0; e < kTotalEng; e++) {
+        if (!engPipeV0(dut, e).toBool() || !fwdedPktVld(dut, e).toBool())
+          continue;
+        std::uint64_t seq = engPipeSeq0(dut, e).value();
+        if (seq >= maxPackets)
+          continue;
+        std::size_t idx = static_cast<std::size_t>(seq);
+        if ((pktState[idx] & kPktDispatched) == 0 || (pktState[idx] & kPktCompleted) != 0)
+          continue;
+        std::string feStage = "FE" + std::to_string(e);
+        konata.stageEnd(seq, /*laneId=*/0, feStage);
+        konata.stageStart(seq, /*laneId=*/0, "ROB");
+        pktState[idx] |= kPktCompleted;
+      }
+    }
+
     // Drive PKTIN for this cycle (only when not backpressured).
+    bool laneVld[4]{false, false, false, false};
+    Wire<128> laneData[4]{Wire<128>(0), Wire<128>(0), Wire<128>(0), Wire<128>(0)};
+    Wire<5> laneCtrl[4]{Wire<5>(0), Wire<5>(0), Wire<5>(0), Wire<5>(0)};
     for (int lane = 0; lane < 4; lane++) {
       lanePktInVld(dut, lane) = Wire<1>(0);
       lanePktInData(dut, lane) = Wire<128>(0);
       lanePktInCtrl(dut, lane) = Wire<5>(0);
     }
 
-    if (!bkpr && simCycle < maxCycles && sent < maxPackets) {
+    if (use_stim && simCycle < maxCycles) {
+      std::string line;
+      if (std::getline(stim_in, line)) {
+        std::istringstream iss(line);
+        std::uint64_t fileCycle = 0;
+        std::uint64_t fileBkpr = 0;
+        if (!(iss >> fileCycle >> fileBkpr)) {
+          std::cerr << "ERROR: malformed stim line at cyc=" << simCycle << "\n";
+          return 2;
+        }
+        if (fileCycle != simCycle) {
+          std::cerr << "ERROR: stim cycle mismatch: expected=" << simCycle << " got=" << fileCycle << "\n";
+          return 2;
+        }
+        if (fileBkpr != (bkpr ? 1u : 0u)) {
+          std::cerr << "ERROR: bkpr mismatch at cyc=" << simCycle << " stim=" << fileBkpr << " dut=" << (bkpr ? 1 : 0) << "\n";
+          return 2;
+        }
+
+        for (int lane = 0; lane < 4; lane++) {
+          std::uint64_t v = 0;
+          std::string data_s;
+          std::string ctrl_s;
+          if (!(iss >> v >> data_s >> ctrl_s)) {
+            std::cerr << "ERROR: malformed stim lane at cyc=" << simCycle << " lane=" << lane << "\n";
+            return 2;
+          }
+          laneVld[lane] = (v != 0);
+          laneData[lane] = parseHex128(data_s);
+          laneCtrl[lane] = Wire<5>(parseHexU64(ctrl_s) & 0x1Fu);
+        }
+
+        // Apply + build expected model.
+        for (int lane = 0; lane < 4; lane++) {
+          if (!laneVld[lane])
+            continue;
+          if (sent >= maxPackets) {
+            std::cerr << "ERROR: stim inject exceeds maxPackets at cyc=" << simCycle << "\n";
+            return 2;
+          }
+          if (bkpr) {
+            std::cerr << "ERROR: stim inject while backpressured at cyc=" << simCycle << "\n";
+            return 2;
+          }
+          std::uint64_t seq = sent;
+          std::uint64_t ctrl = laneCtrl[lane].value() & 0x1Fu;
+          std::uint64_t dep = (ctrl >> 2u) & 0x7u;
+          if (dep != 0 && seq < dep) {
+            std::cerr << "ERROR: invalid dep at cyc=" << simCycle << " seq=" << seq << " dep=" << dep << "\n";
+            return 2;
+          }
+          Wire<128> dp_data = (dep != 0) ? expectedBySeq[static_cast<std::size_t>(seq - dep)] : Wire<128>(0);
+          Wire<128> fwded = laneData[lane] + dp_data;
+          expectedBySeq.push_back(fwded);
+          expectedOut.push_back(ExpectedPkt{seq, fwded});
+          sent++;
+        }
+      } else {
+        // EOF: stop injecting, drain only.
+      }
+    } else if (!bkpr && simCycle < maxCycles && sent < maxPackets) {
       bool doSend[4]{};
       for (int lane = 0; lane < 4; lane++) {
         bool heavy = (simCycle >= (maxCycles / 2));
@@ -452,9 +2338,24 @@ static int runFastFwd(std::uint64_t seed, std::uint64_t maxCycles, std::uint64_t
         expectedOut.push_back(ExpectedPkt{seq, fwded});
         sent++;
 
-        lanePktInVld(dut, lane) = Wire<1>(1);
-        lanePktInData(dut, lane) = data;
-        lanePktInCtrl(dut, lane) = Wire<5>(ctrl);
+        if (trace_konata && konata.isOpen()) {
+          std::size_t idx = static_cast<std::size_t>(seq);
+          pktState[idx] |= kPktStarted;
+          std::uint64_t out_lane = seq & 0x3u;
+          konata.insn(seq, seq, out_lane);
+          konata.label(
+              seq,
+              /*type=*/0,
+              "seq=" + std::to_string(seq) + " in_lane=" + std::to_string(lane) + " out_lane=" + std::to_string(out_lane) +
+                  " lat=" + std::to_string(lat + 1u) + " dep=" + std::to_string(dep));
+          konata.stageStart(seq, /*laneId=*/0, "INQ");
+          if (dep != 0)
+            konata.dep(seq, seq - dep, /*type=*/0);
+        }
+
+        laneVld[lane] = true;
+        laneData[lane] = data;
+        laneCtrl[lane] = Wire<5>(ctrl);
 
         if (trace_log) {
           tb.log() << "[in]  cyc=" << dutCycle << " lane=" << lane << " seq=" << seq << " lat=" << (lat + 1u)
@@ -463,10 +2364,83 @@ static int runFastFwd(std::uint64_t seed, std::uint64_t maxCycles, std::uint64_t
       }
     }
 
+    for (int lane = 0; lane < 4; lane++) {
+      if (laneVld[lane]) {
+        lanePktInVld(dut, lane) = Wire<1>(1);
+        lanePktInData(dut, lane) = laneData[lane];
+        lanePktInCtrl(dut, lane) = laneCtrl[lane];
+      }
+    }
+
+    if (stim_out.is_open() && simCycle < maxCycles) {
+      stim_out << simCycle << " " << (bkpr ? 1 : 0);
+      for (int lane = 0; lane < 4; lane++) {
+        stim_out << " " << (laneVld[lane] ? 1 : 0) << " " << hex128(laneData[lane]) << " " << hexU64(laneCtrl[lane].value() & 0x1Fu, 2);
+      }
+      stim_out << "\n";
+    }
+
     // Evaluate combinational logic, capture FE inputs, then step posedge.
     dut.eval();
     fe.captureAndSchedule(dut, dutCycle, trace_log ? &tb.log() : nullptr);
+
+    if (trace_konata && konata.isOpen()) {
+      for (int e = 0; e < kTotalEng; e++) {
+        prevPipeV2[static_cast<std::size_t>(e)] = static_cast<std::uint8_t>(engPipeV2(dut, e).toBool() ? 1u : 0u);
+        prevPipeV3[static_cast<std::size_t>(e)] = static_cast<std::uint8_t>(engPipeV3(dut, e).toBool() ? 1u : 0u);
+        prevPipeV4[static_cast<std::size_t>(e)] = static_cast<std::uint8_t>(engPipeV4(dut, e).toBool() ? 1u : 0u);
+      }
+    }
+
     tb.step(); // posedge
+
+    // Konata: observe dispatches via pipeline insertion (captured on this posedge, attributed to dutCycle).
+    if (trace_konata && konata.isOpen()) {
+      for (int e = 0; e < kTotalEng; e++) {
+        const std::size_t ei = static_cast<std::size_t>(e);
+        const bool v1 = engPipeV1(dut, e).toBool();
+        const bool v2 = engPipeV2(dut, e).toBool();
+        const bool v3 = engPipeV3(dut, e).toBool();
+        const bool v4 = engPipeV4(dut, e).toBool();
+
+        int insStage = -1;
+        if (v4)
+          insStage = 4;
+        else if (v3 && prevPipeV4[ei] == 0)
+          insStage = 3;
+        else if (v2 && prevPipeV3[ei] == 0)
+          insStage = 2;
+        else if (v1 && prevPipeV2[ei] == 0)
+          insStage = 1;
+
+        if (insStage < 0)
+          continue;
+
+        std::uint64_t seq = 0;
+        if (insStage == 1)
+          seq = engPipeSeq1(dut, e).value();
+        else if (insStage == 2)
+          seq = engPipeSeq2(dut, e).value();
+        else if (insStage == 3)
+          seq = engPipeSeq3(dut, e).value();
+        else
+          seq = engPipeSeq4(dut, e).value();
+
+        if (seq >= maxPackets)
+          continue;
+        std::size_t idx = static_cast<std::size_t>(seq);
+        if ((pktState[idx] & kPktStarted) == 0 || (pktState[idx] & kPktDispatched) != 0)
+          continue;
+
+        konata.stageEnd(seq, /*laneId=*/0, "INQ");
+        std::string feStage = "FE" + std::to_string(e);
+        konata.stageStart(seq, /*laneId=*/0, feStage);
+        pktState[idx] |= kPktDispatched;
+
+        const std::uint64_t lat = static_cast<std::uint64_t>(insStage - 1); // 0..3
+        konata.label(seq, /*type=*/1, "dispatch eng=" + std::to_string(e) + " lat=" + std::to_string(lat + 1u));
+      }
+    }
 
     // Sanity: the DUT should have allocated exactly `sent` sequence numbers so far.
     std::uint64_t dutSeqAlloc = dut.TIME__seq_alloc.value();
@@ -514,6 +2488,22 @@ static int runFastFwd(std::uint64_t seed, std::uint64_t maxCycles, std::uint64_t
         return 1;
       }
       got++;
+      if (out_trace.is_open()) {
+        // Log in terms of the "post-posedge" cycle index to match the SV TB's notion of cycle.
+        out_trace << outIndex << " " << (simCycle + 1u) << " " << ptr << " " << exp.seq << " " << hex128(out) << "\n";
+        outIndex++;
+      }
+      if (trace_konata && konata.isOpen()) {
+        std::uint64_t seq = exp.seq;
+        if (seq < maxPackets) {
+          std::size_t idx = static_cast<std::size_t>(seq);
+          if ((pktState[idx] & kPktCompleted) != 0 && (pktState[idx] & kPktCommitted) == 0) {
+            konata.stageEnd(seq, /*laneId=*/0, "ROB");
+            konata.retire(seq, /*retireId=*/seq, /*type=*/0);
+            pktState[idx] |= kPktCommitted;
+          }
+        }
+      }
       if (trace_log) {
         tb.log() << "[out] cyc=" << dutCycle << " lane=" << ptr << " seq=" << exp.seq << " got=" << got
                  << " outstanding=" << expectedOut.size() << "\n";
@@ -561,6 +2551,9 @@ int main(int argc, char **argv) {
   std::uint64_t seed = 1;
   std::uint64_t cycles = 20000;
   std::uint64_t packets = 60000;
+  std::string stim_path{};
+  std::string stim_out_path{};
+  std::string out_trace_path{};
 
   for (int i = 1; i < argc; i++) {
     std::string a(argv[i]);
@@ -576,8 +2569,22 @@ int main(int argc, char **argv) {
       packets = parseU64(argv[++i]);
       continue;
     }
+    if (a == "--stim" && i + 1 < argc) {
+      stim_path = argv[++i];
+      continue;
+    }
+    if (a == "--stim-out" && i + 1 < argc) {
+      stim_out_path = argv[++i];
+      continue;
+    }
+    if (a == "--out-trace" && i + 1 < argc) {
+      out_trace_path = argv[++i];
+      continue;
+    }
     if (a == "-h" || a == "--help") {
-      std::cout << "Usage: " << argv[0] << " [--seed N] [--cycles N] [--packets N]\n";
+      std::cout << "Usage: " << argv[0]
+                << " [--seed N] [--cycles N] [--packets N]"
+                << " [--stim path] [--stim-out path] [--out-trace path]\n";
       return 0;
     }
     std::cerr << "error: unknown arg: " << a << "\n";
@@ -585,5 +2592,5 @@ int main(int argc, char **argv) {
   }
 
   // Match the published load: 41.7% then 90% (approx via per-lane Bernoulli).
-  return runFastFwd(seed, cycles, packets, /*pMed=*/0.417, /*pHeavy=*/0.90);
+  return runFastFwd(seed, cycles, packets, /*pMed=*/0.417, /*pHeavy=*/0.90, stim_path, stim_out_path, out_trace_path);
 }

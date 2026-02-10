@@ -1,51 +1,127 @@
 from __future__ import annotations
 
-from pycircuit import Circuit
+from dataclasses import dataclass
 
-from ..decode import decode_bundle_8B
+from pycircuit import Circuit
+from pycircuit.dsl import Signal
+
+from .exec import exec_uop_comb
 from ..isa import (
     BK_CALL,
     BK_COND,
+    BK_DIRECT,
     BK_FALL,
+    BK_ICALL,
+    BK_IND,
     BK_RET,
+    OP_BSTART_STD_COND,
     OP_BSTART_STD_CALL,
+    OP_BSTART_STD_DIRECT,
+    OP_BSTART_STD_FALL,
     OP_C_BSTART_COND,
+    OP_C_BSTART_DIRECT,
     OP_C_BSTART_STD,
     OP_C_BSTOP,
+    OP_C_LDI,
     OP_C_LWI,
+    OP_C_SETC_NE,
+    OP_C_SDI,
     OP_C_SWI,
     OP_C_SETC_EQ,
     OP_C_SETC_TGT,
     OP_EBREAK,
+    OP_FENTRY,
+    OP_FEXIT,
+    OP_FRET_RA,
+    OP_FRET_STK,
     OP_INVALID,
+    OP_HL_LB_PCR,
+    OP_HL_LBU_PCR,
+    OP_HL_LD_PCR,
+    OP_HL_LH_PCR,
+    OP_HL_LHU_PCR,
+    OP_HL_LW_PCR,
+    OP_HL_LWU_PCR,
+    OP_HL_SB_PCR,
+    OP_HL_SD_PCR,
+    OP_HL_SH_PCR,
+    OP_HL_SW_PCR,
+    OP_LB,
+    OP_LBI,
+    OP_LBU,
+    OP_LBUI,
+    OP_LD,
+    OP_LH,
+    OP_LHI,
+    OP_LHU,
+    OP_LHUI,
+    OP_LW,
+    OP_LWU,
+    OP_LWUI,
+    OP_SB,
+    OP_SBI,
+    OP_SD,
+    OP_SH,
+    OP_SHI,
+    OP_SW,
     OP_LWI,
+    OP_LDI,
+    OP_SETC_AND,
+    OP_SETC_ANDI,
+    OP_SETC_EQ,
+    OP_SETC_EQI,
+    OP_SETC_GE,
+    OP_SETC_GEI,
+    OP_SETC_GEU,
+    OP_SETC_GEUI,
+    OP_SETC_LT,
+    OP_SETC_LTI,
+    OP_SETC_LTU,
+    OP_SETC_LTUI,
+    OP_SETC_NE,
+    OP_SETC_NEI,
+    OP_SETC_OR,
+    OP_SETC_ORI,
     OP_SDI,
     OP_SWI,
     REG_INVALID,
 )
 from ..util import make_consts
-from .exec import exec_uop
+from .dec1 import decode_f4_bundle
 from .helpers import alloc_from_free_mask, mask_bit, mux_by_uindex, onehot_from_tag
 from .params import OooParams
 from .state import make_core_ctrl_regs, make_ifu_regs, make_iq_regs, make_prf, make_rename_regs, make_rob_regs
 
 
-def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None) -> None:
+@dataclass(frozen=True)
+class BccOooExports:
+    clk: Signal
+    rst: Signal
+    block_cmd_valid: Signal
+    block_cmd_kind: Signal
+    block_cmd_payload: Signal
+    block_cmd_tile: Signal
+    block_cmd_tag: Signal
+    cycles: Signal
+    halted: Signal
+
+
+def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None) -> BccOooExports:
     p = params or OooParams()
 
     clk = m.clock("clk")
     rst = m.reset("rst")
 
-    boot_pc = m.in_wire("boot_pc", width=64)
-    boot_sp = m.in_wire("boot_sp", width=64)
+    boot_pc = m.input("boot_pc", width=64)
+    boot_sp = m.input("boot_sp", width=64)
 
-    c = m.const_wire
+    c = m.const
     consts = make_consts(m)
 
     def op_is(op, *codes: int):
         v = consts.zero1
         for code in codes:
-            v = v | op.eq(c(code, width=6))
+            v = v | op.eq(c(code, width=12))
         return v
 
     tag0 = c(0, width=p.ptag_w)
@@ -53,7 +129,7 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     # --- core state (architectural) ---
     state = make_core_ctrl_regs(m, clk, rst, boot_pc=boot_pc, consts=consts)
 
-    can_run = (~state.halted.out()) & (~state.flush_pending.out())
+    base_can_run = (~state.halted.out()) & (~state.flush_pending.out())
     do_flush = state.flush_pending.out()
 
     # --- IFU (bring-up): single-entry fetch queue (F4 bundle) ---
@@ -87,12 +163,14 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     rob_st_addrs = []
     rob_st_datas = []
     rob_st_sizes = []
+    rob_macro_begins = []
+    rob_macro_ends = []
     for slot in range(p.commit_w):
         idx = rob.head.out() + c(slot, width=p.rob_w)
         commit_idxs.append(idx)
         rob_valids.append(mux_by_uindex(m, idx=idx, items=rob.valid, default=consts.zero1))
         rob_dones.append(mux_by_uindex(m, idx=idx, items=rob.done, default=consts.zero1))
-        rob_ops.append(mux_by_uindex(m, idx=idx, items=rob.op, default=c(0, width=6)))
+        rob_ops.append(mux_by_uindex(m, idx=idx, items=rob.op, default=c(0, width=12)))
         rob_lens.append(mux_by_uindex(m, idx=idx, items=rob.len_bytes, default=consts.zero3))
         rob_dst_kinds.append(mux_by_uindex(m, idx=idx, items=rob.dst_kind, default=c(0, width=2)))
         rob_dst_aregs.append(mux_by_uindex(m, idx=idx, items=rob.dst_areg, default=c(REG_INVALID, width=6)))
@@ -101,7 +179,9 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         rob_is_stores.append(mux_by_uindex(m, idx=idx, items=rob.is_store, default=consts.zero1))
         rob_st_addrs.append(mux_by_uindex(m, idx=idx, items=rob.store_addr, default=consts.zero64))
         rob_st_datas.append(mux_by_uindex(m, idx=idx, items=rob.store_data, default=consts.zero64))
-        rob_st_sizes.append(mux_by_uindex(m, idx=idx, items=rob.store_size, default=consts.zero3))
+        rob_st_sizes.append(mux_by_uindex(m, idx=idx, items=rob.store_size, default=consts.zero4))
+        rob_macro_begins.append(mux_by_uindex(m, idx=idx, items=rob.macro_begin, default=c(0, width=6)))
+        rob_macro_ends.append(mux_by_uindex(m, idx=idx, items=rob.macro_end, default=c(0, width=6)))
 
     head_op = rob_ops[0]
     head_len = rob_lens[0]
@@ -113,13 +193,70 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     head_st_addr = rob_st_addrs[0]
     head_st_data = rob_st_datas[0]
     head_st_size = rob_st_sizes[0]
+    head_macro_begin = rob_macro_begins[0]
+    head_macro_end = rob_macro_ends[0]
 
     # Commit-time branch/control decisions (BlockISA markers) for the head.
-    op_is_start_marker = op_is(head_op, OP_C_BSTART_STD, OP_C_BSTART_COND, OP_BSTART_STD_CALL)
-    op_is_boundary = op_is_start_marker | op_is(head_op, OP_C_BSTOP)
+    head_is_macro = op_is(head_op, OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK)
+    head_is_start_marker = (
+        op_is(
+            head_op,
+            OP_C_BSTART_STD,
+            OP_C_BSTART_COND,
+            OP_C_BSTART_DIRECT,
+            OP_BSTART_STD_FALL,
+            OP_BSTART_STD_DIRECT,
+            OP_BSTART_STD_COND,
+            OP_BSTART_STD_CALL,
+        )
+        | head_is_macro
+    )
+    head_is_boundary = head_is_start_marker | op_is(head_op, OP_C_BSTOP)
+
+    # Boundary markers are skipped when the previous block takes a control-flow
+    # transition at that boundary. Skipped markers must not trigger template
+    # macro expansion.
+    br_kind_head = state.br_kind.out()
+    br_is_cond_head = br_kind_head.eq(c(BK_COND, width=3))
+    br_is_call_head = br_kind_head.eq(c(BK_CALL, width=3))
+    br_is_ret_head = br_kind_head.eq(c(BK_RET, width=3))
+    br_is_direct_head = br_kind_head.eq(c(BK_DIRECT, width=3))
+    br_is_ind_head = br_kind_head.eq(c(BK_IND, width=3))
+    br_is_icall_head = br_kind_head.eq(c(BK_ICALL, width=3))
+    head_br_take = (
+        br_is_call_head
+        | br_is_direct_head
+        | br_is_ind_head
+        | br_is_icall_head
+        | (br_is_cond_head & state.commit_cond.out())
+        | (br_is_ret_head & state.commit_cond.out())
+    )
+    head_skip = head_is_boundary & head_br_take
+
+    # Template macro blocks (FENTRY/FEXIT/FRET.*) are expanded by a small
+    # microcode engine. Stall the normal pipeline in the cycle we start the
+    # macro, and while the macro is active.
+    macro_start = (
+        base_can_run
+        & (~state.macro_active.out())
+        & (~state.macro_wait_commit.out())
+        & head_is_macro
+        & (~head_skip)
+        & rob_valids[0]
+        & rob_dones[0]
+    )
+    macro_block = state.macro_active.out() | macro_start
+
+    can_run = base_can_run & (~macro_block)
+
+    # Return target for FRET.* (via RA, possibly restored by the macro engine).
+    ret_ra_tag = ren.cmap[10].out()
+    ret_ra_val = mux_by_uindex(m, idx=ret_ra_tag, items=prf, default=consts.zero64)
 
     commit_allow = consts.one1
     commit_fires = []
+    commit_pcs = []
+    commit_enter_new_blocks = []
 
     commit_count = c(0, width=3)
 
@@ -129,7 +266,11 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     commit_store_fire = consts.zero1
     commit_store_addr = consts.zero64
     commit_store_data = consts.zero64
-    commit_store_size = consts.zero3
+    commit_store_size = consts.zero4
+    ra_write_fire = consts.zero1
+    ra_write_value = consts.zero64
+    ra_tag_live = ren.cmap[10].out()
+    ra_write_tag = ra_tag_live
 
     pc_live = state.pc.out()
     commit_cond_live = state.commit_cond.out()
@@ -140,35 +281,93 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
 
     for slot in range(p.commit_w):
         pc_this = pc_live
+        commit_pcs.append(pc_this)
         op = rob_ops[slot]
         ln = rob_lens[slot]
         val = rob_values[slot]
 
-        is_start_marker = op_is(op, OP_C_BSTART_STD, OP_C_BSTART_COND, OP_BSTART_STD_CALL)
+        is_macro = op_is(op, OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK)
+        is_start_marker = (
+            op_is(
+                op,
+                OP_C_BSTART_STD,
+                OP_C_BSTART_COND,
+                OP_C_BSTART_DIRECT,
+                OP_BSTART_STD_FALL,
+                OP_BSTART_STD_DIRECT,
+                OP_BSTART_STD_COND,
+                OP_BSTART_STD_CALL,
+            )
+            | is_macro
+        )
         is_boundary = is_start_marker | op_is(op, OP_C_BSTOP)
 
-        br_is_fall = br_kind_live.eq(c(BK_FALL, width=2))
-        br_is_cond = br_kind_live.eq(c(BK_COND, width=2))
-        br_is_call = br_kind_live.eq(c(BK_CALL, width=2))
-        br_is_ret = br_kind_live.eq(c(BK_RET, width=2))
+        br_is_fall = br_kind_live.eq(c(BK_FALL, width=3))
+        br_is_cond = br_kind_live.eq(c(BK_COND, width=3))
+        br_is_call = br_kind_live.eq(c(BK_CALL, width=3))
+        br_is_ret = br_kind_live.eq(c(BK_RET, width=3))
+        br_is_direct = br_kind_live.eq(c(BK_DIRECT, width=3))
+        br_is_ind = br_kind_live.eq(c(BK_IND, width=3))
+        br_is_icall = br_kind_live.eq(c(BK_ICALL, width=3))
 
         br_target = br_base_live + br_off_live
-        br_target = br_is_ret.select(commit_tgt_live, br_target)
-        br_take = br_is_call | br_is_ret | (br_is_cond & commit_cond_live)
+        # Dynamic target for RET/IND/ICALL blocks comes from commit_tgt.
+        br_target = (br_is_ret | br_is_ind | br_is_icall).select(commit_tgt_live, br_target)
+        # Allow SETC.TGT to override fixed targets for DIRECT/CALL/COND blocks.
+        br_target = (~(br_is_ret | br_is_ind | br_is_icall) & (~commit_tgt_live.eq(consts.zero64))).select(commit_tgt_live, br_target)
+
+        br_take = (
+            br_is_call
+            | br_is_direct
+            | br_is_ind
+            | br_is_icall
+            | (br_is_cond & commit_cond_live)
+            | (br_is_ret & commit_cond_live)
+        )
 
         pc_inc = pc_this + ln.zext(width=64)
         pc_next = is_boundary.select(br_take.select(br_target, pc_inc), pc_inc)
 
         fire = can_run & commit_allow & rob_valids[slot] & rob_dones[slot]
 
+        # Template macro blocks (FENTRY/FEXIT/FRET.*) must reach the head of the
+        # ROB so the macro microcode engine can run before the macro commits.
+        # With commit_w>1, a macro could otherwise commit in the same cycle as
+        # an older non-macro (slot>0) and skip the required save/restore.
+        if slot != 0:
+            fire = fire & (~is_macro)
+
         # Stop commit on redirect, store, or halt.
         is_halt = op_is(op, OP_EBREAK, OP_INVALID)
         redirect = fire & is_boundary & br_take
+
+        # FRET.* are explicit control-flow ops (return via RA). They behave like
+        # a taken boundary when the marker is entered (i.e., not skipped by a
+        # prior taken branch at this boundary).
+        is_fret = op_is(op, OP_FRET_RA, OP_FRET_STK)
+        fret_redirect = fire & is_fret & (~redirect)
+        pc_next = fret_redirect.select(ret_ra_val, pc_next)
+        redirect = redirect | fret_redirect
+
+        # Call/ICALL blocks also set RA to the fall-through block start marker.
+        # - Boundary is a start marker: fall-through is the boundary PC itself.
+        # - Boundary is C.BSTOP: fall-through is the next PC after BSTOP.
+        ra_fallthrough = op_is(op, OP_C_BSTOP).select(pc_inc, pc_this)
+        ra_write = redirect & (br_is_call | br_is_icall)
+        ra_write_fire = ra_write.select(consts.one1, ra_write_fire)
+        ra_write_value = ra_write.select(ra_fallthrough, ra_write_value)
+
         store_commit = fire & rob_is_stores[slot]
         stop = redirect | store_commit | (fire & is_halt)
 
         commit_fires.append(fire)
         commit_count = commit_count + fire.zext(width=3)
+
+        # Track the committed RA mapping across commit slots so CALL/ICALL can
+        # update the correct physical reg even when RA is renamed by an older
+        # instruction in the same cycle.
+        ra_map_write = fire & rob_dst_kinds[slot].eq(c(1, width=2)) & rob_dst_aregs[slot].eq(c(10, width=6))
+        ra_tag_live = ra_map_write.select(rob_pdsts[slot], ra_tag_live)
 
         redirect_valid = redirect.select(consts.one1, redirect_valid)
         redirect_pc = redirect.select(pc_next, redirect_pc)
@@ -178,39 +377,94 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         commit_store_data = store_commit.select(rob_st_datas[slot], commit_store_data)
         commit_store_size = store_commit.select(rob_st_sizes[slot], commit_store_size)
 
+        ra_write_tag = ra_write.select(ra_tag_live, ra_write_tag)
+
         # --- sequential architectural state updates across commit slots ---
-        op_setc_eq = op_is(op, OP_C_SETC_EQ)
+        op_setc_any = op_is(
+            op,
+            OP_C_SETC_EQ,
+            OP_C_SETC_NE,
+            OP_SETC_GEUI,
+            OP_SETC_EQ,
+            OP_SETC_NE,
+            OP_SETC_AND,
+            OP_SETC_OR,
+            OP_SETC_LT,
+            OP_SETC_LTU,
+            OP_SETC_GE,
+            OP_SETC_GEU,
+            OP_SETC_EQI,
+            OP_SETC_NEI,
+            OP_SETC_ANDI,
+            OP_SETC_ORI,
+            OP_SETC_LTI,
+            OP_SETC_GEI,
+            OP_SETC_LTUI,
+        )
         op_setc_tgt = op_is(op, OP_C_SETC_TGT)
         commit_cond_live = (fire & is_boundary).select(consts.zero1, commit_cond_live)
         commit_tgt_live = (fire & is_boundary).select(consts.zero64, commit_tgt_live)
-        commit_cond_live = (fire & op_setc_eq).select(val.trunc(width=1), commit_cond_live)
+        commit_cond_live = (fire & op_setc_any).select(val.trunc(width=1), commit_cond_live)
         commit_tgt_live = (fire & op_setc_tgt).select(val, commit_tgt_live)
+        commit_cond_live = (fire & op_setc_tgt).select(consts.one1, commit_cond_live)
 
-        br_kind_live = (fire & is_boundary & br_take).select(c(BK_FALL, width=2), br_kind_live)
+        br_kind_live = (fire & is_boundary & br_take).select(c(BK_FALL, width=3), br_kind_live)
         br_base_live = (fire & is_boundary & br_take).select(pc_this, br_base_live)
         br_off_live = (fire & is_boundary & br_take).select(consts.zero64, br_off_live)
 
         enter_new_block = fire & is_start_marker & (~br_take)
+        commit_enter_new_blocks.append(enter_new_block)
 
         is_bstart_cond = op_is(op, OP_C_BSTART_COND)
-        br_kind_live = (enter_new_block & is_bstart_cond).select(c(BK_COND, width=2), br_kind_live)
+        br_kind_live = (enter_new_block & is_bstart_cond).select(c(BK_COND, width=3), br_kind_live)
         br_base_live = (enter_new_block & is_bstart_cond).select(pc_this, br_base_live)
         br_off_live = (enter_new_block & is_bstart_cond).select(val, br_off_live)
 
+        is_bstart_direct = op_is(op, OP_C_BSTART_DIRECT)
+        br_kind_live = (enter_new_block & is_bstart_direct).select(c(BK_DIRECT, width=3), br_kind_live)
+        br_base_live = (enter_new_block & is_bstart_direct).select(pc_this, br_base_live)
+        br_off_live = (enter_new_block & is_bstart_direct).select(val, br_off_live)
+
+        is_bstart_std_fall = op_is(op, OP_BSTART_STD_FALL)
+        br_kind_live = (enter_new_block & is_bstart_std_fall).select(c(BK_FALL, width=3), br_kind_live)
+        br_base_live = (enter_new_block & is_bstart_std_fall).select(pc_this, br_base_live)
+        br_off_live = (enter_new_block & is_bstart_std_fall).select(consts.zero64, br_off_live)
+
+        is_bstart_std_direct = op_is(op, OP_BSTART_STD_DIRECT)
+        br_kind_live = (enter_new_block & is_bstart_std_direct).select(c(BK_DIRECT, width=3), br_kind_live)
+        br_base_live = (enter_new_block & is_bstart_std_direct).select(pc_this, br_base_live)
+        br_off_live = (enter_new_block & is_bstart_std_direct).select(val, br_off_live)
+
+        is_bstart_std_cond = op_is(op, OP_BSTART_STD_COND)
+        br_kind_live = (enter_new_block & is_bstart_std_cond).select(c(BK_COND, width=3), br_kind_live)
+        br_base_live = (enter_new_block & is_bstart_std_cond).select(pc_this, br_base_live)
+        br_off_live = (enter_new_block & is_bstart_std_cond).select(val, br_off_live)
+
         is_bstart_call = op_is(op, OP_BSTART_STD_CALL)
-        br_kind_live = (enter_new_block & is_bstart_call).select(c(BK_CALL, width=2), br_kind_live)
+        br_kind_live = (enter_new_block & is_bstart_call).select(c(BK_CALL, width=3), br_kind_live)
         br_base_live = (enter_new_block & is_bstart_call).select(pc_this, br_base_live)
         br_off_live = (enter_new_block & is_bstart_call).select(val, br_off_live)
 
         brtype = val.trunc(width=3)
-        kind_from_brtype = brtype.eq(c(7, width=3)).select(c(BK_RET, width=2), c(BK_FALL, width=2))
+        kind_from_brtype = c(BK_FALL, width=3)
+        kind_from_brtype = brtype.eq(c(2, width=3)).select(c(BK_DIRECT, width=3), kind_from_brtype)
+        kind_from_brtype = brtype.eq(c(3, width=3)).select(c(BK_COND, width=3), kind_from_brtype)
+        kind_from_brtype = brtype.eq(c(4, width=3)).select(c(BK_CALL, width=3), kind_from_brtype)
+        kind_from_brtype = brtype.eq(c(5, width=3)).select(c(BK_IND, width=3), kind_from_brtype)
+        kind_from_brtype = brtype.eq(c(6, width=3)).select(c(BK_ICALL, width=3), kind_from_brtype)
+        kind_from_brtype = brtype.eq(c(7, width=3)).select(c(BK_RET, width=3), kind_from_brtype)
         is_bstart_std = op_is(op, OP_C_BSTART_STD)
         br_kind_live = (enter_new_block & is_bstart_std).select(kind_from_brtype, br_kind_live)
         br_base_live = (enter_new_block & is_bstart_std).select(pc_this, br_base_live)
         br_off_live = (enter_new_block & is_bstart_std).select(consts.zero64, br_off_live)
 
+        # Macro blocks (FENTRY/FEXIT/FRET.*) are treated as standalone fall-through blocks.
+        br_kind_live = (enter_new_block & is_macro).select(c(BK_FALL, width=3), br_kind_live)
+        br_base_live = (enter_new_block & is_macro).select(pc_this, br_base_live)
+        br_off_live = (enter_new_block & is_macro).select(consts.zero64, br_off_live)
+
         is_bstop = op_is(op, OP_C_BSTOP)
-        br_kind_live = (fire & is_bstop).select(c(BK_FALL, width=2), br_kind_live)
+        br_kind_live = (fire & is_bstop).select(c(BK_FALL, width=3), br_kind_live)
         br_base_live = (fire & is_bstop).select(pc_this, br_base_live)
         br_off_live = (fire & is_bstop).select(consts.zero64, br_off_live)
 
@@ -271,8 +525,52 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         ready = v & sl_rdy & sr_rdy & sp_rdy
 
         op_i = iq_lsu.op[i].out()
-        is_load_i = op_i.eq(c(OP_LWI, width=6)) | op_i.eq(c(OP_C_LWI, width=6))
-        is_store_i = op_i.eq(c(OP_SWI, width=6)) | op_i.eq(c(OP_C_SWI, width=6)) | op_i.eq(c(OP_SDI, width=6))
+        # Bring-up conservative ordering: do not issue *any* load when there is
+        # an older store in the ROB. This avoids load-before-store hazards in
+        # the simplified single-cycle LSU (no forwarding/replay).
+        is_load_i = op_is(
+            op_i,
+            OP_LWI,
+            OP_C_LWI,
+            OP_LBI,
+            OP_LBUI,
+            OP_LHI,
+            OP_LHUI,
+            OP_LWUI,
+            OP_LDI,
+            OP_C_LDI,
+            OP_LB,
+            OP_LBU,
+            OP_LH,
+            OP_LHU,
+            OP_LW,
+            OP_LWU,
+            OP_LD,
+            OP_HL_LB_PCR,
+            OP_HL_LBU_PCR,
+            OP_HL_LH_PCR,
+            OP_HL_LHU_PCR,
+            OP_HL_LW_PCR,
+            OP_HL_LWU_PCR,
+            OP_HL_LD_PCR,
+        )
+        is_store_i = op_is(
+            op_i,
+            OP_SBI,
+            OP_SHI,
+            OP_SWI,
+            OP_C_SWI,
+            OP_SDI,
+            OP_C_SDI,
+            OP_SB,
+            OP_SH,
+            OP_SW,
+            OP_SD,
+            OP_HL_SB_PCR,
+            OP_HL_SH_PCR,
+            OP_HL_SW_PCR,
+            OP_HL_SD_PCR,
+        )
 
         uop_rob_i = iq_lsu.rob[i].out()
         uop_dist = uop_rob_i + sub_head  # (uop_rob - head) mod 2^ROB_W
@@ -361,6 +659,8 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     uop_imms = []
     uop_sls = []
     uop_srs = []
+    uop_srcr_types = []
+    uop_shamts = []
     uop_sps = []
     uop_pdsts = []
     uop_has_dsts = []
@@ -368,11 +668,13 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         iq = issue_iqs[slot]
         idx = issue_idxs[slot]
         uop_robs.append(mux_by_uindex(m, idx=idx, items=iq.rob, default=c(0, width=p.rob_w)))
-        uop_ops.append(mux_by_uindex(m, idx=idx, items=iq.op, default=c(0, width=6)))
+        uop_ops.append(mux_by_uindex(m, idx=idx, items=iq.op, default=c(0, width=12)))
         uop_pcs.append(mux_by_uindex(m, idx=idx, items=iq.pc, default=consts.zero64))
         uop_imms.append(mux_by_uindex(m, idx=idx, items=iq.imm, default=consts.zero64))
         uop_sls.append(mux_by_uindex(m, idx=idx, items=iq.srcl, default=tag0))
         uop_srs.append(mux_by_uindex(m, idx=idx, items=iq.srcr, default=tag0))
+        uop_srcr_types.append(mux_by_uindex(m, idx=idx, items=iq.srcr_type, default=c(0, width=2)))
+        uop_shamts.append(mux_by_uindex(m, idx=idx, items=iq.shamt, default=consts.zero6))
         uop_sps.append(mux_by_uindex(m, idx=idx, items=iq.srcp, default=tag0))
         uop_pdsts.append(mux_by_uindex(m, idx=idx, items=iq.pdst, default=tag0))
         uop_has_dsts.append(mux_by_uindex(m, idx=idx, items=iq.has_dst, default=consts.zero1))
@@ -398,13 +700,15 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         sr_vals.append(mux_by_uindex(m, idx=uop_srs[slot], items=prf, default=consts.zero64))
         sp_vals.append(mux_by_uindex(m, idx=uop_sps[slot], items=prf, default=consts.zero64))
         exs.append(
-            exec_uop(
+            exec_uop_comb(
                 m,
                 op=uop_ops[slot],
                 pc=uop_pcs[slot],
                 imm=uop_imms[slot],
                 srcl_val=sl_vals[slot],
                 srcr_val=sr_vals[slot],
+                srcr_type=uop_srcr_types[slot],
+                shamt=uop_shamts[slot],
                 srcp_val=sp_vals[slot],
                 consts=consts,
             )
@@ -431,29 +735,106 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     issued_is_store = store_fires[0]
     older_store_pending = mux_by_uindex(m, idx=issue_idx, items=lsu_older_store_pending, default=consts.zero1)
 
-    # Memory port arbitration: a load uses the read port, otherwise fetch uses it.
-    mem_raddr = any_load_fire.select(load_addr, state.fpc.out())
+    # --- template macro engine (FENTRY/FEXIT/FRET.*) ---
+    macro_active = state.macro_active.out()
+    macro_phase = state.macro_phase.out()
+    macro_op = state.macro_op.out()
+    macro_stacksize = state.macro_stacksize.out()
+    macro_reg = state.macro_reg.out()
+    macro_i = state.macro_i.out()
+    macro_sp_base = state.macro_sp_base.out()
 
-    # Commit store write port (writes at clk edge). Stop-at-store ensures that at most one
-    # store commits per cycle in this bring-up model.
-    wstrb = commit_store_size.eq(c(8, width=3)).select(c(0xFF, width=8), consts.zero8)
-    wstrb = commit_store_size.eq(c(4, width=3)).select(c(0x0F, width=8), wstrb)
+    macro_is_fentry = macro_op.eq(c(OP_FENTRY, width=12))
+    macro_phase_mem = macro_phase.eq(c(1, width=2))
+
+    macro_i1 = (macro_i + c(1, width=6)).zext(width=64)
+    macro_bytes = macro_i1.shl(amount=3)  # (i + 1) * 8
+    macro_off_ok = macro_bytes.ule(macro_stacksize)
+    macro_off = macro_stacksize - macro_bytes
+    macro_addr = macro_sp_base + macro_off
+
+    # Memory port arbitration: macro restore-load > uop load > fetch.
+    macro_mem_read = macro_active & macro_phase_mem & (~macro_is_fentry) & macro_off_ok
+    mem_raddr = macro_mem_read.select(macro_addr, any_load_fire.select(load_addr, state.fpc.out()))
+
+    # Macro save path (FENTRY): store one register per cycle.
+    cmap_now = [ren.cmap[i].out() for i in range(p.aregs)]
+    macro_reg_tag = mux_by_uindex(m, idx=macro_reg, items=cmap_now, default=tag0)
+    macro_reg_val = mux_by_uindex(m, idx=macro_reg_tag, items=prf, default=consts.zero64)
+    macro_sp_tag = ren.cmap[1].out()
+    macro_sp_val = mux_by_uindex(m, idx=macro_sp_tag, items=prf, default=consts.zero64)
+    macro_reg_is_gpr = macro_reg.ult(c(24, width=6))
+    macro_reg_not_zero = ~macro_reg.eq(c(0, width=6))
+    macro_store_fire = macro_active & macro_phase_mem & macro_is_fentry & macro_off_ok & macro_reg_is_gpr & macro_reg_not_zero
+    macro_store_addr = macro_addr
+    macro_store_data = macro_reg_val
+    macro_store_size = c(8, width=4)
+
+    # MMIO (QEMU virt compatibility).
+    #
+    # - UART data: 0x1000_0000 (write low byte)
+    # - EXIT:      0x1000_0004 (write exit code; stop simulation)
+    mmio_uart = commit_store_fire & commit_store_addr.eq(c(0x1000_0000, width=64))
+    mmio_exit = commit_store_fire & commit_store_addr.eq(c(0x1000_0004, width=64))
+    mmio_any = mmio_uart | mmio_exit
+
+    mmio_uart_data = mmio_uart.select(commit_store_data.trunc(width=8), c(0, width=8))
+    mmio_exit_code = mmio_exit.select(commit_store_data.trunc(width=32), c(0, width=32))
+
+    mem_wvalid = (commit_store_fire & (~mmio_any)) | macro_store_fire
+    mem_waddr = macro_store_fire.select(macro_store_addr, commit_store_addr)
+    mem_wdata = macro_store_fire.select(macro_store_data, commit_store_data)
+    mem_wsize = macro_store_fire.select(macro_store_size, commit_store_size)
+
+    # Store write port (writes at clk edge). Stop-at-store ensures that at most
+    # one store commits per cycle in this bring-up model; the macro engine
+    # consumes the same single write port.
+    wstrb = consts.zero8
+    wstrb = mem_wsize.eq(c(1, width=4)).select(c(0x01, width=8), wstrb)
+    wstrb = mem_wsize.eq(c(2, width=4)).select(c(0x03, width=8), wstrb)
+    wstrb = mem_wsize.eq(c(4, width=4)).select(c(0x0F, width=8), wstrb)
+    wstrb = mem_wsize.eq(c(8, width=4)).select(c(0xFF, width=8), wstrb)
 
     mem_rdata = m.byte_mem(
         clk,
         rst,
         raddr=mem_raddr,
-        wvalid=commit_store_fire,
-        waddr=commit_store_addr,
-        wdata=commit_store_data,
+        wvalid=mem_wvalid,
+        waddr=mem_waddr,
+        wdata=mem_wdata,
         wstrb=wstrb,
         depth=mem_bytes,
         name="mem",
     )
 
+    macro_phase_init = macro_phase.eq(c(0, width=2))
+    macro_phase_sp = macro_phase.eq(c(2, width=2))
+    macro_is_restore = macro_active & (~macro_is_fentry)
+
+    # Macro PRF write port (one write per cycle).
+    macro_reg_write = macro_active & macro_phase_mem & macro_is_restore & macro_off_ok & macro_reg_is_gpr & macro_reg_not_zero
+    macro_sp_write_init = macro_active & macro_phase_init & macro_is_fentry
+    macro_sp_write_restore = macro_active & macro_phase_sp & macro_is_restore
+
+    macro_prf_we = macro_reg_write | macro_sp_write_init | macro_sp_write_restore
+    macro_prf_tag = macro_sp_tag
+    macro_prf_data = consts.zero64
+    macro_prf_tag = macro_reg_write.select(macro_reg_tag, macro_prf_tag)
+    macro_prf_data = macro_reg_write.select(mem_rdata, macro_prf_data)
+    macro_prf_data = macro_sp_write_restore.select(macro_sp_base + macro_stacksize, macro_prf_data)
+    macro_prf_data = macro_sp_write_init.select(macro_sp_val - macro_stacksize, macro_prf_data)
+
     # Load result (uses mem_rdata in the same cycle raddr is set).
+    load8 = mem_rdata.trunc(width=8)
+    load16 = mem_rdata.trunc(width=16)
     load32 = mem_rdata.trunc(width=32)
-    load64 = load32.sext(width=64)
+    load_lb = load8.sext(width=64)
+    load_lbu = load8.zext(width=64)
+    load_lh = load16.sext(width=64)
+    load_lhu = load16.zext(width=64)
+    load_lw = load32.sext(width=64)
+    load_lwu = load32.zext(width=64)
+    load_ld = mem_rdata
     wb_fires = []
     wb_robs = []
     wb_pdsts = []
@@ -464,7 +845,16 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         wb_fire = issue_fires[slot]
         wb_rob = uop_robs[slot]
         wb_pdst = uop_pdsts[slot]
-        wb_value = load_fires[slot].select(load64, exs[slot].alu)
+        op = uop_ops[slot]
+        load_val = load_lw
+        load_val = op_is(op, OP_LB, OP_LBI, OP_HL_LB_PCR).select(load_lb, load_val)
+        load_val = op_is(op, OP_LBU, OP_LBUI, OP_HL_LBU_PCR).select(load_lbu, load_val)
+        load_val = op_is(op, OP_LH, OP_LHI, OP_HL_LH_PCR).select(load_lh, load_val)
+        load_val = op_is(op, OP_LHU, OP_LHUI, OP_HL_LHU_PCR).select(load_lhu, load_val)
+        load_val = op_is(op, OP_LWI, OP_C_LWI, OP_LW, OP_HL_LW_PCR).select(load_lw, load_val)
+        load_val = op_is(op, OP_LWU, OP_LWUI, OP_HL_LWU_PCR).select(load_lwu, load_val)
+        load_val = op_is(op, OP_LD, OP_LDI, OP_C_LDI, OP_HL_LD_PCR).select(load_ld, load_val)
+        wb_value = load_fires[slot].select(load_val, exs[slot].alu)
         wb_has_dst = uop_has_dsts[slot] & (~store_fires[slot])
         wb_fire_has_dst = wb_fire & wb_has_dst
 
@@ -480,7 +870,7 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     f4_pc = ifu.f4_pc.out()
     f4_window = ifu.f4_window.out()
 
-    f4_bundle = decode_bundle_8B(m, f4_window)
+    f4_bundle = decode_f4_bundle(m, f4_window)
 
     disp_valids = []
     disp_pcs = []
@@ -489,6 +879,8 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     disp_regdsts = []
     disp_srcls = []
     disp_srcrs = []
+    disp_srcr_types = []
+    disp_shamts = []
     disp_srcps = []
     disp_imms = []
     disp_is_start_marker = []
@@ -510,13 +902,44 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         regdst = dec.regdst
         srcl = dec.srcl
         srcr = dec.srcr
+        srcr_type = dec.srcr_type
+        shamt = dec.shamt
         srcp = dec.srcp
         imm = dec.imm
 
-        is_start = op.eq(c(OP_C_BSTART_STD, width=6)) | op.eq(c(OP_C_BSTART_COND, width=6)) | op.eq(c(OP_BSTART_STD_CALL, width=6))
-        push_t = regdst.eq(c(31, width=6)) | op.eq(c(OP_C_LWI, width=6))
+        is_macro = op_is(op, OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK)
+        is_start = (
+            op_is(
+                op,
+                OP_C_BSTART_STD,
+                OP_C_BSTART_COND,
+                OP_C_BSTART_DIRECT,
+                OP_BSTART_STD_FALL,
+                OP_BSTART_STD_DIRECT,
+                OP_BSTART_STD_COND,
+                OP_BSTART_STD_CALL,
+            )
+            | is_macro
+        )
+        push_t = regdst.eq(c(31, width=6)) | op.eq(c(OP_C_LWI, width=12))
         push_u = regdst.eq(c(30, width=6))
-        is_store = op.eq(c(OP_SWI, width=6)) | op.eq(c(OP_C_SWI, width=6)) | op.eq(c(OP_SDI, width=6))
+        is_store = op_is(
+            op,
+            OP_SBI,
+            OP_SHI,
+            OP_SWI,
+            OP_C_SWI,
+            OP_SDI,
+            OP_C_SDI,
+            OP_SB,
+            OP_SH,
+            OP_SW,
+            OP_SD,
+            OP_HL_SB_PCR,
+            OP_HL_SH_PCR,
+            OP_HL_SW_PCR,
+            OP_HL_SD_PCR,
+        )
 
         dst_is_invalid = regdst.eq(c(REG_INVALID, width=6))
         dst_is_zero = regdst.eq(c(0, width=6))
@@ -536,6 +959,8 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         disp_regdsts.append(regdst)
         disp_srcls.append(srcl)
         disp_srcrs.append(srcr)
+        disp_srcr_types.append(srcr_type)
+        disp_shamts.append(shamt)
         disp_srcps.append(srcp)
         disp_imms.append(imm)
         disp_is_start_marker.append(is_start)
@@ -564,20 +989,56 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     disp_to_lsu = []
     for slot in range(p.dispatch_w):
         op = disp_ops[slot]
-        is_load = op.eq(c(OP_LWI, width=6)) | op.eq(c(OP_C_LWI, width=6))
+        is_macro = op_is(op, OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK)
+        is_load = op_is(
+            op,
+            OP_LWI,
+            OP_C_LWI,
+            OP_LBI,
+            OP_LBUI,
+            OP_LHI,
+            OP_LHUI,
+            OP_LWUI,
+            OP_LB,
+            OP_LBU,
+            OP_LH,
+            OP_LHU,
+            OP_LW,
+            OP_LWU,
+            OP_LD,
+            OP_LDI,
+            OP_C_LDI,
+            OP_HL_LB_PCR,
+            OP_HL_LBU_PCR,
+            OP_HL_LH_PCR,
+            OP_HL_LHU_PCR,
+            OP_HL_LW_PCR,
+            OP_HL_LWU_PCR,
+            OP_HL_LD_PCR,
+        )
         is_store = disp_is_store[slot]
         is_mem = is_load | is_store
-        is_bru = (
-            op.eq(c(OP_C_BSTART_STD, width=6))
-            | op.eq(c(OP_C_BSTART_COND, width=6))
-            | op.eq(c(OP_C_BSTOP, width=6))
-            | op.eq(c(OP_BSTART_STD_CALL, width=6))
-            | op.eq(c(OP_C_SETC_EQ, width=6))
-            | op.eq(c(OP_C_SETC_TGT, width=6))
+        is_bru = op_is(
+            op,
+            OP_C_BSTART_STD,
+            OP_C_BSTART_COND,
+            OP_C_BSTART_DIRECT,
+            OP_C_BSTOP,
+            OP_BSTART_STD_FALL,
+            OP_BSTART_STD_DIRECT,
+            OP_BSTART_STD_COND,
+            OP_BSTART_STD_CALL,
+            OP_FENTRY,
+            OP_FEXIT,
+            OP_FRET_RA,
+            OP_FRET_STK,
+            OP_C_SETC_EQ,
+            OP_C_SETC_NE,
+            OP_C_SETC_TGT,
         )
         to_lsu = is_mem
-        to_bru = (~to_lsu) & is_bru
-        to_alu = (~to_lsu) & (~to_bru)
+        to_bru = (~to_lsu) & is_bru & (~is_macro)
+        to_alu = (~to_lsu) & (~to_bru) & (~is_macro)
         disp_to_alu.append(to_alu)
         disp_to_bru.append(to_bru)
         disp_to_lsu.append(to_lsu)
@@ -688,7 +1149,7 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     #
     # Fetch when the memory read port is available and the queue is empty (or
     # being consumed by dispatch in the same cycle).
-    fetch_bundle = decode_bundle_8B(m, mem_rdata)
+    fetch_bundle = decode_f4_bundle(m, mem_rdata)
     fetch_len = fetch_bundle.total_len_bytes
     fetch_advance = fetch_bundle.total_len_bytes.zext(width=64)
     fetch_fire = can_run & (~commit_redirect) & (~any_load_fire) & ((~f4_valid) | dispatch_fire)
@@ -780,6 +1241,7 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     ren.ready_mask.set(ready_next)
 
     # PRF writes (up to issue_w writebacks per cycle).
+    ra_tag = ra_write_tag
     for i in range(p.pregs):
         we = consts.zero1
         wdata = consts.zero64
@@ -787,6 +1249,12 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
             hit = wb_fire_has_dsts[slot] & wb_pdsts[slot].eq(c(i, width=p.ptag_w))
             we = we | hit
             wdata = hit.select(wb_values[slot], wdata)
+        hit_ra = ra_write_fire & ra_tag.eq(c(i, width=p.ptag_w))
+        we = we | hit_ra
+        wdata = hit_ra.select(ra_write_value, wdata)
+        hit_macro = macro_prf_we & macro_prf_tag.eq(c(i, width=p.ptag_w))
+        we = we | hit_macro
+        wdata = hit_macro.select(macro_prf_data, wdata)
         prf[i].set(wdata, when=we)
 
     # --- ROB updates ---
@@ -820,6 +1288,10 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         done_next = do_flush.select(consts.zero1, done_next)
         done_next = commit_hit.select(consts.zero1, done_next)
         done_next = disp_hit.select(consts.zero1, done_next)
+        for slot in range(p.dispatch_w):
+            hit = disp_fires[slot] & disp_rob_idxs[slot].eq(idx)
+            is_macro = op_is(disp_ops[slot], OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK)
+            done_next = (hit & is_macro).select(consts.one1, done_next)
         done_next = wb_hit.select(consts.one1, done_next)
         rob.done[i].set(done_next)
 
@@ -855,6 +1327,10 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
 
         val_next = rob.value[i].out()
         val_next = disp_hit.select(consts.zero64, val_next)
+        for slot in range(p.dispatch_w):
+            hit = disp_fires[slot] & disp_rob_idxs[slot].eq(idx)
+            is_macro = op_is(disp_ops[slot], OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK)
+            val_next = (hit & is_macro).select(disp_imms[slot], val_next)
         for slot in range(p.issue_w):
             hit = wb_fires[slot] & wb_robs[slot].eq(idx)
             val_next = hit.select(wb_values[slot], val_next)
@@ -871,7 +1347,7 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         st_size_next = rob.store_size[i].out()
         st_addr_next = disp_hit.select(consts.zero64, st_addr_next)
         st_data_next = disp_hit.select(consts.zero64, st_data_next)
-        st_size_next = disp_hit.select(consts.zero3, st_size_next)
+        st_size_next = disp_hit.select(consts.zero4, st_size_next)
         for slot in range(p.issue_w):
             hit = store_fires[slot] & wb_robs[slot].eq(idx)
             st_addr_next = hit.select(exs[slot].addr, st_addr_next)
@@ -880,6 +1356,15 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         rob.store_addr[i].set(st_addr_next)
         rob.store_data[i].set(st_data_next)
         rob.store_size[i].set(st_size_next)
+
+        mb_next = rob.macro_begin[i].out()
+        me_next = rob.macro_end[i].out()
+        for slot in range(p.dispatch_w):
+            hit = disp_fires[slot] & disp_rob_idxs[slot].eq(idx)
+            mb_next = hit.select(disp_srcls[slot], mb_next)
+            me_next = hit.select(disp_srcrs[slot], me_next)
+        rob.macro_begin[i].set(mb_next)
+        rob.macro_end[i].set(me_next)
 
     # ROB pointers/count.
     head_next = rob.head.out()
@@ -940,6 +1425,8 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
             imn = iq.imm[i].out()
             sln = iq.srcl[i].out()
             srn = iq.srcr[i].out()
+            stn = iq.srcr_type[i].out()
+            shn = iq.shamt[i].out()
             spn = iq.srcp[i].out()
             pdn = iq.pdst[i].out()
             hdn = iq.has_dst[i].out()
@@ -951,6 +1438,8 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
                 imn = hit.select(disp_imms[slot], imn)
                 sln = hit.select(disp_srcl_tags[slot], sln)
                 srn = hit.select(disp_srcr_tags[slot], srn)
+                stn = hit.select(disp_srcr_types[slot], stn)
+                shn = hit.select(disp_shamts[slot], shn)
                 spn = hit.select(disp_srcp_tags[slot], spn)
                 pdn = hit.select(disp_pdsts[slot], pdn)
                 hdn = hit.select(disp_need_pdst[slot], hdn)
@@ -960,6 +1449,8 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
             iq.imm[i].set(imn)
             iq.srcl[i].set(sln)
             iq.srcr[i].set(srn)
+            iq.srcr_type[i].set(stn)
+            iq.shamt[i].set(shn)
             iq.srcp[i].set(spn)
             iq.pdst[i].set(pdn)
             iq.has_dst[i].set(hdn)
@@ -995,7 +1486,20 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         areg = rob_dst_aregs[slot]
         pdst = rob_pdsts[slot]
 
-        is_start_marker = op.eq(c(OP_C_BSTART_STD, width=6)) | op.eq(c(OP_C_BSTART_COND, width=6)) | op.eq(c(OP_BSTART_STD_CALL, width=6))
+        is_macro = op_is(op, OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK)
+        is_start_marker = (
+            op_is(
+                op,
+                OP_C_BSTART_STD,
+                OP_C_BSTART_COND,
+                OP_C_BSTART_DIRECT,
+                OP_BSTART_STD_FALL,
+                OP_BSTART_STD_DIRECT,
+                OP_BSTART_STD_COND,
+                OP_BSTART_STD_CALL,
+            )
+            | is_macro
+        )
 
         # Snapshot old hand regs (from the pre-update state for this slot).
         old_t0 = cmap_live[24]
@@ -1008,7 +1512,7 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
         old_u3 = cmap_live[31]
 
         # Start marker clears: free all old hand tags and clear mappings.
-        if_free = fire & is_start_marker
+        if_free = commit_enter_new_blocks[slot]
         for old in [old_t0, old_t1, old_t2, old_t3, old_u0, old_u1, old_u2, old_u3]:
             oh = onehot_from_tag(m, tag=old, width=p.pregs, tag_width=p.ptag_w)
             free_live = (if_free & (~old.eq(tag0))).select(free_live | oh, free_live)
@@ -1077,8 +1581,9 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     halt_set = consts.zero1
     for slot in range(p.commit_w):
         op = rob_ops[slot]
-        is_halt = op.eq(c(OP_EBREAK, width=6)) | op.eq(c(OP_INVALID, width=6))
+        is_halt = op.eq(c(OP_EBREAK, width=12)) | op.eq(c(OP_INVALID, width=12))
         halt_set = halt_set | (commit_fires[slot] & is_halt)
+    halt_set = halt_set | mmio_exit
     state.halted.set(consts.one1, when=halt_set)
 
     state.cycles.set(state.cycles.out() + consts.one64)
@@ -1087,6 +1592,92 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     state.br_kind.set(br_kind_live)
     state.br_base_pc.set(br_base_live)
     state.br_off.set(br_off_live)
+
+    # --- template macro engine state updates ---
+    #
+    # Implements the bring-up ABI semantics used by QEMU/LLVM:
+    # - SP adjust: adj = stacksize (+ callframe_size, currently 0).
+    # - Save/restore regs [begin..end] at offsets (stacksize - (i+1)*8).
+    # - FRET.* commits as an explicit return via restored RA.
+    ph_init = c(0, width=2)
+    ph_mem = c(1, width=2)
+    ph_sp = c(2, width=2)
+
+    macro_active_n = macro_active
+    macro_phase_n = macro_phase
+    macro_op_n = macro_op
+    macro_begin_n = state.macro_begin.out()
+    macro_end_n = state.macro_end.out()
+    macro_stack_n = macro_stacksize
+    macro_reg_n = macro_reg
+    macro_i_n = macro_i
+    macro_sp_base_n = macro_sp_base
+
+    macro_active_n = do_flush.select(consts.zero1, macro_active_n)
+    macro_phase_n = do_flush.select(ph_init, macro_phase_n)
+
+    macro_active_n = macro_start.select(consts.one1, macro_active_n)
+    macro_phase_n = macro_start.select(ph_init, macro_phase_n)
+    macro_op_n = macro_start.select(head_op, macro_op_n)
+    macro_begin_n = macro_start.select(head_macro_begin, macro_begin_n)
+    macro_end_n = macro_start.select(head_macro_end, macro_end_n)
+    macro_stack_n = macro_start.select(head_value, macro_stack_n)
+    macro_reg_n = macro_start.select(head_macro_begin, macro_reg_n)
+    macro_i_n = macro_start.select(c(0, width=6), macro_i_n)
+
+    macro_phase_is_init = macro_phase.eq(ph_init)
+    macro_phase_is_mem = macro_phase.eq(ph_mem)
+    macro_phase_is_sp = macro_phase.eq(ph_sp)
+    macro_is_restore = macro_active & (~macro_is_fentry)
+
+    # Init: latch base SP and setup iteration.
+    init_fire = macro_active & macro_phase_is_init
+    sp_new_init = macro_sp_val - macro_stacksize
+    macro_sp_base_n = (init_fire & macro_is_fentry).select(sp_new_init, macro_sp_base_n)
+    macro_sp_base_n = (init_fire & macro_is_restore).select(macro_sp_val, macro_sp_base_n)
+    macro_reg_n = init_fire.select(state.macro_begin.out(), macro_reg_n)
+    macro_i_n = init_fire.select(c(0, width=6), macro_i_n)
+    macro_phase_n = init_fire.select(ph_mem, macro_phase_n)
+
+    # Mem loop: iterate regs and offsets; save uses store port, restore uses load port.
+    step_fire = macro_active & macro_phase_is_mem
+    step_done = step_fire & ((~macro_off_ok) | macro_reg.eq(state.macro_end.out()))
+
+    reg_plus = macro_reg + c(1, width=6)
+    reg_wrap = reg_plus.ugt(c(23, width=6))
+    reg_next = reg_wrap.select(c(2, width=6), reg_plus)
+    macro_reg_n = (step_fire & (~step_done)).select(reg_next, macro_reg_n)
+    macro_i_n = (step_fire & (~step_done)).select((macro_i + c(1, width=6)), macro_i_n)
+
+    macro_phase_n = (step_done & macro_is_restore).select(ph_sp, macro_phase_n)
+    macro_active_n = (step_done & macro_is_fentry).select(consts.zero1, macro_active_n)
+    macro_phase_n = (step_done & macro_is_fentry).select(ph_init, macro_phase_n)
+
+    # Restore SP update phase.
+    sp_fire = macro_active & macro_phase_is_sp
+    macro_active_n = sp_fire.select(consts.zero1, macro_active_n)
+    macro_phase_n = sp_fire.select(ph_init, macro_phase_n)
+
+    macro_wait_n = state.macro_wait_commit.out()
+    macro_wait_n = do_flush.select(consts.zero1, macro_wait_n)
+    macro_wait_n = macro_start.select(consts.one1, macro_wait_n)
+    macro_committed = consts.zero1
+    for slot in range(p.commit_w):
+        op = rob_ops[slot]
+        fire = commit_fires[slot]
+        macro_committed = macro_committed | (fire & op_is(op, OP_FENTRY, OP_FEXIT, OP_FRET_RA, OP_FRET_STK))
+    macro_wait_n = macro_committed.select(consts.zero1, macro_wait_n)
+
+    state.macro_active.set(macro_active_n)
+    state.macro_wait_commit.set(macro_wait_n)
+    state.macro_phase.set(macro_phase_n)
+    state.macro_op.set(macro_op_n)
+    state.macro_begin.set(macro_begin_n)
+    state.macro_end.set(macro_end_n)
+    state.macro_stacksize.set(macro_stack_n)
+    state.macro_reg.set(macro_reg_n)
+    state.macro_i.set(macro_i_n)
+    state.macro_sp_base.set(macro_sp_base_n)
 
     # --- outputs ---
     a0_tag = ren.cmap[2].out()
@@ -1108,6 +1699,39 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     m.output("commit_dst_kind", head_dst_kind)
     m.output("commit_dst_areg", head_dst_areg)
     m.output("commit_pdst", head_pdst)
+    m.output("commit_cond", state.commit_cond)
+    m.output("commit_tgt", state.commit_tgt)
+    m.output("br_kind", state.br_kind)
+    m.output("br_base_pc", state.br_base_pc)
+    m.output("br_off", state.br_off)
+    m.output("commit_store_fire", commit_store_fire)
+    m.output("commit_store_addr", commit_store_addr)
+    m.output("commit_store_data", commit_store_data)
+    m.output("commit_store_size", commit_store_size)
+
+    # Commit slot visibility (bring-up tracing): per-slot PC/op/value/fire.
+    #
+    # `commit_fire` / `commit_op` / `commit_value` remain lane0-compatible.
+    # These additional signals help debug multi-commit cycles where older
+    # commits may not appear in a slot0-only log.
+    max_commit_slots = 4
+    for slot in range(max_commit_slots):
+        fire = consts.zero1
+        pc = consts.zero64
+        rob_idx = c(0, width=p.rob_w)
+        op = c(0, width=12)
+        val = consts.zero64
+        if slot < p.commit_w:
+            fire = commit_fires[slot]
+            pc = commit_pcs[slot]
+            rob_idx = commit_idxs[slot]
+            op = rob_ops[slot]
+            val = rob_values[slot]
+        m.output(f"commit_fire{slot}", fire)
+        m.output(f"commit_pc{slot}", pc)
+        m.output(f"commit_rob{slot}", rob_idx)
+        m.output(f"commit_op{slot}", op)
+        m.output(f"commit_value{slot}", val)
     m.output("rob_count", rob.count)
 
     # Debug: committed vs speculative hand tops (T0/U0).
@@ -1139,3 +1763,71 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     m.output("mem_raddr", mem_raddr)
     m.output("dispatch_fire", dispatch_fire)
     m.output("dec_op", dec_op)
+
+    # Dispatch slot visibility (trace hook): per-slot PC/op/ROB for pipeview tools.
+    max_disp_slots = 4
+    for slot in range(max_disp_slots):
+        fire = consts.zero1
+        pc = consts.zero64
+        rob_i = c(0, width=p.rob_w)
+        op = c(0, width=12)
+        if slot < p.dispatch_w:
+            fire = disp_fires[slot]
+            pc = disp_pcs[slot]
+            rob_i = disp_rob_idxs[slot]
+            op = disp_ops[slot]
+        m.output(f"dispatch_fire{slot}", fire)
+        m.output(f"dispatch_pc{slot}", pc)
+        m.output(f"dispatch_rob{slot}", rob_i)
+        m.output(f"dispatch_op{slot}", op)
+
+    # Issue slot visibility (trace hook): per-slot PC/op/ROB for pipeview tools.
+    max_issue_slots = 4
+    for slot in range(max_issue_slots):
+        fire = consts.zero1
+        pc = consts.zero64
+        rob_i = c(0, width=p.rob_w)
+        op = c(0, width=12)
+        if slot < p.issue_w:
+            fire = issue_fires[slot]
+            pc = uop_pcs[slot]
+            rob_i = uop_robs[slot]
+            op = uop_ops[slot]
+        m.output(f"issue_fire{slot}", fire)
+        m.output(f"issue_pc{slot}", pc)
+        m.output(f"issue_rob{slot}", rob_i)
+        m.output(f"issue_op{slot}", op)
+
+    # MMIO visibility for testbenches (UART + exit).
+    m.output("mmio_uart_valid", mmio_uart)
+    m.output("mmio_uart_data", mmio_uart_data)
+    m.output("mmio_exit_valid", mmio_exit)
+    m.output("mmio_exit_code", mmio_exit_code)
+
+    # Block command export for Janus BCtrl/TMU/PE top-level bring-up.
+    block_cmd_valid = commit_fire & op_is(head_op, OP_C_BSTART_STD, OP_C_BSTART_COND, OP_BSTART_STD_CALL)
+    block_cmd_kind = head_op.eq(c(OP_C_BSTART_COND, width=6)).select(c(1, width=2), c(0, width=2))
+    block_cmd_kind = head_op.eq(c(OP_BSTART_STD_CALL, width=6)).select(c(2, width=2), block_cmd_kind)
+    block_cmd_payload = head_value
+    block_cmd_tile = head_value.trunc(width=6)
+    block_cmd_tag = state.cycles.out().trunc(width=8)
+
+    ooo_4wide = c(1 if (p.fetch_w == 4 and p.dispatch_w == 4 and p.issue_w == 4 and p.commit_w == 4) else 0, width=1)
+    m.output("ooo_4wide", ooo_4wide)
+    m.output("block_cmd_valid", block_cmd_valid)
+    m.output("block_cmd_kind", block_cmd_kind)
+    m.output("block_cmd_payload", block_cmd_payload)
+    m.output("block_cmd_tile", block_cmd_tile)
+    m.output("block_cmd_tag", block_cmd_tag)
+
+    return BccOooExports(
+        clk=clk,
+        rst=rst,
+        block_cmd_valid=block_cmd_valid.sig,
+        block_cmd_kind=block_cmd_kind.sig,
+        block_cmd_payload=block_cmd_payload.sig,
+        block_cmd_tile=block_cmd_tile.sig,
+        block_cmd_tag=block_cmd_tag.sig,
+        cycles=state.cycles.out().sig,
+        halted=state.halted.out().sig,
+    )

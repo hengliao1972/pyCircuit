@@ -10,5 +10,6 @@ This module exists as the stable import path for the OOO core builder:
 The implementation currently lives in `linxcore.py` (historical name).
 """
 
-from .linxcore import build_bcc_ooo
+from .linxcore import BccOooExports, build_bcc_ooo
 
+__all__ = ["BccOooExports", "build_bcc_ooo"]

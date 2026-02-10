@@ -187,9 +187,9 @@ class _Compiler:
         elif isinstance(v, Signal):
             w = Wire(self.m, v)
         elif isinstance(v, bool):
-            w = self.m.const_wire(int(v), width=self._ty_width(expected_ty))
+            w = self.m.const(int(v), width=self._ty_width(expected_ty))
         elif isinstance(v, int):
-            w = self.m.const_wire(int(v), width=self._ty_width(expected_ty))
+            w = self.m.const(int(v), width=self._ty_width(expected_ty))
         else:
             raise JitError(f"{ctx}: expected Wire/Reg/Signal/int, got {type(v).__name__}")
 
@@ -229,6 +229,11 @@ class _Compiler:
     def _alias_if_wire(self, v: Any, *, base_name: str, node: ast.AST) -> Any:
         n = self._scoped_name(self._name_with_loc(base_name, node))
         if isinstance(v, Wire):
+            # `pyc.assign` destinations must be defined by `pyc.wire`. The JIT
+            # compiler normally wraps assigned values in `pyc.alias` for stable
+            # naming, but that would break assignable/backedge wires.
+            if getattr(v, "assignable", False):
+                return v
             return Wire(self.m, self.m.alias(v.sig, name=n), signed=v.signed)
         if isinstance(v, Reg):
             q_named = Wire(self.m, self.m.alias(v.q.sig, name=n), signed=v.q.signed)
@@ -627,6 +632,25 @@ class _Compiler:
                 self.env[name] = cur
                 return
             raise JitError("unsupported augmented assignment operator")
+        if isinstance(node, ast.Assert):
+            test_v = self.eval_expr(node.test)
+            msg: str | None = None
+            if node.msg is not None:
+                mv = self.eval_expr(node.msg)
+                if not isinstance(mv, str):
+                    raise JitError("assert message must be a constant string")
+                msg = mv
+
+            if isinstance(test_v, (bool, int)):
+                if not bool(test_v):
+                    raise JitError(f"compile-time assert failed{': ' + msg if msg else ''}")
+                return
+
+            w = _expect_wire(test_v, ctx="assert")
+            if w.ty != "i1":
+                raise JitError("assert condition must be an i1 Wire")
+            self.m.assert_(w, msg=msg)
+            return
         if isinstance(node, ast.If):
             self.compile_if(node)
             return
@@ -698,7 +722,7 @@ class _Compiler:
 
         def int_width(v: int) -> int:
             if v < 0:
-                raise JitError("cannot infer width for negative integer constant in dynamic if; use m.const_wire(..., width=...)")
+                raise JitError("cannot infer width for negative integer constant in dynamic if; use m.const(..., width=...)")
             return max(1, int(v).bit_length())
 
         # Compile branches first (captured), then infer phi types from their final values.
@@ -904,7 +928,7 @@ class _Compiler:
             self.env[name] = self._alias_if_wire(Wire(self.m, Signal(ref=res_ref, ty=ty)), base_name=name, node=node)
 
 
-def compile(fn: Any, *, name: str | None = None, **params: Any) -> Circuit:
+def compile(fn: Any, *, name: str | None = None, design_ctx: Any | None = None, **params: Any) -> Circuit:
     """Compile a restricted Python function into a static pyCircuit Module.
 
     The function is *not executed*; it is parsed via `ast` and lowered into
@@ -931,7 +955,7 @@ def compile(fn: Any, *, name: str | None = None, **params: Any) -> Circuit:
         if a.arg not in params:
             raise JitError(f"missing JIT param {a.arg!r}")
 
-    m = Circuit(name or fn.__name__)
+    m = Circuit(name or fn.__name__, design_ctx=design_ctx)
     src_file = inspect.getsourcefile(fn) or inspect.getfile(fn)
     src_stem = None
     try:
@@ -964,11 +988,16 @@ def compile(fn: Any, *, name: str | None = None, **params: Any) -> Circuit:
     if returned and getattr(m, "_results", []):  # noqa: SLF001
         raise JitError("cannot mix `return` and explicit `m.output(...)`")
     if returned:
+        def as_out(v: Any) -> Any:
+            if isinstance(v, Reg):
+                return v.q
+            return v
+
         if len(returned) == 1:
-            m.output("out", returned[0])
+            m.output("out", as_out(returned[0]))
         else:
             for i, v in enumerate(returned):
-                m.output(f"out{i}", v)
+                m.output(f"out{i}", as_out(v))
 
     return m
 
@@ -1584,3 +1613,27 @@ def compile_cycle_aware(
                 m.output(f"out{i}" if len(returned) > 1 else "out", v)
 
     return m
+
+
+def compile_design(top_fn: Any, *, name: str | None = None, **top_params: Any):
+    """Compile a multi-module Design rooted at `top_fn`.
+
+    The returned Design contains multiple `func.func`s and preserves hierarchy
+    via `pyc.instance` ops emitted by `Circuit.instance(...)`.
+    """
+
+    from .design import Design, DesignContext
+
+    sym = name
+    if sym is None:
+        override = getattr(top_fn, "__pycircuit_name__", None)
+        if isinstance(override, str) and override.strip():
+            sym = override.strip()
+        else:
+            sym = getattr(top_fn, "__name__", "Top")
+
+    design = Design(top=str(sym))
+    ctx = DesignContext(design)
+    # Compile the top as an explicit symbol (no hash suffix).
+    ctx.specialize(top_fn, params=dict(top_params), module_name=str(sym))
+    return design

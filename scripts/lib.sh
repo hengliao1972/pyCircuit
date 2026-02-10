@@ -27,12 +27,30 @@ pyc_find_pyc_compile() {
     "${PYC_ROOT_DIR}/build-top/bin/pyc-compile"
   )
 
+  # Pick the newest executable among the common build locations. This avoids
+  # accidentally grabbing an older `pyc-compile` from a stale build directory.
+  local best=""
+  local best_mtime=0
   for c in "${candidates[@]}"; do
     if [[ -x "${c}" ]]; then
-      export PYC_COMPILE="${c}"
-      return 0
+      local mtime=0
+      if mtime="$(stat -f %m "${c}" 2>/dev/null)"; then
+        :
+      elif mtime="$(stat -c %Y "${c}" 2>/dev/null)"; then
+        :
+      else
+        mtime=0
+      fi
+      if (( mtime > best_mtime )); then
+        best="${c}"
+        best_mtime="${mtime}"
+      fi
     fi
   done
+  if [[ -n "${best}" ]]; then
+    export PYC_COMPILE="${best}"
+    return 0
+  fi
 
   if command -v pyc-compile >/dev/null 2>&1; then
     export PYC_COMPILE
@@ -48,4 +66,3 @@ pyc_pythonpath() {
   # repo-local runs.
   echo "${PYC_ROOT_DIR}/python"
 }
-

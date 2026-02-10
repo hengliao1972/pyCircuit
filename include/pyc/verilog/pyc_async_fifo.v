@@ -79,7 +79,16 @@ module pyc_async_fifo #(
   assign do_push = in_valid && in_ready;
   assign wptr_bin_next = wptr_bin + (do_push ? {{AW{1'b0}}, 1'b1} : {AW+1{1'b0}});
   assign wptr_gray_next = bin2gray(wptr_bin_next);
-  assign wfull_next = (wptr_gray_next == {~rptr_gray_w2[AW:AW-1], rptr_gray_w2[AW-2:0]});
+  // Full detection compares next wptr gray against synchronized rptr gray with
+  // the top 2 bits inverted (classic async FIFO technique). For DEPTH=2, AW=1
+  // and there are no "lower" bits to append.
+  generate
+    if (AW == 1) begin : gen_wfull_aw1
+      assign wfull_next = (wptr_gray_next == ~rptr_gray_w2);
+    end else begin : gen_wfull_awn
+      assign wfull_next = (wptr_gray_next == {~rptr_gray_w2[AW:AW-1], rptr_gray_w2[AW-2:0]});
+    end
+  endgenerate
 
   integer wi;
   always @(posedge in_clk) begin

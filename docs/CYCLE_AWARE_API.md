@@ -12,6 +12,7 @@ The cycle-aware system is a new programming paradigm for PyCircuit that tracks s
 - **Automatic Cycle Balancing**: Automatic DFF insertion when combining signals of different cycles
 - **Domain-based Cycle Management**: `next()`, `prev()`, `push()`, `pop()` methods for cycle control
 - **JIT Compilation**: Python source code compiles to MLIR hardware description
+- **Unified signal model**: create signals via `domain.signal(...)` and drive them via `.set(...)`
 
 ## Installation
 
@@ -43,8 +44,7 @@ m = CycleAwareCircuit("my_circuit")
 |--------|-------------|
 | `create_domain(name)` | Create a new clock domain |
 | `get_default_domain()` | Get the default clock domain |
-| `const_signal(value, width, domain)` | Create a constant signal |
-| `input_signal(name, width, domain)` | Create an input signal |
+| `ca_const(value, width, domain=None)` | Create a constant signal (legacy helper; prefer `domain.const(...)`) |
 | `output(name, signal)` | Register an output signal |
 | `emit_mlir()` | Generate MLIR representation |
 
@@ -60,13 +60,17 @@ domain = m.create_domain("clk")
 
 | Method | Description |
 |--------|-------------|
-| `create_signal(name, width)` | Create an input signal |
-| `create_const(value, width, name)` | Create a constant signal |
+| `input(name, width)` | Create an input port signal |
+| `signal(name, width, reset=None)` | Create a wire/flop in the current cycle (`reset!=None` → flop, `reset=None` → wire) |
+| `const(value, width)` | Create a constant in the current cycle |
 | `next()` | Advance current cycle by 1 |
 | `prev()` | Decrease current cycle by 1 |
 | `push()` | Save current cycle to stack |
 | `pop()` | Restore cycle from stack |
-| `cycle(signal, reset_value, name)` | Insert DFF register |
+| `cycle(signal, reset_value, name)` | Insert DFF register (legacy helper; prefer `signal(..., reset=...)`) |
+
+Notes:
+- `create_signal(...)` / `create_const(...)` exist for backward compatibility.
 
 ### CycleAwareSignal
 

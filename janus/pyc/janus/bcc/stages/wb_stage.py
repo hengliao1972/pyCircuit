@@ -46,7 +46,7 @@ def build_wb_stage(
     consts: Consts,
 ) -> None:
     with m.scope("WB"):
-        c = m.const_wire
+        c = m.const
 
         # Stage inputs.
         stage = state.stage.out()
@@ -170,4 +170,3 @@ def build_wb_stage(
         u_next = stack_next(m, rf.u, do_push=do_push_u, do_clear=do_clear_hands, value=memwb.value)
         commit_stack(m, rf.t, t_next)
         commit_stack(m, rf.u, u_next)
-

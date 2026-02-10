@@ -15,7 +15,7 @@
 #include <pyc/cpp/pyc_sim.hpp>
 #include <pyc/cpp/pyc_tb.hpp>
 
-#include "examples/generated/digital_clock/digital_clock_gen.hpp"
+#include "../generated/digital_clock/digital_clock_gen.hpp"
 
 using pyc::cpp::Wire;
 

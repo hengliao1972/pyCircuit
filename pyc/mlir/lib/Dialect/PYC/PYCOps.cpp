@@ -4,7 +4,10 @@
 #include "pyc/Dialect/PYC/PYCTypes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallString.h"
@@ -294,6 +297,14 @@ OpFoldResult SltOp::fold(FoldAdaptor adaptor) {
 OpFoldResult TruncOp::fold(FoldAdaptor adaptor) {
   if (getIn().getType() == getResult().getType())
     return getIn();
+  if (auto z = getIn().getDefiningOp<ZextOp>()) {
+    if (z.getIn().getType() == getResult().getType())
+      return z.getIn();
+  }
+  if (auto s = getIn().getDefiningOp<SextOp>()) {
+    if (s.getIn().getType() == getResult().getType())
+      return s.getIn();
+  }
   auto a = asIntAttr(adaptor.getIn());
   if (a)
     return intAttrFor(getResult().getType(), a->trunc(cast<IntegerType>(getResult().getType()).getWidth()));
@@ -328,6 +339,16 @@ OpFoldResult ExtractOp::fold(FoldAdaptor adaptor) {
   std::int64_t lsb = getLsbAttr().getInt();
   if (lsb == 0 && outTy.getWidth() == inTy.getWidth())
     return getIn();
+  if (auto c = getIn().getDefiningOp<ConcatOp>()) {
+    auto cTy = cast<IntegerType>(c.getResult().getType());
+    std::int64_t pos = static_cast<std::int64_t>(cTy.getWidth());
+    for (Value v : c.getInputs()) {
+      auto vTy = cast<IntegerType>(v.getType());
+      pos -= static_cast<std::int64_t>(vTy.getWidth());
+      if (pos == lsb && vTy.getWidth() == outTy.getWidth())
+        return v;
+    }
+  }
   auto a = asIntAttr(adaptor.getIn());
   if (a) {
     llvm::APInt shifted = a->lshr(static_cast<unsigned>(lsb));
@@ -708,6 +729,53 @@ LogicalResult CdcSyncOp::verify() {
   if (stagesAttr) {
     if (stagesAttr.getValue().getSExtValue() < 1)
       return emitOpError("stages must be >= 1");
+  }
+  return success();
+}
+
+LogicalResult InstanceOp::verify() {
+  auto calleeAttr = getCalleeAttr();
+  if (!calleeAttr)
+    return emitOpError("requires FlatSymbolRefAttr attribute `callee`");
+
+  auto module = (*this)->getParentOfType<ModuleOp>();
+  if (!module)
+    return emitOpError("must be contained in an MLIR module");
+
+  Operation *sym = SymbolTable::lookupSymbolIn(module, calleeAttr);
+  auto callee = dyn_cast_or_null<func::FuncOp>(sym);
+  if (!callee)
+    return emitOpError("callee must reference a func.func");
+
+  FunctionType ft = callee.getFunctionType();
+  if (ft.getNumInputs() != getNumOperands())
+    return emitOpError("operand count does not match callee signature");
+  if (ft.getNumResults() != getNumResults())
+    return emitOpError("result count does not match callee signature");
+
+  for (auto [i, ty] : llvm::enumerate(ft.getInputs())) {
+    if (getOperand(i).getType() != ty)
+      return emitOpError() << "operand type mismatch at #" << i << ": got " << getOperand(i).getType()
+                           << " expected " << ty;
+  }
+  for (auto [i, ty] : llvm::enumerate(ft.getResults())) {
+    if (getResult(i).getType() != ty)
+      return emitOpError() << "result type mismatch at #" << i << ": got " << getResult(i).getType()
+                           << " expected " << ty;
+  }
+
+  if (auto n = getNameAttr()) {
+    if (n.getValue().empty())
+      return emitOpError("name must be non-empty when provided");
+  }
+
+  return success();
+}
+
+LogicalResult AssertOp::verify() {
+  if (auto m = getMsgAttr()) {
+    if (m.getValue().empty())
+      return emitOpError("msg must be non-empty when provided");
   }
   return success();
 }

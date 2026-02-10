@@ -326,6 +326,21 @@ def PYC_CdcSyncOp : PYC_Op<"cdc_sync", [MemoryEffects<[MemRead, MemWrite]>, AllT
   let assemblyFormat = "$clk `,` $rst `,` $in attr-dict `:` type($out)";
 }
 
+def PYC_InstanceOp : PYC_Op<"instance", [Pure]> {
+  let summary = "Instantiate a sub-module";
+  let arguments = (ins Variadic<AnyType>:$inputs, FlatSymbolRefAttr:$callee, OptionalAttr<StrAttr>:$name);
+  let results = (outs Variadic<AnyType>:$outputs);
+  let hasVerifier = 1;
+  let assemblyFormat = "$inputs attr-dict `:` functional-type($inputs, $outputs)";
+}
+
+def PYC_AssertOp : PYC_Op<"assert", [MemoryEffects<[MemWrite]>]> {
+  let summary = "Simulation-only assertion (prototype)";
+  let arguments = (ins I1:$cond, OptionalAttr<StrAttr>:$msg);
+  let hasVerifier = 1;
+  let assemblyFormat = "$cond attr-dict";
+}
+
 // Fused combinational region (prototype).
 //
 // This is intended as a codegen-friendly wrapper that allows backends to emit

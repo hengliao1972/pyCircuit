@@ -10,7 +10,7 @@ from pycircuit import (
 )
 
 
-def build(m: CycleAwareCircuit, domain: CycleAwareDomain) -> None:
+def multiclock_regs(m: CycleAwareCircuit, domain: CycleAwareDomain) -> None:
     """Build two independent counters in separate clock domains.
     
     Note: This example creates a second clock domain for demonstration.
@@ -47,7 +47,10 @@ def build(m: CycleAwareCircuit, domain: CycleAwareDomain) -> None:
     m.output("b_count", b_reg.sig)
 
 
+def build():
+    return compile_cycle_aware(multiclock_regs, name="multiclock_regs", domain_name="clk_a")
+
+
 # Entry point for JIT compilation
 if __name__ == "__main__":
-    circuit = compile_cycle_aware(build, name="multiclock_regs", domain_name="clk_a")
-    print(circuit.emit_mlir())
+    print(build().emit_mlir())
