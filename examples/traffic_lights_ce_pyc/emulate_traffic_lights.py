@@ -63,8 +63,31 @@ def _digit_rows(d: int, color: str = WHITE) -> list[str]:
     return [f"{color}{r}{RESET}" for r in rows]
 
 
-def _light(on: int, color: str, label: str) -> str:
-    return f"{color}{label}{RESET}" if on else f"{DIM}{label}{RESET}"
+def _box(rows: list[str]) -> list[str]:
+    """Wrap content rows with a 1-char ASCII border."""
+    if not rows:
+        raise ValueError("expected at least 1 row for box content")
+    width = len(rows[0])
+    if any(len(r) != width for r in rows):
+        raise ValueError("all rows must be the same width for box")
+    top = "+" + "-" * width + "+"
+    mid = [f"|{r}|" for r in rows]
+    return [top, *mid, top]
+
+
+def _light_cluster(label: str, on: int, color: str) -> list[str]:
+    """3x3 letter cluster representing a single light."""
+    ch = label if on else label.lower()
+    paint = color if on else DIM
+    row = f"{paint}{ch*3}{RESET}"
+    return [row, row, row]
+
+
+def _digits_box(tens: int, ones: int, color: str = WHITE) -> list[str]:
+    d0 = _digit_rows(tens, color)
+    d1 = _digit_rows(ones, color)
+    rows = [f"{d0[i]} {d1[i]}" for i in range(3)]
+    return _box(rows)
 
 
 # =============================================================================
@@ -159,19 +182,19 @@ class TrafficLightsRTL:
 
 def render_direction(label: str, tens: int, ones: int, lights: tuple[int, int, int]) -> list[str]:
     r, y, g = lights
-    lights_str = " ".join([
-        _light(r, RED, "R"),
-        _light(y, YELLOW, "Y"),
-        _light(g, GREEN, "G"),
-    ])
-    header = f"{BOLD}{label}{RESET}  {lights_str}"
+    header = f"{BOLD}{label}{RESET}"
 
-    d0 = _digit_rows(tens, WHITE)
-    d1 = _digit_rows(ones, WHITE)
+    digits_box = _digits_box(tens, ones, WHITE)
+
+    r_cluster = _light_cluster("R", r, RED)
+    y_cluster = _light_cluster("Y", y, YELLOW)
+    g_cluster = _light_cluster("G", g, GREEN)
+    lights_row = " ".join([r_cluster[1], y_cluster[1], g_cluster[1]])
+    lights_box = _box([lights_row])
 
     lines = [header]
-    for i in range(3):
-        lines.append(f"  {d0[i]} {d1[i]}")
+    lines.extend([f"  {row}" for row in lights_box])
+    lines.extend([f"  {row}" for row in digits_box])
     return lines
 
 
