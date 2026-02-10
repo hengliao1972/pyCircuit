@@ -172,6 +172,24 @@ OP_XOR = 134
 OP_XORIW = 135
 OP_CMP_LT = 136
 
+# --- template blocks (standalone; restartable) ---
+OP_MCOPY = 137
+OP_MSET = 138
+
+# --- decoupled blocks (header + out-of-line body) ---
+OP_BSTART_TMA = 139
+OP_BSTART_CUBE = 140
+OP_BSTART_VPAR = 141
+OP_BSTART_VSEQ = 142
+
+# --- block header descriptors ---
+OP_B_TEXT = 143
+OP_B_IOT = 144
+OP_B_IOTI = 145
+OP_B_IOR = 146
+OP_B_ATTR = 147
+OP_B_DIM = 148
+
 REG_INVALID = 0x3F
 
 ST_IF = 0
