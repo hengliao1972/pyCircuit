@@ -18,6 +18,10 @@ module linx_cpu_pyc (
   input [63:0] boot_sp,
   input irq,
   input [63:0] irq_vector,
+  input host_wvalid,
+  input [63:0] host_waddr,
+  input [63:0] host_wdata,
+  input [7:0] host_wstrb,
   output halted,
   output [31:0] exit_code,
   output uart_valid,
@@ -41607,20 +41611,20 @@ pyc_byte_mem #(.ADDR_WIDTH(64), .DATA_WIDTH(64), .DEPTH(1048576)) dmem (
   .rst(rst),
   .raddr(pyc_comb_1740),
   .rdata(pyc_byte_mem_1747),
-  .wvalid(pyc_comb_1744),
-  .waddr(pyc_comb_1741),
-  .wdata(pyc_comb_1742),
-  .wstrb(pyc_comb_1743)
+  .wvalid(pyc_comb_1744 | host_wvalid),
+  .waddr(host_wvalid ? host_waddr : pyc_comb_1741),
+  .wdata(host_wvalid ? host_wdata : pyc_comb_1742),
+  .wstrb(host_wvalid ? host_wstrb : pyc_comb_1743)
 );
 pyc_byte_mem #(.ADDR_WIDTH(64), .DATA_WIDTH(64), .DEPTH(1048576)) imem (
   .clk(clk),
   .rst(rst),
   .raddr(pyc_comb_1745),
   .rdata(pyc_byte_mem_1746),
-  .wvalid(pyc_comb_1744),
-  .waddr(pyc_comb_1741),
-  .wdata(pyc_comb_1742),
-  .wstrb(pyc_comb_1743)
+  .wvalid(pyc_comb_1744 | host_wvalid),
+  .waddr(host_wvalid ? host_waddr : pyc_comb_1741),
+  .wdata(host_wvalid ? host_wdata : pyc_comb_1742),
+  .wstrb(host_wvalid ? host_wstrb : pyc_comb_1743)
 );
 pyc_reg #(.WIDTH(2)) pyc_reg_1000_inst (
   .clk(clk),

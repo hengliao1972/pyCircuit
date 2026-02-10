@@ -1,0 +1,17 @@
+{
+  "core": "ooo",
+  "boot_pc": "0x0000000000010000",
+  "boot_sp": "0x000000000003ff00",
+  "tests": [
+    { "name": "test_or", "memh": "janus/programs/test_or.memh", "expected_exit": 0 },
+    { "name": "test_csel_fixed", "memh": "janus/programs/test_csel_fixed.memh", "expected_exit": 0 },
+    { "name": "test_store100_llvm", "memh": "janus/programs/test_store100_llvm.memh", "expected_exit": 0 },
+    { "name": "test_branch2", "memh": "janus/programs/test_branch2.memh", "boot_pc": "0x000000000001000a", "expected_exit": 0 },
+    { "name": "test_call_simple", "memh": "janus/programs/test_call_simple.memh", "boot_pc": "0x000000000001001c", "expected_exit": 0 },
+    { "name": "test_jump", "memh": "janus/programs/test_jump.memh", "expected_exit": 0 },
+    { "name": "test_pcrel", "memh": "janus/programs/test_pcrel.memh", "expected_exit": 0 },
+
+    { "name": "coremark_lite", "memh": "janus/generated/benchmarks/coremark_lite.memh", "expected_exit": 0 },
+    { "name": "dhrystone_lite", "memh": "janus/generated/benchmarks/dhrystone_lite.memh", "expected_exit": 0 }
+  ]
+}

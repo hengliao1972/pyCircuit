@@ -119,6 +119,10 @@ module tb_janus_bcc_ooo_pyc;
       .rst(rst),
       .boot_pc(boot_pc),
       .boot_sp(boot_sp),
+      .host_wvalid(1'b0),
+      .host_waddr(64'd0),
+      .host_wdata(64'd0),
+      .host_wstrb(8'd0),
       .halted(halted),
       .cycles(cycles),
       .pc(pc),
@@ -246,10 +250,13 @@ module tb_janus_bcc_ooo_pyc;
   longint unsigned max_cycles;
   longint unsigned expected_mem100;
   longint unsigned expected_a0;
+  longint unsigned expected_exit;
   bit has_expected_mem100;
   bit has_expected_a0;
+  bit has_expected_exit;
   bit has_expected_exit_pc;
   logic [31:0] got_mem100;
+  logic [31:0] got_exit_code;
   longint unsigned i;
   longint unsigned expected_exit_pc;
   int unsigned exit_pc_stable_cycles;
@@ -389,11 +396,13 @@ module tb_janus_bcc_ooo_pyc;
 
     has_expected_mem100 = $value$plusargs("expected_mem100=%h", expected_mem100);
     has_expected_a0 = $value$plusargs("expected_a0=%h", expected_a0);
+    has_expected_exit = $value$plusargs("expected_exit=%h", expected_exit);
     has_expected_exit_pc = $value$plusargs("expected_exit_pc=%h", expected_exit_pc);
     exit_pc_stable_cycles = 8;
     void'($value$plusargs("exit_pc_stable=%d", exit_pc_stable_cycles));
     exit_pc_stable = 0;
     done = 0;
+    got_exit_code = 32'd0;
 
     vcd_path = "janus/generated/janus_bcc_ooo_pyc/tb_janus_bcc_ooo_pyc_sv.vcd";
     log_path = "janus/generated/janus_bcc_ooo_pyc/tb_janus_bcc_ooo_pyc_sv.log";
@@ -469,6 +478,7 @@ module tb_janus_bcc_ooo_pyc;
         $write("%c", mmio_uart_data);
       end
       if (mmio_exit_valid) begin
+        got_exit_code = mmio_exit_code;
         done = 1;
       end
       if (log_fd != 0 && log_commits) begin
@@ -639,6 +649,10 @@ module tb_janus_bcc_ooo_pyc;
     end
 
     got_mem100 = mem_read32(32'h0000_0100);
+
+    if (has_expected_exit && got_exit_code !== expected_exit[31:0]) begin
+      $fatal(1, "FAIL: exit_code=0x%08x expected_exit=0x%08x", got_exit_code, expected_exit[31:0]);
+    end
 
     if (has_expected_mem100 && got_mem100 !== expected_mem100[31:0]) begin
       $fatal(1, "FAIL: mem[0x100]=0x%08x expected=0x%08x", got_mem100, expected_mem100[31:0]);

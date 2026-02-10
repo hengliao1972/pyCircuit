@@ -115,6 +115,13 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     boot_pc = m.input("boot_pc", width=64)
     boot_sp = m.input("boot_sp", width=64)
 
+    # Host loader write port (used by PS/PL FPGA bring-up). This is intended to
+    # be driven while the core is held in reset.
+    host_wvalid = m.input("host_wvalid", width=1)
+    host_waddr = m.input("host_waddr", width=64)
+    host_wdata = m.input("host_wdata", width=64)
+    host_wstrb = m.input("host_wstrb", width=8)
+
     c = m.const
     consts = make_consts(m)
 
@@ -795,14 +802,19 @@ def build_bcc_ooo(m: Circuit, *, mem_bytes: int, params: OooParams | None = None
     wstrb = mem_wsize.eq(c(4, width=4)).select(c(0x0F, width=8), wstrb)
     wstrb = mem_wsize.eq(c(8, width=4)).select(c(0xFF, width=8), wstrb)
 
+    mem_wvalid_eff = mem_wvalid | host_wvalid
+    mem_waddr_eff = host_wvalid.select(host_waddr, mem_waddr)
+    mem_wdata_eff = host_wvalid.select(host_wdata, mem_wdata)
+    wstrb_eff = host_wvalid.select(host_wstrb, wstrb)
+
     mem_rdata = m.byte_mem(
         clk,
         rst,
         raddr=mem_raddr,
-        wvalid=mem_wvalid,
-        waddr=mem_waddr,
-        wdata=mem_wdata,
-        wstrb=wstrb,
+        wvalid=mem_wvalid_eff,
+        waddr=mem_waddr_eff,
+        wdata=mem_wdata_eff,
+        wstrb=wstrb_eff,
         depth=mem_bytes,
         name="mem",
     )

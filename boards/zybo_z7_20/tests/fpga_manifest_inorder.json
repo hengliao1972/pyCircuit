@@ -1,0 +1,16 @@
+{
+  "core": "inorder",
+  "boot_pc": "0x0000000000010000",
+  "boot_sp": "0x000000000003ff00",
+  "tests": [
+    { "name": "test_or", "memh": "examples/linx_cpu/programs/test_or.memh", "expected_exit": 0 },
+    { "name": "test_csel_fixed", "memh": "examples/linx_cpu/programs/test_csel_fixed.memh", "expected_exit": 0 },
+    { "name": "test_branch2", "memh": "examples/linx_cpu/programs/test_branch2.memh", "expected_exit": 0 },
+    { "name": "test_call_simple", "memh": "examples/linx_cpu/programs/test_call_simple.memh", "expected_exit": 0 },
+    { "name": "test_jump", "memh": "examples/linx_cpu/programs/test_jump.memh", "expected_exit": 0 },
+    { "name": "test_pcrel", "memh": "examples/linx_cpu/programs/test_pcrel.memh", "expected_exit": 0 },
+
+    { "name": "coremark_lite", "memh": "janus/generated/benchmarks/coremark_lite.memh", "expected_exit": 0 },
+    { "name": "dhrystone_lite", "memh": "janus/generated/benchmarks/dhrystone_lite.memh", "expected_exit": 0 }
+  ]
+}

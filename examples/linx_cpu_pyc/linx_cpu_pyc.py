@@ -110,6 +110,13 @@ def build(
     irq = m.input("irq", width=1)
     irq_vector = m.input("irq_vector", width=64)
 
+    # Host loader write port (used by PS/PL FPGA bring-up). This is intended to
+    # be driven while the core is held in reset.
+    host_wvalid = m.input("host_wvalid", width=1)
+    host_waddr = m.input("host_waddr", width=64)
+    host_wdata = m.input("host_wdata", width=64)
+    host_wstrb = m.input("host_wstrb", width=8)
+
     consts = make_consts(m)
 
     # QEMU test framework MMIO.
@@ -490,6 +497,12 @@ def build(
         dmem_wdata = macro_mem_wdata
         dmem_wstrb = macro_mem_wstrb
 
+    # Merge in host writes (priority) for FPGA bring-up loaders.
+    mem_wvalid = dmem_wvalid | host_wvalid
+    mem_waddr = host_wvalid.select(host_waddr, dmem_waddr)
+    mem_wdata = host_wvalid.select(host_wdata, dmem_wdata)
+    mem_wstrb = host_wvalid.select(host_wstrb, dmem_wstrb)
+
     # Instruction fetch port (I$): always reads at the fetch PC.
     imem_raddr = state.pc.out()
 
@@ -499,10 +512,10 @@ def build(
         clk,
         rst,
         raddr=imem_raddr,
-        wvalid=dmem_wvalid,
-        waddr=dmem_waddr,
-        wdata=dmem_wdata,
-        wstrb=dmem_wstrb,
+        wvalid=mem_wvalid,
+        waddr=mem_waddr,
+        wdata=mem_wdata,
+        wstrb=mem_wstrb,
         depth_bytes=mem_bytes,
         name="imem",
     )
@@ -511,10 +524,10 @@ def build(
         clk,
         rst,
         raddr=dmem_raddr_eff,
-        wvalid=dmem_wvalid,
-        waddr=dmem_waddr,
-        wdata=dmem_wdata,
-        wstrb=dmem_wstrb,
+        wvalid=mem_wvalid,
+        waddr=mem_waddr,
+        wdata=mem_wdata,
+        wstrb=mem_wstrb,
         depth_bytes=mem_bytes,
         name="dmem",
     )

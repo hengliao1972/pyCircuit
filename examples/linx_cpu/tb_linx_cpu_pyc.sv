@@ -59,6 +59,10 @@ module tb_linx_cpu_pyc;
       .boot_sp(boot_sp),
       .irq(irq),
       .irq_vector(irq_vector),
+      .host_wvalid(1'b0),
+      .host_waddr(64'd0),
+      .host_wdata(64'd0),
+      .host_wstrb(8'd0),
       .halted(halted),
       .exit_code(exit_code),
       .uart_valid(uart_valid),
@@ -109,6 +113,8 @@ module tb_linx_cpu_pyc;
 
   string memh_path;
   int unsigned expected;
+  int unsigned expected_exit;
+  bit do_memcheck;
   string vcd_path;
   string log_path;
   int log_fd;
@@ -227,6 +233,10 @@ module tb_linx_cpu_pyc;
     if (!$value$plusargs("expected=%h", expected)) begin
       expected = 32'h0000_ff00;
     end
+    if (!$value$plusargs("expected_exit=%h", expected_exit)) begin
+      expected_exit = 32'h0000_0000;
+    end
+    do_memcheck = !$test$plusargs("no_memcheck");
 
     // Tracing / logging (default: enabled; disable with +notrace / +nolog).
     vcd_path = "examples/generated/linx_cpu_pyc/tb_linx_cpu_pyc_sv.vcd";
@@ -261,7 +271,7 @@ module tb_linx_cpu_pyc;
       log_fd = 0;
     end
 
-    $display("tb_linx_cpu_pyc: memh=%s expected=0x%08x", memh_path, expected);
+    $display("tb_linx_cpu_pyc: memh=%s expected=0x%08x expected_exit=0x%08x", memh_path, expected, expected_exit);
 
     // Bring-up model has separate I$ + D$ byte memories. Load the image into both.
     $readmemh(memh_path, dut.imem.mem);
@@ -354,8 +364,12 @@ module tb_linx_cpu_pyc;
       $fatal(1, "FAIL: did not halt (pc=0x%016x cycles=%0d)", pc, cycles);
     end
 
+    if (exit_code !== expected_exit[31:0]) begin
+      $fatal(1, "FAIL: exit_code=0x%08x expected_exit=0x%08x", exit_code, expected_exit[31:0]);
+    end
+
     got = mem_read32(32'h0000_0100);
-    if (got !== expected[31:0]) begin
+    if (do_memcheck && got !== expected[31:0]) begin
       $fatal(1, "FAIL: mem[0x100]=0x%08x expected=0x%08x", got, expected[31:0]);
     end
 
