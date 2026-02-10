@@ -17,6 +17,8 @@ Derived:
 """
 from __future__ import annotations
 
+import os
+
 from pycircuit import (
     CycleAwareCircuit,
     CycleAwareDomain,
@@ -97,14 +99,14 @@ def _traffic_lights_impl(
     is_ns_yellow = phase_r.eq(c(PH_NS_YELLOW, 2))
     yellow_active = is_ew_yellow | is_ns_yellow
 
-    # Countdown end flags (1 -> reload at next tick)
-    ew_end = ew_cnt_r.eq(c(1, CNT_W))
-    ns_end = ns_cnt_r.eq(c(1, CNT_W))
+    # Countdown end flags (0 -> trigger transition/reload)
+    ew_end = ew_cnt_r.eq(c(0, CNT_W))
+    ns_end = ns_cnt_r.eq(c(0, CNT_W))
 
     ew_cnt_dec = ew_cnt_r - 1
     ns_cnt_dec = ns_cnt_r - 1
 
-    # Phase transitions
+    # Phase transitions (when counter reaches 0 on a tick)
     cond_ew_to_yellow = tick_1hz & is_ew_green & ew_end
     cond_ew_to_ns_green = tick_1hz & is_ew_yellow & ew_end
     cond_ns_to_yellow = tick_1hz & is_ns_green & ns_end
@@ -118,14 +120,14 @@ def _traffic_lights_impl(
 
     # EW countdown
     ew_cnt_next = ew_cnt_r
-    ew_cnt_next = mux(tick_1hz, ew_cnt_dec, ew_cnt_next)
+    ew_cnt_next = mux(tick_1hz & (~ew_end), ew_cnt_dec, ew_cnt_next)
     ew_cnt_next = mux(cond_ew_to_yellow, c(EW_YELLOW_S, CNT_W), ew_cnt_next)
     ew_cnt_next = mux(cond_ew_to_ns_green, c(EW_RED_S, CNT_W), ew_cnt_next)
     ew_cnt_next = mux(cond_ns_to_ew_green, c(EW_GREEN_S, CNT_W), ew_cnt_next)
 
     # NS countdown
     ns_cnt_next = ns_cnt_r
-    ns_cnt_next = mux(tick_1hz, ns_cnt_dec, ns_cnt_next)
+    ns_cnt_next = mux(tick_1hz & (~ns_end), ns_cnt_dec, ns_cnt_next)
     ns_cnt_next = mux(cond_ew_to_ns_green, c(NS_GREEN_S, CNT_W), ns_cnt_next)
     ns_cnt_next = mux(cond_ns_to_yellow, c(NS_YELLOW_S, CNT_W), ns_cnt_next)
     ns_cnt_next = mux(cond_ns_to_ew_green, c(NS_RED_S, CNT_W), ns_cnt_next)
@@ -214,14 +216,23 @@ def traffic_lights_ce_pyc(
 # ------------------------------------------------------------------
 
 def build():
+    def _env_int(key: str, default: int) -> int:
+        raw = os.getenv(key)
+        if raw is None:
+            return default
+        try:
+            return int(raw, 0)
+        except ValueError as exc:
+            raise ValueError(f"invalid {key}={raw!r}") from exc
+
     return compile_cycle_aware(
         traffic_lights_ce_pyc,
         name="traffic_lights_ce_pyc",
-        CLK_FREQ=50_000_000,
-        EW_GREEN_S=45,
-        EW_YELLOW_S=5,
-        NS_GREEN_S=30,
-        NS_YELLOW_S=5,
+        CLK_FREQ=_env_int("PYC_TL_CLK_FREQ", 50_000_000),
+        EW_GREEN_S=_env_int("PYC_TL_EW_GREEN_S", 45),
+        EW_YELLOW_S=_env_int("PYC_TL_EW_YELLOW_S", 5),
+        NS_GREEN_S=_env_int("PYC_TL_NS_GREEN_S", 30),
+        NS_YELLOW_S=_env_int("PYC_TL_NS_YELLOW_S", 5),
     )
 
 

@@ -193,6 +193,11 @@ def main():
         default="emergency_pulse",
         help="Stimulus module name (e.g. basic, emergency_pulse, pause_resume)",
     )
+    ap.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print extra debug info (BCD values as integers)",
+    )
     args = ap.parse_args()
 
     stim = _load_stimulus(args.stim)
@@ -219,8 +224,12 @@ def main():
         ew_lines = render_direction("EW", ew_t, ew_o, rtl.ew_lights)
         ns_lines = render_direction("NS", ns_t, ns_o, rtl.ns_lights)
 
+        ew_val = ew_t * 10 + ew_o
+        ns_val = ns_t * 10 + ns_o
         print(f"{CYAN}traffic_lights_ce_pyc{RESET}  cycle={rtl.cycle}  sec={sec}")
         print(f"go={rtl.go}  emergency={rtl.emergency}  CLK_FREQ={RTL_CLK_FREQ}")
+        if args.debug:
+            print(f"ew_bcd={ew_t}{ew_o} ({ew_val})  ns_bcd={ns_t}{ns_o} ({ns_val})")
         print("")
         for line in ew_lines:
             print(line)

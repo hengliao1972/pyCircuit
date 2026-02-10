@@ -44,14 +44,14 @@ Derived durations:
 
 ## Build and Run
 
-The emulator assumes `CLK_FREQ=1000` for fast visualization. The following sequence is
+The emulator assumes `CLK_FREQ=1000` for fast visualization. Set it via
+`PYC_TL_CLK_FREQ=1000` when emitting the design. The following sequence is
 verified end-to-end (including all stimuli):
 
 ```bash
-PYTHONPATH=python python3 -m pycircuit.cli emit \
+PYC_TL_CLK_FREQ=1000 PYTHONPATH=python python3 -m pycircuit.cli emit \
   examples/traffic_lights_ce_pyc/traffic_lights_ce.py \
-  -o /tmp/traffic_lights_ce_pyc.pyc \
-  --param CLK_FREQ=1000
+  -o /tmp/traffic_lights_ce_pyc.pyc
 
 ./build/bin/pyc-compile /tmp/traffic_lights_ce_pyc.pyc \
   --emit=verilog --out-dir=examples/generated/traffic_lights_ce_pyc
@@ -76,11 +76,3 @@ Available modules live under `examples/traffic_lights_ce_pyc/stimuli/`.
 - `basic`: continuous run, no interruptions
 - `emergency_pulse`: assert emergency for a window
 - `pause_resume`: toggle `go` to pause/resume
-
-Examples:
-
-```bash
-python examples/traffic_lights_ce_pyc/emulate_traffic_lights.py --stim basic
-python examples/traffic_lights_ce_pyc/emulate_traffic_lights.py --stim emergency_pulse
-python examples/traffic_lights_ce_pyc/emulate_traffic_lights.py --stim pause_resume
-```
