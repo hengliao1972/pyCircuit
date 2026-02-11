@@ -97,6 +97,42 @@ def ripple_carry_adder(domain, a_bits, b_bits, cin, name="rca"):
     return sums, carry, depth
 
 
+def carry_select_adder(domain, a_bits, b_bits, cin, name="csa"):
+    """N-bit carry-select adder — splits into halves for faster carry propagation.
+
+    Low half:  normal RCA (produces carry_out_low)
+    High half: two RCAs in parallel (cin=0 and cin=1), mux on carry_out_low.
+    depth = max(2*half, 2*half + 2) = N + 2   (vs 2*N for plain RCA).
+    """
+    n = len(a_bits)
+    assert len(b_bits) == n
+    if n <= 4:
+        return ripple_carry_adder(domain, a_bits, b_bits, cin, name)
+
+    half = n // 2
+    lo_a, hi_a = a_bits[:half], a_bits[half:]
+    lo_b, hi_b = b_bits[:half], b_bits[half:]
+
+    # Low half — standard RCA
+    lo_sum, lo_cout, lo_depth = ripple_carry_adder(
+        domain, lo_a, lo_b, cin, f"{name}_lo")
+
+    # High half — two RCAs in parallel (cin=0 and cin=1)
+    from pycircuit import mux as mux_fn
+    c = lambda v, w: domain.const(v, width=w)
+    hi_sum0, hi_cout0, _ = ripple_carry_adder(
+        domain, hi_a, hi_b, c(0, 1), f"{name}_hi0")
+    hi_sum1, hi_cout1, _ = ripple_carry_adder(
+        domain, hi_a, hi_b, c(1, 1), f"{name}_hi1")
+
+    # MUX select based on low carry-out
+    hi_sum = [mux_fn(lo_cout, hi_sum1[i], hi_sum0[i]) for i in range(len(hi_a))]
+    cout = mux_fn(lo_cout, hi_cout1, hi_cout0)
+
+    depth = lo_depth + 2  # RCA(half) + MUX
+    return lo_sum + hi_sum, cout, depth
+
+
 def ripple_carry_adder_packed(domain, a, b, cin, width, name="rca"):
     """Packed version: takes N-bit signals, returns N-bit sum + cout.
 
@@ -220,6 +256,7 @@ def reduce_partial_products(domain, pp_rows, result_width, name="mul"):
     while len(rows) > 2:
         new_rows = []
         i = 0
+        round_depth = 0
         while i + 2 < len(rows):
             a_row = rows[i]
             b_row = rows[i + 1]
@@ -234,20 +271,21 @@ def reduce_partial_products(domain, pp_rows, result_width, name="mul"):
                 c_shifted.append(zero)
             new_rows.append(s_row[:result_width])
             new_rows.append(c_shifted[:result_width])
-            depth += d
+            round_depth = max(round_depth, d)  # parallel CSAs — same depth
             i += 3
         # Remaining rows (0, 1, or 2) pass through
         while i < len(rows):
             new_rows.append(rows[i])
             i += 1
+        depth += round_depth
         rows = new_rows
 
-    # Final addition of 2 rows
+    # Final addition of 2 rows using carry-select adder (faster than RCA)
     if len(rows) == 2:
-        sum_bits, _, rca_depth = ripple_carry_adder(
+        sum_bits, _, final_depth = carry_select_adder(
             domain, rows[0], rows[1], zero, name=f"{name}_final"
         )
-        depth += rca_depth
+        depth += final_depth
     elif len(rows) == 1:
         sum_bits = rows[0]
     else:

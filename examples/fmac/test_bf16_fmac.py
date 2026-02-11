@@ -166,9 +166,9 @@ def main():
     print(f"\n  {CYAN}Pipeline Critical Path Analysis:{RESET}")
     depths = {
         "Stage 1: Unpack + Exp Add": 8,
-        "Stage 2: 8x8 Multiply": 46,
+        "Stage 2: 8x8 Multiply": 28,
         "Stage 3: Align + Add": 21,
-        "Stage 4: Normalize + Pack": 27,
+        "Stage 4: Normalize + Pack": 31,
     }
     for stage, d in depths.items():
         bar = "█" * (d // 2)
