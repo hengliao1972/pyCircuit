@@ -36,12 +36,14 @@ try:
     from .primitive_standard_cells import (
         unsigned_multiplier, ripple_carry_adder_packed,
         barrel_shift_right, barrel_shift_left, leading_zero_count,
+        multiplier_pp_and_partial_reduce, multiplier_complete_reduce,
     )
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from primitive_standard_cells import (
         unsigned_multiplier, ripple_carry_adder_packed,
         barrel_shift_right, barrel_shift_left, leading_zero_count,
+        multiplier_pp_and_partial_reduce, multiplier_complete_reduce,
     )
 
 
@@ -77,18 +79,22 @@ def _bf16_fmac_impl(m, domain):
     # ════════════════════════════════════════════════════════════
 
     # Stage 1→2 registers (Q at cycle 1)
+    # After partial product generation + 2 CSA rounds, the intermediate
+    # carry-save rows (up to ~4-6 rows of PROD_MANT_W bits) are stored here.
+    MAX_INTER_ROWS = 6  # max rows after 2 CSA rounds from 8 PP rows
     domain.push()
     domain.next()  # cycle 1
     s1_prod_sign  = domain.signal("s1_prod_sign",  width=1,  reset=0)
-    s1_prod_exp   = domain.signal("s1_prod_exp",   width=10, reset=0)  # biased, may overflow
-    s1_a_mant     = domain.signal("s1_a_mant",     width=BF16_MANT_FULL, reset=0)
-    s1_b_mant     = domain.signal("s1_b_mant",     width=BF16_MANT_FULL, reset=0)
+    s1_prod_exp   = domain.signal("s1_prod_exp",   width=10, reset=0)
     s1_acc_sign   = domain.signal("s1_acc_sign",   width=1,  reset=0)
     s1_acc_exp    = domain.signal("s1_acc_exp",    width=8,  reset=0)
     s1_acc_mant   = domain.signal("s1_acc_mant",   width=FP32_MANT_FULL, reset=0)
     s1_prod_zero  = domain.signal("s1_prod_zero",  width=1,  reset=0)
     s1_acc_zero   = domain.signal("s1_acc_zero",   width=1,  reset=0)
     s1_valid      = domain.signal("s1_valid",      width=1,  reset=0)
+    s1_mul_rows   = [domain.signal(f"s1_mul_row{i}", width=PROD_MANT_W, reset=0)
+                     for i in range(MAX_INTER_ROWS)]
+    s1_mul_nrows  = domain.signal("s1_mul_nrows", width=4, reset=0)  # actual row count
 
     # Stage 2→3 registers (Q at cycle 2)
     domain.next()  # cycle 2
@@ -155,32 +161,44 @@ def _bf16_fmac_impl(m, domain):
     # Product is zero if either input is zero
     prod_zero = a_is_zero | b_is_zero
 
-    pipeline_depths["Stage 1: Unpack + Exp Add"] = s1_depth
+    # ── Partial product generation + 2 CSA rounds (still in Stage 1) ──
+    CSA_ROUNDS_IN_S1 = 2
+    mul_inter_rows, pp_csa_depth = multiplier_pp_and_partial_reduce(
+        domain, a_mant, b_mant,
+        BF16_MANT_FULL, BF16_MANT_FULL,
+        csa_rounds=CSA_ROUNDS_IN_S1, name="mantmul"
+    )
+    s1_depth = max(s1_depth, 8 + pp_csa_depth)  # unpack(~8) + PP+CSA in parallel
+    n_inter_rows = len(mul_inter_rows)
+
+    pipeline_depths["Stage 1: Unpack + PP + 2×CSA"] = s1_depth
 
     # ──── Pipeline register write (cycle 0 → 1) ────
     domain.next()  # → cycle 1
 
     s1_prod_sign.set(prod_sign)
     s1_prod_exp.set(prod_exp)
-    s1_a_mant.set(a_mant)
-    s1_b_mant.set(b_mant)
     s1_acc_sign.set(acc_sign)
     s1_acc_exp.set(acc_exp)
     s1_acc_mant.set(acc_mant)
     s1_prod_zero.set(prod_zero)
     s1_acc_zero.set(acc_is_zero)
     s1_valid.set(valid_in)
+    # Store intermediate multiply rows
+    for i in range(MAX_INTER_ROWS):
+        if i < n_inter_rows:
+            s1_mul_rows[i].set(mul_inter_rows[i])
+        else:
+            s1_mul_rows[i].set(c(0, PROD_MANT_W))
+    s1_mul_nrows.set(c(n_inter_rows, 4))
 
     # ════════════════════════════════════════════════════════════
-    # STAGE 2 (cycle 1): 8×8 mantissa multiply
+    # STAGE 2 (cycle 1): Complete multiply (remaining CSA + carry-select)
     # ════════════════════════════════════════════════════════════
-    # 8×8 unsigned mantissa multiply using standard-cell primitives
-    # (partial products + Wallace tree reduction + final RCA)
-    prod_mant, mul_depth = unsigned_multiplier(
-        domain, s1_a_mant, s1_b_mant,
-        BF16_MANT_FULL, BF16_MANT_FULL, name="mantmul"
+    prod_mant, mul_depth = multiplier_complete_reduce(
+        domain, s1_mul_rows[:n_inter_rows], PROD_MANT_W, name="mantmul"
     )
-    pipeline_depths["Stage 2: 8x8 Multiply"] = mul_depth
+    pipeline_depths["Stage 2: Complete Multiply"] = mul_depth
 
     # ──── Pipeline register write (cycle 1 → 2) ────
     domain.next()  # → cycle 2

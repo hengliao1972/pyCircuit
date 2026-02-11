@@ -23,14 +23,10 @@ module bf16_fmac (
 );
 
 wire [5:0] norm_lzc_cnt; // pyc.name="norm_lzc_cnt"
-wire [9:0] pyc_add_111; // op=pyc.add
-wire [9:0] pyc_add_537; // op=pyc.add
-wire [26:0] pyc_add_582; // op=pyc.add
-wire [9:0] pyc_add_672; // op=pyc.add
-wire pyc_and_130; // op=pyc.and
-wire pyc_and_131; // op=pyc.and
-wire pyc_and_132; // op=pyc.and
-wire pyc_and_133; // op=pyc.and
+wire [9:0] pyc_add_115; // op=pyc.add
+wire [9:0] pyc_add_808; // op=pyc.add
+wire [26:0] pyc_add_853; // op=pyc.add
+wire [9:0] pyc_add_945; // op=pyc.add
 wire pyc_and_134; // op=pyc.and
 wire pyc_and_135; // op=pyc.and
 wire pyc_and_136; // op=pyc.and
@@ -91,151 +87,174 @@ wire pyc_and_190; // op=pyc.and
 wire pyc_and_191; // op=pyc.and
 wire pyc_and_192; // op=pyc.and
 wire pyc_and_193; // op=pyc.and
+wire pyc_and_194; // op=pyc.and
 wire pyc_and_195; // op=pyc.and
-wire pyc_and_198; // op=pyc.and
+wire pyc_and_196; // op=pyc.and
+wire pyc_and_197; // op=pyc.and
 wire pyc_and_199; // op=pyc.and
+wire pyc_and_202; // op=pyc.and
 wire pyc_and_203; // op=pyc.and
-wire pyc_and_204; // op=pyc.and
+wire pyc_and_207; // op=pyc.and
 wire pyc_and_208; // op=pyc.and
-wire pyc_and_209; // op=pyc.and
+wire pyc_and_212; // op=pyc.and
 wire pyc_and_213; // op=pyc.and
-wire pyc_and_214; // op=pyc.and
+wire pyc_and_217; // op=pyc.and
 wire pyc_and_218; // op=pyc.and
-wire pyc_and_219; // op=pyc.and
+wire pyc_and_222; // op=pyc.and
 wire pyc_and_223; // op=pyc.and
-wire pyc_and_224; // op=pyc.and
 wire pyc_and_227; // op=pyc.and
-wire pyc_and_229; // op=pyc.and
-wire pyc_and_232; // op=pyc.and
+wire pyc_and_228; // op=pyc.and
+wire pyc_and_231; // op=pyc.and
 wire pyc_and_233; // op=pyc.and
+wire pyc_and_236; // op=pyc.and
 wire pyc_and_237; // op=pyc.and
-wire pyc_and_238; // op=pyc.and
+wire pyc_and_241; // op=pyc.and
 wire pyc_and_242; // op=pyc.and
-wire pyc_and_243; // op=pyc.and
+wire pyc_and_246; // op=pyc.and
 wire pyc_and_247; // op=pyc.and
-wire pyc_and_248; // op=pyc.and
+wire pyc_and_251; // op=pyc.and
 wire pyc_and_252; // op=pyc.and
-wire pyc_and_253; // op=pyc.and
+wire pyc_and_256; // op=pyc.and
 wire pyc_and_257; // op=pyc.and
-wire pyc_and_258; // op=pyc.and
 wire pyc_and_261; // op=pyc.and
-wire pyc_and_263; // op=pyc.and
-wire pyc_and_266; // op=pyc.and
+wire pyc_and_262; // op=pyc.and
+wire pyc_and_265; // op=pyc.and
 wire pyc_and_267; // op=pyc.and
+wire pyc_and_270; // op=pyc.and
 wire pyc_and_271; // op=pyc.and
-wire pyc_and_272; // op=pyc.and
+wire pyc_and_275; // op=pyc.and
 wire pyc_and_276; // op=pyc.and
-wire pyc_and_277; // op=pyc.and
+wire pyc_and_280; // op=pyc.and
 wire pyc_and_281; // op=pyc.and
-wire pyc_and_282; // op=pyc.and
+wire pyc_and_285; // op=pyc.and
 wire pyc_and_286; // op=pyc.and
-wire pyc_and_287; // op=pyc.and
+wire pyc_and_290; // op=pyc.and
 wire pyc_and_291; // op=pyc.and
-wire pyc_and_292; // op=pyc.and
+wire pyc_and_295; // op=pyc.and
 wire pyc_and_296; // op=pyc.and
-wire pyc_and_297; // op=pyc.and
 wire pyc_and_300; // op=pyc.and
-wire pyc_and_303; // op=pyc.and
+wire pyc_and_301; // op=pyc.and
 wire pyc_and_304; // op=pyc.and
+wire pyc_and_307; // op=pyc.and
 wire pyc_and_308; // op=pyc.and
-wire pyc_and_309; // op=pyc.and
+wire pyc_and_312; // op=pyc.and
 wire pyc_and_313; // op=pyc.and
-wire pyc_and_314; // op=pyc.and
+wire pyc_and_317; // op=pyc.and
 wire pyc_and_318; // op=pyc.and
-wire pyc_and_319; // op=pyc.and
+wire pyc_and_322; // op=pyc.and
 wire pyc_and_323; // op=pyc.and
-wire pyc_and_324; // op=pyc.and
+wire pyc_and_327; // op=pyc.and
 wire pyc_and_328; // op=pyc.and
-wire pyc_and_329; // op=pyc.and
 wire pyc_and_332; // op=pyc.and
-wire pyc_and_334; // op=pyc.and
+wire pyc_and_333; // op=pyc.and
 wire pyc_and_336; // op=pyc.and
-wire pyc_and_339; // op=pyc.and
-wire pyc_and_340; // op=pyc.and
-wire pyc_and_344; // op=pyc.and
-wire pyc_and_345; // op=pyc.and
-wire pyc_and_349; // op=pyc.and
-wire pyc_and_350; // op=pyc.and
-wire pyc_and_354; // op=pyc.and
-wire pyc_and_355; // op=pyc.and
-wire pyc_and_359; // op=pyc.and
-wire pyc_and_360; // op=pyc.and
-wire pyc_and_364; // op=pyc.and
-wire pyc_and_365; // op=pyc.and
-wire pyc_and_368; // op=pyc.and
-wire pyc_and_370; // op=pyc.and
-wire pyc_and_372; // op=pyc.and
-wire pyc_and_374; // op=pyc.and
-wire pyc_and_376; // op=pyc.and
-wire pyc_and_379; // op=pyc.and
-wire pyc_and_380; // op=pyc.and
-wire pyc_and_384; // op=pyc.and
-wire pyc_and_385; // op=pyc.and
-wire pyc_and_389; // op=pyc.and
-wire pyc_and_390; // op=pyc.and
-wire pyc_and_394; // op=pyc.and
-wire pyc_and_395; // op=pyc.and
-wire pyc_and_399; // op=pyc.and
-wire pyc_and_400; // op=pyc.and
-wire pyc_and_404; // op=pyc.and
-wire pyc_and_405; // op=pyc.and
-wire pyc_and_409; // op=pyc.and
-wire pyc_and_410; // op=pyc.and
-wire pyc_and_413; // op=pyc.and
-wire pyc_and_415; // op=pyc.and
-wire pyc_and_418; // op=pyc.and
-wire pyc_and_419; // op=pyc.and
-wire pyc_and_423; // op=pyc.and
-wire pyc_and_424; // op=pyc.and
-wire pyc_and_427; // op=pyc.and
-wire pyc_and_430; // op=pyc.and
-wire pyc_and_431; // op=pyc.and
-wire pyc_and_435; // op=pyc.and
-wire pyc_and_436; // op=pyc.and
-wire pyc_and_440; // op=pyc.and
-wire pyc_and_441; // op=pyc.and
-wire pyc_and_445; // op=pyc.and
-wire pyc_and_446; // op=pyc.and
-wire pyc_and_450; // op=pyc.and
-wire pyc_and_451; // op=pyc.and
-wire pyc_and_455; // op=pyc.and
-wire pyc_and_456; // op=pyc.and
-wire pyc_and_462; // op=pyc.and
-wire pyc_and_465; // op=pyc.and
-wire pyc_and_468; // op=pyc.and
-wire pyc_and_471; // op=pyc.and
-wire pyc_and_474; // op=pyc.and
-wire pyc_and_477; // op=pyc.and
-wire [23:0] pyc_comb_44; // op=pyc.comb
-wire [7:0] pyc_comb_45; // op=pyc.comb
-wire [15:0] pyc_comb_46; // op=pyc.comb
-wire [9:0] pyc_comb_47; // op=pyc.comb
-wire [31:0] pyc_comb_48; // op=pyc.comb
-wire [25:0] pyc_comb_49; // op=pyc.comb
-wire [9:0] pyc_comb_50; // op=pyc.comb
-wire [4:0] pyc_comb_51; // op=pyc.comb
-wire [5:0] pyc_comb_52; // op=pyc.comb
-wire [5:0] pyc_comb_53; // op=pyc.comb
+wire pyc_and_515; // op=pyc.and
+wire pyc_and_516; // op=pyc.and
+wire pyc_and_520; // op=pyc.and
+wire pyc_and_521; // op=pyc.and
+wire pyc_and_525; // op=pyc.and
+wire pyc_and_526; // op=pyc.and
+wire pyc_and_530; // op=pyc.and
+wire pyc_and_531; // op=pyc.and
+wire pyc_and_535; // op=pyc.and
+wire pyc_and_536; // op=pyc.and
+wire pyc_and_540; // op=pyc.and
+wire pyc_and_541; // op=pyc.and
+wire pyc_and_545; // op=pyc.and
+wire pyc_and_546; // op=pyc.and
+wire pyc_and_550; // op=pyc.and
+wire pyc_and_551; // op=pyc.and
+wire pyc_and_555; // op=pyc.and
+wire pyc_and_556; // op=pyc.and
+wire pyc_and_560; // op=pyc.and
+wire pyc_and_561; // op=pyc.and
+wire pyc_and_565; // op=pyc.and
+wire pyc_and_566; // op=pyc.and
+wire pyc_and_570; // op=pyc.and
+wire pyc_and_571; // op=pyc.and
+wire pyc_and_575; // op=pyc.and
+wire pyc_and_576; // op=pyc.and
+wire pyc_and_580; // op=pyc.and
+wire pyc_and_581; // op=pyc.and
+wire pyc_and_585; // op=pyc.and
+wire pyc_and_586; // op=pyc.and
+wire pyc_and_591; // op=pyc.and
+wire pyc_and_594; // op=pyc.and
+wire pyc_and_595; // op=pyc.and
+wire pyc_and_599; // op=pyc.and
+wire pyc_and_600; // op=pyc.and
+wire pyc_and_604; // op=pyc.and
+wire pyc_and_605; // op=pyc.and
+wire pyc_and_609; // op=pyc.and
+wire pyc_and_610; // op=pyc.and
+wire pyc_and_614; // op=pyc.and
+wire pyc_and_615; // op=pyc.and
+wire pyc_and_619; // op=pyc.and
+wire pyc_and_620; // op=pyc.and
+wire pyc_and_624; // op=pyc.and
+wire pyc_and_625; // op=pyc.and
+wire pyc_and_629; // op=pyc.and
+wire pyc_and_630; // op=pyc.and
+wire pyc_and_634; // op=pyc.and
+wire pyc_and_635; // op=pyc.and
+wire pyc_and_639; // op=pyc.and
+wire pyc_and_640; // op=pyc.and
+wire pyc_and_644; // op=pyc.and
+wire pyc_and_645; // op=pyc.and
+wire pyc_and_649; // op=pyc.and
+wire pyc_and_650; // op=pyc.and
+wire pyc_and_654; // op=pyc.and
+wire pyc_and_655; // op=pyc.and
+wire pyc_and_659; // op=pyc.and
+wire pyc_and_660; // op=pyc.and
+wire pyc_and_665; // op=pyc.and
+wire pyc_and_668; // op=pyc.and
+wire pyc_and_669; // op=pyc.and
+wire pyc_and_673; // op=pyc.and
+wire pyc_and_674; // op=pyc.and
+wire pyc_and_678; // op=pyc.and
+wire pyc_and_679; // op=pyc.and
+wire pyc_and_683; // op=pyc.and
+wire pyc_and_684; // op=pyc.and
+wire pyc_and_688; // op=pyc.and
+wire pyc_and_689; // op=pyc.and
+wire pyc_and_693; // op=pyc.and
+wire pyc_and_694; // op=pyc.and
+wire pyc_and_697; // op=pyc.and
+wire pyc_and_700; // op=pyc.and
+wire pyc_and_701; // op=pyc.and
+wire pyc_and_705; // op=pyc.and
+wire pyc_and_706; // op=pyc.and
+wire pyc_and_710; // op=pyc.and
+wire pyc_and_711; // op=pyc.and
+wire pyc_and_715; // op=pyc.and
+wire pyc_and_716; // op=pyc.and
+wire pyc_and_720; // op=pyc.and
+wire pyc_and_721; // op=pyc.and
+wire pyc_and_725; // op=pyc.and
+wire pyc_and_726; // op=pyc.and
+wire pyc_and_733; // op=pyc.and
+wire pyc_and_736; // op=pyc.and
+wire pyc_and_739; // op=pyc.and
+wire pyc_and_742; // op=pyc.and
+wire pyc_and_745; // op=pyc.and
+wire pyc_and_748; // op=pyc.and
+wire [5:0] pyc_comb_1040; // op=pyc.comb
+wire [23:0] pyc_comb_46; // op=pyc.comb
+wire [7:0] pyc_comb_47; // op=pyc.comb
+wire [3:0] pyc_comb_48; // op=pyc.comb
+wire [9:0] pyc_comb_49; // op=pyc.comb
+wire [31:0] pyc_comb_50; // op=pyc.comb
+wire [25:0] pyc_comb_51; // op=pyc.comb
+wire [9:0] pyc_comb_52; // op=pyc.comb
+wire [4:0] pyc_comb_53; // op=pyc.comb
 wire [5:0] pyc_comb_54; // op=pyc.comb
 wire [5:0] pyc_comb_55; // op=pyc.comb
 wire [5:0] pyc_comb_56; // op=pyc.comb
 wire [5:0] pyc_comb_57; // op=pyc.comb
 wire [5:0] pyc_comb_58; // op=pyc.comb
 wire [5:0] pyc_comb_59; // op=pyc.comb
-wire [7:0] pyc_comb_596; // op=pyc.comb
-wire [7:0] pyc_comb_597; // op=pyc.comb
-wire pyc_comb_598; // op=pyc.comb
-wire [7:0] pyc_comb_599; // op=pyc.comb
 wire [5:0] pyc_comb_60; // op=pyc.comb
-wire pyc_comb_600; // op=pyc.comb
-wire [23:0] pyc_comb_601; // op=pyc.comb
-wire pyc_comb_602; // op=pyc.comb
-wire [9:0] pyc_comb_603; // op=pyc.comb
-wire pyc_comb_604; // op=pyc.comb
-wire [15:0] pyc_comb_605; // op=pyc.comb
-wire [25:0] pyc_comb_606; // op=pyc.comb
-wire pyc_comb_607; // op=pyc.comb
-wire [9:0] pyc_comb_608; // op=pyc.comb
 wire [5:0] pyc_comb_61; // op=pyc.comb
 wire [5:0] pyc_comb_62; // op=pyc.comb
 wire [5:0] pyc_comb_63; // op=pyc.comb
@@ -244,52 +263,70 @@ wire [5:0] pyc_comb_65; // op=pyc.comb
 wire [5:0] pyc_comb_66; // op=pyc.comb
 wire [5:0] pyc_comb_67; // op=pyc.comb
 wire [5:0] pyc_comb_68; // op=pyc.comb
-wire pyc_comb_686; // op=pyc.comb
-wire pyc_comb_687; // op=pyc.comb
-wire pyc_comb_688; // op=pyc.comb
-wire pyc_comb_689; // op=pyc.comb
 wire [5:0] pyc_comb_69; // op=pyc.comb
-wire pyc_comb_690; // op=pyc.comb
-wire pyc_comb_691; // op=pyc.comb
-wire pyc_comb_692; // op=pyc.comb
-wire pyc_comb_693; // op=pyc.comb
-wire pyc_comb_694; // op=pyc.comb
-wire pyc_comb_695; // op=pyc.comb
-wire pyc_comb_696; // op=pyc.comb
-wire pyc_comb_697; // op=pyc.comb
-wire pyc_comb_698; // op=pyc.comb
-wire pyc_comb_699; // op=pyc.comb
 wire [5:0] pyc_comb_70; // op=pyc.comb
-wire pyc_comb_700; // op=pyc.comb
-wire pyc_comb_701; // op=pyc.comb
-wire pyc_comb_702; // op=pyc.comb
-wire pyc_comb_703; // op=pyc.comb
-wire pyc_comb_704; // op=pyc.comb
-wire pyc_comb_705; // op=pyc.comb
-wire pyc_comb_706; // op=pyc.comb
-wire pyc_comb_707; // op=pyc.comb
-wire pyc_comb_708; // op=pyc.comb
-wire pyc_comb_709; // op=pyc.comb
 wire [5:0] pyc_comb_71; // op=pyc.comb
-wire pyc_comb_710; // op=pyc.comb
-wire pyc_comb_711; // op=pyc.comb
-wire [31:0] pyc_comb_712; // op=pyc.comb
 wire [5:0] pyc_comb_72; // op=pyc.comb
 wire [5:0] pyc_comb_73; // op=pyc.comb
 wire [5:0] pyc_comb_74; // op=pyc.comb
 wire [5:0] pyc_comb_75; // op=pyc.comb
 wire [5:0] pyc_comb_76; // op=pyc.comb
-wire [5:0] pyc_comb_762; // op=pyc.comb
 wire [5:0] pyc_comb_77; // op=pyc.comb
 wire [5:0] pyc_comb_78; // op=pyc.comb
-wire [4:0] pyc_comb_79; // op=pyc.comb
-wire [7:0] pyc_comb_80; // op=pyc.comb
-wire [9:0] pyc_comb_81; // op=pyc.comb
-wire pyc_comb_82; // op=pyc.comb
+wire [5:0] pyc_comb_79; // op=pyc.comb
+wire [5:0] pyc_comb_80; // op=pyc.comb
+wire [4:0] pyc_comb_81; // op=pyc.comb
+wire [7:0] pyc_comb_82; // op=pyc.comb
 wire [9:0] pyc_comb_83; // op=pyc.comb
-wire [23:0] pyc_comb_84; // op=pyc.comb
-wire pyc_comb_85; // op=pyc.comb
-wire [7:0] pyc_comb_86; // op=pyc.comb
+wire [3:0] pyc_comb_84; // op=pyc.comb
+wire [15:0] pyc_comb_85; // op=pyc.comb
+wire pyc_comb_86; // op=pyc.comb
+wire pyc_comb_867; // op=pyc.comb
+wire [7:0] pyc_comb_868; // op=pyc.comb
+wire pyc_comb_869; // op=pyc.comb
+wire [9:0] pyc_comb_87; // op=pyc.comb
+wire [23:0] pyc_comb_870; // op=pyc.comb
+wire pyc_comb_871; // op=pyc.comb
+wire [9:0] pyc_comb_872; // op=pyc.comb
+wire pyc_comb_873; // op=pyc.comb
+wire [15:0] pyc_comb_874; // op=pyc.comb
+wire [15:0] pyc_comb_875; // op=pyc.comb
+wire [15:0] pyc_comb_876; // op=pyc.comb
+wire [15:0] pyc_comb_877; // op=pyc.comb
+wire [15:0] pyc_comb_878; // op=pyc.comb
+wire [25:0] pyc_comb_879; // op=pyc.comb
+wire [23:0] pyc_comb_88; // op=pyc.comb
+wire pyc_comb_880; // op=pyc.comb
+wire [9:0] pyc_comb_881; // op=pyc.comb
+wire pyc_comb_89; // op=pyc.comb
+wire [7:0] pyc_comb_90; // op=pyc.comb
+wire pyc_comb_959; // op=pyc.comb
+wire pyc_comb_960; // op=pyc.comb
+wire pyc_comb_961; // op=pyc.comb
+wire pyc_comb_962; // op=pyc.comb
+wire pyc_comb_963; // op=pyc.comb
+wire pyc_comb_964; // op=pyc.comb
+wire pyc_comb_965; // op=pyc.comb
+wire pyc_comb_966; // op=pyc.comb
+wire pyc_comb_967; // op=pyc.comb
+wire pyc_comb_968; // op=pyc.comb
+wire pyc_comb_969; // op=pyc.comb
+wire pyc_comb_970; // op=pyc.comb
+wire pyc_comb_971; // op=pyc.comb
+wire pyc_comb_972; // op=pyc.comb
+wire pyc_comb_973; // op=pyc.comb
+wire pyc_comb_974; // op=pyc.comb
+wire pyc_comb_975; // op=pyc.comb
+wire pyc_comb_976; // op=pyc.comb
+wire pyc_comb_977; // op=pyc.comb
+wire pyc_comb_978; // op=pyc.comb
+wire pyc_comb_979; // op=pyc.comb
+wire pyc_comb_980; // op=pyc.comb
+wire pyc_comb_981; // op=pyc.comb
+wire pyc_comb_982; // op=pyc.comb
+wire pyc_comb_983; // op=pyc.comb
+wire pyc_comb_984; // op=pyc.comb
+wire [31:0] pyc_comb_985; // op=pyc.comb
 wire [23:0] pyc_constant_1; // op=pyc.constant
 wire [5:0] pyc_constant_10; // op=pyc.constant
 wire [5:0] pyc_constant_11; // op=pyc.constant
@@ -312,7 +349,7 @@ wire [5:0] pyc_constant_26; // op=pyc.constant
 wire [5:0] pyc_constant_27; // op=pyc.constant
 wire [5:0] pyc_constant_28; // op=pyc.constant
 wire [5:0] pyc_constant_29; // op=pyc.constant
-wire [15:0] pyc_constant_3; // op=pyc.constant
+wire [3:0] pyc_constant_3; // op=pyc.constant
 wire [5:0] pyc_constant_30; // op=pyc.constant
 wire [5:0] pyc_constant_31; // op=pyc.constant
 wire [5:0] pyc_constant_32; // op=pyc.constant
@@ -322,28 +359,27 @@ wire [5:0] pyc_constant_35; // op=pyc.constant
 wire [4:0] pyc_constant_36; // op=pyc.constant
 wire [7:0] pyc_constant_37; // op=pyc.constant
 wire [9:0] pyc_constant_38; // op=pyc.constant
-wire pyc_constant_39; // op=pyc.constant
+wire [3:0] pyc_constant_39; // op=pyc.constant
 wire [9:0] pyc_constant_4; // op=pyc.constant
-wire [9:0] pyc_constant_40; // op=pyc.constant
-wire [23:0] pyc_constant_41; // op=pyc.constant
-wire pyc_constant_42; // op=pyc.constant
-wire [7:0] pyc_constant_43; // op=pyc.constant
+wire [15:0] pyc_constant_40; // op=pyc.constant
+wire pyc_constant_41; // op=pyc.constant
+wire [9:0] pyc_constant_42; // op=pyc.constant
+wire [23:0] pyc_constant_43; // op=pyc.constant
+wire pyc_constant_44; // op=pyc.constant
+wire [7:0] pyc_constant_45; // op=pyc.constant
 wire [31:0] pyc_constant_5; // op=pyc.constant
 wire [25:0] pyc_constant_6; // op=pyc.constant
 wire [9:0] pyc_constant_7; // op=pyc.constant
 wire [4:0] pyc_constant_8; // op=pyc.constant
 wire [5:0] pyc_constant_9; // op=pyc.constant
-wire pyc_eq_104; // op=pyc.eq
-wire pyc_eq_677; // op=pyc.eq
-wire pyc_eq_90; // op=pyc.eq
-wire pyc_eq_97; // op=pyc.eq
-wire pyc_extract_101; // op=pyc.extract
-wire [7:0] pyc_extract_102; // op=pyc.extract
-wire [22:0] pyc_extract_103; // op=pyc.extract
-wire pyc_extract_114; // op=pyc.extract
-wire pyc_extract_115; // op=pyc.extract
-wire pyc_extract_116; // op=pyc.extract
-wire pyc_extract_117; // op=pyc.extract
+wire pyc_eq_101; // op=pyc.eq
+wire pyc_eq_108; // op=pyc.eq
+wire pyc_eq_94; // op=pyc.eq
+wire pyc_eq_950; // op=pyc.eq
+wire [6:0] pyc_extract_100; // op=pyc.extract
+wire pyc_extract_105; // op=pyc.extract
+wire [7:0] pyc_extract_106; // op=pyc.extract
+wire [22:0] pyc_extract_107; // op=pyc.extract
 wire pyc_extract_118; // op=pyc.extract
 wire pyc_extract_119; // op=pyc.extract
 wire pyc_extract_120; // op=pyc.extract
@@ -356,446 +392,693 @@ wire pyc_extract_126; // op=pyc.extract
 wire pyc_extract_127; // op=pyc.extract
 wire pyc_extract_128; // op=pyc.extract
 wire pyc_extract_129; // op=pyc.extract
-wire pyc_extract_534; // op=pyc.extract
-wire pyc_extract_551; // op=pyc.extract
-wire pyc_extract_554; // op=pyc.extract
-wire pyc_extract_557; // op=pyc.extract
-wire pyc_extract_560; // op=pyc.extract
-wire pyc_extract_563; // op=pyc.extract
-wire pyc_extract_609; // op=pyc.extract
-wire pyc_extract_610; // op=pyc.extract
-wire pyc_extract_611; // op=pyc.extract
-wire pyc_extract_612; // op=pyc.extract
-wire pyc_extract_613; // op=pyc.extract
-wire pyc_extract_614; // op=pyc.extract
-wire pyc_extract_615; // op=pyc.extract
-wire pyc_extract_616; // op=pyc.extract
-wire pyc_extract_617; // op=pyc.extract
-wire pyc_extract_618; // op=pyc.extract
-wire pyc_extract_619; // op=pyc.extract
-wire pyc_extract_620; // op=pyc.extract
-wire pyc_extract_621; // op=pyc.extract
-wire pyc_extract_622; // op=pyc.extract
-wire pyc_extract_623; // op=pyc.extract
-wire pyc_extract_624; // op=pyc.extract
-wire pyc_extract_625; // op=pyc.extract
-wire pyc_extract_626; // op=pyc.extract
-wire pyc_extract_627; // op=pyc.extract
-wire pyc_extract_628; // op=pyc.extract
-wire pyc_extract_629; // op=pyc.extract
-wire pyc_extract_630; // op=pyc.extract
-wire pyc_extract_631; // op=pyc.extract
-wire pyc_extract_632; // op=pyc.extract
-wire pyc_extract_633; // op=pyc.extract
-wire pyc_extract_634; // op=pyc.extract
-wire pyc_extract_641; // op=pyc.extract
-wire pyc_extract_644; // op=pyc.extract
-wire pyc_extract_647; // op=pyc.extract
-wire pyc_extract_650; // op=pyc.extract
-wire pyc_extract_653; // op=pyc.extract
-wire pyc_extract_656; // op=pyc.extract
-wire pyc_extract_659; // op=pyc.extract
-wire pyc_extract_662; // op=pyc.extract
-wire pyc_extract_665; // op=pyc.extract
-wire pyc_extract_668; // op=pyc.extract
-wire [22:0] pyc_extract_675; // op=pyc.extract
-wire pyc_extract_87; // op=pyc.extract
-wire [7:0] pyc_extract_88; // op=pyc.extract
-wire [6:0] pyc_extract_89; // op=pyc.extract
-wire pyc_extract_94; // op=pyc.extract
-wire [7:0] pyc_extract_95; // op=pyc.extract
-wire [6:0] pyc_extract_96; // op=pyc.extract
-wire [15:0] pyc_lshri_535; // op=pyc.lshri
-wire [25:0] pyc_lshri_550; // op=pyc.lshri
-wire [25:0] pyc_lshri_553; // op=pyc.lshri
-wire [25:0] pyc_lshri_556; // op=pyc.lshri
-wire [25:0] pyc_lshri_559; // op=pyc.lshri
-wire [25:0] pyc_lshri_562; // op=pyc.lshri
-wire [25:0] pyc_lshri_566; // op=pyc.lshri
-wire [25:0] pyc_lshri_568; // op=pyc.lshri
-wire [25:0] pyc_lshri_570; // op=pyc.lshri
-wire [25:0] pyc_lshri_572; // op=pyc.lshri
-wire [25:0] pyc_lshri_574; // op=pyc.lshri
-wire [25:0] pyc_lshri_655; // op=pyc.lshri
-wire [25:0] pyc_lshri_658; // op=pyc.lshri
-wire [25:0] pyc_lshri_661; // op=pyc.lshri
-wire [25:0] pyc_lshri_664; // op=pyc.lshri
-wire [25:0] pyc_lshri_667; // op=pyc.lshri
-wire [7:0] pyc_mux_100; // op=pyc.mux
-wire [23:0] pyc_mux_107; // op=pyc.mux
-wire pyc_mux_480; // op=pyc.mux
-wire pyc_mux_481; // op=pyc.mux
-wire pyc_mux_482; // op=pyc.mux
-wire pyc_mux_483; // op=pyc.mux
-wire pyc_mux_484; // op=pyc.mux
-wire pyc_mux_485; // op=pyc.mux
-wire pyc_mux_486; // op=pyc.mux
-wire pyc_mux_487; // op=pyc.mux
-wire [15:0] pyc_mux_536; // op=pyc.mux
-wire [9:0] pyc_mux_538; // op=pyc.mux
-wire [7:0] pyc_mux_546; // op=pyc.mux
-wire [4:0] pyc_mux_549; // op=pyc.mux
-wire [25:0] pyc_mux_552; // op=pyc.mux
-wire [25:0] pyc_mux_555; // op=pyc.mux
-wire [25:0] pyc_mux_558; // op=pyc.mux
-wire [25:0] pyc_mux_561; // op=pyc.mux
-wire [25:0] pyc_mux_564; // op=pyc.mux
-wire [25:0] pyc_mux_565; // op=pyc.mux
-wire [25:0] pyc_mux_567; // op=pyc.mux
-wire [25:0] pyc_mux_569; // op=pyc.mux
-wire [25:0] pyc_mux_571; // op=pyc.mux
-wire [25:0] pyc_mux_573; // op=pyc.mux
-wire [25:0] pyc_mux_575; // op=pyc.mux
-wire [25:0] pyc_mux_576; // op=pyc.mux
-wire [7:0] pyc_mux_577; // op=pyc.mux
-wire [25:0] pyc_mux_588; // op=pyc.mux
-wire [25:0] pyc_mux_589; // op=pyc.mux
-wire pyc_mux_590; // op=pyc.mux
-wire pyc_mux_591; // op=pyc.mux
-wire [25:0] pyc_mux_592; // op=pyc.mux
-wire [7:0] pyc_mux_593; // op=pyc.mux
-wire pyc_mux_594; // op=pyc.mux
-wire [25:0] pyc_mux_642; // op=pyc.mux
-wire [25:0] pyc_mux_645; // op=pyc.mux
-wire [25:0] pyc_mux_648; // op=pyc.mux
-wire [25:0] pyc_mux_651; // op=pyc.mux
-wire [25:0] pyc_mux_654; // op=pyc.mux
-wire [25:0] pyc_mux_657; // op=pyc.mux
-wire [25:0] pyc_mux_660; // op=pyc.mux
-wire [25:0] pyc_mux_663; // op=pyc.mux
-wire [25:0] pyc_mux_666; // op=pyc.mux
-wire [25:0] pyc_mux_669; // op=pyc.mux
-wire [25:0] pyc_mux_670; // op=pyc.mux
-wire [25:0] pyc_mux_671; // op=pyc.mux
-wire [31:0] pyc_mux_685; // op=pyc.mux
-wire [5:0] pyc_mux_736; // op=pyc.mux
-wire [5:0] pyc_mux_737; // op=pyc.mux
-wire [5:0] pyc_mux_738; // op=pyc.mux
-wire [5:0] pyc_mux_739; // op=pyc.mux
-wire [5:0] pyc_mux_740; // op=pyc.mux
-wire [5:0] pyc_mux_741; // op=pyc.mux
-wire [5:0] pyc_mux_742; // op=pyc.mux
-wire [5:0] pyc_mux_743; // op=pyc.mux
-wire [5:0] pyc_mux_744; // op=pyc.mux
-wire [5:0] pyc_mux_745; // op=pyc.mux
-wire [5:0] pyc_mux_746; // op=pyc.mux
-wire [5:0] pyc_mux_747; // op=pyc.mux
-wire [5:0] pyc_mux_748; // op=pyc.mux
-wire [5:0] pyc_mux_749; // op=pyc.mux
-wire [5:0] pyc_mux_750; // op=pyc.mux
-wire [5:0] pyc_mux_751; // op=pyc.mux
-wire [5:0] pyc_mux_752; // op=pyc.mux
-wire [5:0] pyc_mux_753; // op=pyc.mux
-wire [5:0] pyc_mux_754; // op=pyc.mux
-wire [5:0] pyc_mux_755; // op=pyc.mux
-wire [5:0] pyc_mux_756; // op=pyc.mux
-wire [5:0] pyc_mux_757; // op=pyc.mux
-wire [5:0] pyc_mux_758; // op=pyc.mux
-wire [5:0] pyc_mux_759; // op=pyc.mux
-wire [5:0] pyc_mux_760; // op=pyc.mux
-wire [5:0] pyc_mux_761; // op=pyc.mux
-wire [31:0] pyc_mux_763; // op=pyc.mux
-wire [7:0] pyc_mux_93; // op=pyc.mux
-wire pyc_not_579; // op=pyc.not
-wire pyc_not_585; // op=pyc.not
-wire [23:0] pyc_or_106; // op=pyc.or
-wire pyc_or_113; // op=pyc.or
-wire pyc_or_200; // op=pyc.or
-wire pyc_or_205; // op=pyc.or
-wire pyc_or_210; // op=pyc.or
-wire pyc_or_215; // op=pyc.or
-wire pyc_or_220; // op=pyc.or
-wire pyc_or_225; // op=pyc.or
-wire pyc_or_234; // op=pyc.or
-wire pyc_or_239; // op=pyc.or
-wire pyc_or_244; // op=pyc.or
-wire pyc_or_249; // op=pyc.or
-wire pyc_or_254; // op=pyc.or
-wire pyc_or_259; // op=pyc.or
-wire pyc_or_268; // op=pyc.or
-wire pyc_or_273; // op=pyc.or
-wire pyc_or_278; // op=pyc.or
-wire pyc_or_283; // op=pyc.or
-wire pyc_or_288; // op=pyc.or
-wire pyc_or_293; // op=pyc.or
-wire pyc_or_298; // op=pyc.or
-wire pyc_or_305; // op=pyc.or
-wire pyc_or_310; // op=pyc.or
-wire pyc_or_315; // op=pyc.or
-wire pyc_or_320; // op=pyc.or
-wire pyc_or_325; // op=pyc.or
-wire pyc_or_330; // op=pyc.or
-wire pyc_or_341; // op=pyc.or
-wire pyc_or_346; // op=pyc.or
-wire pyc_or_351; // op=pyc.or
-wire pyc_or_356; // op=pyc.or
-wire pyc_or_361; // op=pyc.or
-wire pyc_or_366; // op=pyc.or
-wire pyc_or_381; // op=pyc.or
-wire pyc_or_386; // op=pyc.or
-wire pyc_or_391; // op=pyc.or
-wire pyc_or_396; // op=pyc.or
-wire pyc_or_401; // op=pyc.or
-wire pyc_or_406; // op=pyc.or
-wire pyc_or_411; // op=pyc.or
-wire pyc_or_420; // op=pyc.or
-wire pyc_or_425; // op=pyc.or
-wire pyc_or_432; // op=pyc.or
-wire pyc_or_437; // op=pyc.or
-wire pyc_or_442; // op=pyc.or
-wire pyc_or_447; // op=pyc.or
-wire pyc_or_452; // op=pyc.or
-wire pyc_or_457; // op=pyc.or
-wire pyc_or_460; // op=pyc.or
-wire pyc_or_463; // op=pyc.or
-wire pyc_or_466; // op=pyc.or
-wire pyc_or_469; // op=pyc.or
-wire pyc_or_472; // op=pyc.or
-wire pyc_or_475; // op=pyc.or
-wire pyc_or_478; // op=pyc.or
-wire [15:0] pyc_or_491; // op=pyc.or
-wire [15:0] pyc_or_494; // op=pyc.or
-wire [15:0] pyc_or_497; // op=pyc.or
-wire [15:0] pyc_or_500; // op=pyc.or
-wire [15:0] pyc_or_503; // op=pyc.or
-wire [15:0] pyc_or_506; // op=pyc.or
-wire [15:0] pyc_or_509; // op=pyc.or
-wire [15:0] pyc_or_512; // op=pyc.or
-wire [15:0] pyc_or_515; // op=pyc.or
-wire [15:0] pyc_or_518; // op=pyc.or
-wire [15:0] pyc_or_521; // op=pyc.or
-wire [15:0] pyc_or_524; // op=pyc.or
-wire [15:0] pyc_or_527; // op=pyc.or
-wire [15:0] pyc_or_530; // op=pyc.or
-wire [15:0] pyc_or_533; // op=pyc.or
-wire [31:0] pyc_or_682; // op=pyc.or
-wire [31:0] pyc_or_684; // op=pyc.or
-wire [7:0] pyc_or_92; // op=pyc.or
-wire [7:0] pyc_or_99; // op=pyc.or
-wire pyc_reg_713; // op=pyc.reg
-wire [9:0] pyc_reg_714; // op=pyc.reg
-wire [7:0] pyc_reg_715; // op=pyc.reg
-wire [7:0] pyc_reg_716; // op=pyc.reg
-wire pyc_reg_717; // op=pyc.reg
-wire [7:0] pyc_reg_718; // op=pyc.reg
-wire [23:0] pyc_reg_719; // op=pyc.reg
-wire pyc_reg_720; // op=pyc.reg
-wire pyc_reg_721; // op=pyc.reg
-wire pyc_reg_722; // op=pyc.reg
-wire [15:0] pyc_reg_723; // op=pyc.reg
-wire pyc_reg_724; // op=pyc.reg
-wire [9:0] pyc_reg_725; // op=pyc.reg
-wire pyc_reg_726; // op=pyc.reg
-wire [7:0] pyc_reg_727; // op=pyc.reg
-wire [23:0] pyc_reg_728; // op=pyc.reg
-wire pyc_reg_729; // op=pyc.reg
-wire pyc_reg_730; // op=pyc.reg
-wire pyc_reg_731; // op=pyc.reg
-wire pyc_reg_732; // op=pyc.reg
-wire [9:0] pyc_reg_733; // op=pyc.reg
-wire [25:0] pyc_reg_734; // op=pyc.reg
-wire pyc_reg_735; // op=pyc.reg
-wire [31:0] pyc_reg_764; // op=pyc.reg
-wire pyc_reg_765; // op=pyc.reg
-wire [15:0] pyc_shli_490; // op=pyc.shli
-wire [15:0] pyc_shli_493; // op=pyc.shli
-wire [15:0] pyc_shli_496; // op=pyc.shli
-wire [15:0] pyc_shli_499; // op=pyc.shli
-wire [15:0] pyc_shli_502; // op=pyc.shli
-wire [15:0] pyc_shli_505; // op=pyc.shli
-wire [15:0] pyc_shli_508; // op=pyc.shli
-wire [15:0] pyc_shli_511; // op=pyc.shli
-wire [15:0] pyc_shli_514; // op=pyc.shli
-wire [15:0] pyc_shli_517; // op=pyc.shli
-wire [15:0] pyc_shli_520; // op=pyc.shli
-wire [15:0] pyc_shli_523; // op=pyc.shli
-wire [15:0] pyc_shli_526; // op=pyc.shli
-wire [15:0] pyc_shli_529; // op=pyc.shli
-wire [15:0] pyc_shli_532; // op=pyc.shli
-wire [25:0] pyc_shli_540; // op=pyc.shli
-wire [25:0] pyc_shli_640; // op=pyc.shli
-wire [25:0] pyc_shli_643; // op=pyc.shli
-wire [25:0] pyc_shli_646; // op=pyc.shli
-wire [25:0] pyc_shli_649; // op=pyc.shli
-wire [25:0] pyc_shli_652; // op=pyc.shli
-wire [31:0] pyc_shli_679; // op=pyc.shli
-wire [31:0] pyc_shli_681; // op=pyc.shli
-wire [9:0] pyc_sub_112; // op=pyc.sub
-wire [7:0] pyc_sub_544; // op=pyc.sub
-wire [7:0] pyc_sub_545; // op=pyc.sub
-wire [25:0] pyc_sub_586; // op=pyc.sub
-wire [25:0] pyc_sub_587; // op=pyc.sub
-wire [4:0] pyc_sub_638; // op=pyc.sub
-wire [4:0] pyc_sub_639; // op=pyc.sub
-wire [9:0] pyc_sub_674; // op=pyc.sub
-wire [7:0] pyc_trunc_542; // op=pyc.trunc
-wire [4:0] pyc_trunc_547; // op=pyc.trunc
-wire [25:0] pyc_trunc_583; // op=pyc.trunc
-wire [4:0] pyc_trunc_635; // op=pyc.trunc
-wire [7:0] pyc_trunc_676; // op=pyc.trunc
-wire pyc_ult_543; // op=pyc.ult
-wire pyc_ult_548; // op=pyc.ult
-wire pyc_ult_584; // op=pyc.ult
-wire pyc_ult_636; // op=pyc.ult
-wire pyc_ult_637; // op=pyc.ult
-wire pyc_xor_108; // op=pyc.xor
-wire pyc_xor_194; // op=pyc.xor
-wire pyc_xor_196; // op=pyc.xor
-wire pyc_xor_197; // op=pyc.xor
+wire pyc_extract_130; // op=pyc.extract
+wire pyc_extract_131; // op=pyc.extract
+wire pyc_extract_132; // op=pyc.extract
+wire pyc_extract_133; // op=pyc.extract
+wire pyc_extract_449; // op=pyc.extract
+wire pyc_extract_450; // op=pyc.extract
+wire pyc_extract_451; // op=pyc.extract
+wire pyc_extract_452; // op=pyc.extract
+wire pyc_extract_453; // op=pyc.extract
+wire pyc_extract_454; // op=pyc.extract
+wire pyc_extract_455; // op=pyc.extract
+wire pyc_extract_456; // op=pyc.extract
+wire pyc_extract_457; // op=pyc.extract
+wire pyc_extract_458; // op=pyc.extract
+wire pyc_extract_459; // op=pyc.extract
+wire pyc_extract_460; // op=pyc.extract
+wire pyc_extract_461; // op=pyc.extract
+wire pyc_extract_462; // op=pyc.extract
+wire pyc_extract_463; // op=pyc.extract
+wire pyc_extract_464; // op=pyc.extract
+wire pyc_extract_465; // op=pyc.extract
+wire pyc_extract_466; // op=pyc.extract
+wire pyc_extract_467; // op=pyc.extract
+wire pyc_extract_468; // op=pyc.extract
+wire pyc_extract_469; // op=pyc.extract
+wire pyc_extract_470; // op=pyc.extract
+wire pyc_extract_471; // op=pyc.extract
+wire pyc_extract_472; // op=pyc.extract
+wire pyc_extract_473; // op=pyc.extract
+wire pyc_extract_474; // op=pyc.extract
+wire pyc_extract_475; // op=pyc.extract
+wire pyc_extract_476; // op=pyc.extract
+wire pyc_extract_477; // op=pyc.extract
+wire pyc_extract_478; // op=pyc.extract
+wire pyc_extract_479; // op=pyc.extract
+wire pyc_extract_480; // op=pyc.extract
+wire pyc_extract_481; // op=pyc.extract
+wire pyc_extract_482; // op=pyc.extract
+wire pyc_extract_483; // op=pyc.extract
+wire pyc_extract_484; // op=pyc.extract
+wire pyc_extract_485; // op=pyc.extract
+wire pyc_extract_486; // op=pyc.extract
+wire pyc_extract_487; // op=pyc.extract
+wire pyc_extract_488; // op=pyc.extract
+wire pyc_extract_489; // op=pyc.extract
+wire pyc_extract_490; // op=pyc.extract
+wire pyc_extract_491; // op=pyc.extract
+wire pyc_extract_492; // op=pyc.extract
+wire pyc_extract_493; // op=pyc.extract
+wire pyc_extract_494; // op=pyc.extract
+wire pyc_extract_495; // op=pyc.extract
+wire pyc_extract_496; // op=pyc.extract
+wire pyc_extract_497; // op=pyc.extract
+wire pyc_extract_498; // op=pyc.extract
+wire pyc_extract_499; // op=pyc.extract
+wire pyc_extract_500; // op=pyc.extract
+wire pyc_extract_501; // op=pyc.extract
+wire pyc_extract_502; // op=pyc.extract
+wire pyc_extract_503; // op=pyc.extract
+wire pyc_extract_504; // op=pyc.extract
+wire pyc_extract_505; // op=pyc.extract
+wire pyc_extract_506; // op=pyc.extract
+wire pyc_extract_507; // op=pyc.extract
+wire pyc_extract_508; // op=pyc.extract
+wire pyc_extract_509; // op=pyc.extract
+wire pyc_extract_510; // op=pyc.extract
+wire pyc_extract_511; // op=pyc.extract
+wire pyc_extract_512; // op=pyc.extract
+wire pyc_extract_805; // op=pyc.extract
+wire pyc_extract_822; // op=pyc.extract
+wire pyc_extract_825; // op=pyc.extract
+wire pyc_extract_828; // op=pyc.extract
+wire pyc_extract_831; // op=pyc.extract
+wire pyc_extract_834; // op=pyc.extract
+wire pyc_extract_882; // op=pyc.extract
+wire pyc_extract_883; // op=pyc.extract
+wire pyc_extract_884; // op=pyc.extract
+wire pyc_extract_885; // op=pyc.extract
+wire pyc_extract_886; // op=pyc.extract
+wire pyc_extract_887; // op=pyc.extract
+wire pyc_extract_888; // op=pyc.extract
+wire pyc_extract_889; // op=pyc.extract
+wire pyc_extract_890; // op=pyc.extract
+wire pyc_extract_891; // op=pyc.extract
+wire pyc_extract_892; // op=pyc.extract
+wire pyc_extract_893; // op=pyc.extract
+wire pyc_extract_894; // op=pyc.extract
+wire pyc_extract_895; // op=pyc.extract
+wire pyc_extract_896; // op=pyc.extract
+wire pyc_extract_897; // op=pyc.extract
+wire pyc_extract_898; // op=pyc.extract
+wire pyc_extract_899; // op=pyc.extract
+wire pyc_extract_900; // op=pyc.extract
+wire pyc_extract_901; // op=pyc.extract
+wire pyc_extract_902; // op=pyc.extract
+wire pyc_extract_903; // op=pyc.extract
+wire pyc_extract_904; // op=pyc.extract
+wire pyc_extract_905; // op=pyc.extract
+wire pyc_extract_906; // op=pyc.extract
+wire pyc_extract_907; // op=pyc.extract
+wire pyc_extract_91; // op=pyc.extract
+wire pyc_extract_914; // op=pyc.extract
+wire pyc_extract_917; // op=pyc.extract
+wire [7:0] pyc_extract_92; // op=pyc.extract
+wire pyc_extract_920; // op=pyc.extract
+wire pyc_extract_923; // op=pyc.extract
+wire pyc_extract_926; // op=pyc.extract
+wire pyc_extract_929; // op=pyc.extract
+wire [6:0] pyc_extract_93; // op=pyc.extract
+wire pyc_extract_932; // op=pyc.extract
+wire pyc_extract_935; // op=pyc.extract
+wire pyc_extract_938; // op=pyc.extract
+wire pyc_extract_941; // op=pyc.extract
+wire [22:0] pyc_extract_948; // op=pyc.extract
+wire pyc_extract_98; // op=pyc.extract
+wire [7:0] pyc_extract_99; // op=pyc.extract
+wire [15:0] pyc_lshri_806; // op=pyc.lshri
+wire [25:0] pyc_lshri_821; // op=pyc.lshri
+wire [25:0] pyc_lshri_824; // op=pyc.lshri
+wire [25:0] pyc_lshri_827; // op=pyc.lshri
+wire [25:0] pyc_lshri_830; // op=pyc.lshri
+wire [25:0] pyc_lshri_833; // op=pyc.lshri
+wire [25:0] pyc_lshri_837; // op=pyc.lshri
+wire [25:0] pyc_lshri_839; // op=pyc.lshri
+wire [25:0] pyc_lshri_841; // op=pyc.lshri
+wire [25:0] pyc_lshri_843; // op=pyc.lshri
+wire [25:0] pyc_lshri_845; // op=pyc.lshri
+wire [25:0] pyc_lshri_928; // op=pyc.lshri
+wire [25:0] pyc_lshri_931; // op=pyc.lshri
+wire [25:0] pyc_lshri_934; // op=pyc.lshri
+wire [25:0] pyc_lshri_937; // op=pyc.lshri
+wire [25:0] pyc_lshri_940; // op=pyc.lshri
+wire [5:0] pyc_mux_1014; // op=pyc.mux
+wire [5:0] pyc_mux_1015; // op=pyc.mux
+wire [5:0] pyc_mux_1016; // op=pyc.mux
+wire [5:0] pyc_mux_1017; // op=pyc.mux
+wire [5:0] pyc_mux_1018; // op=pyc.mux
+wire [5:0] pyc_mux_1019; // op=pyc.mux
+wire [5:0] pyc_mux_1020; // op=pyc.mux
+wire [5:0] pyc_mux_1021; // op=pyc.mux
+wire [5:0] pyc_mux_1022; // op=pyc.mux
+wire [5:0] pyc_mux_1023; // op=pyc.mux
+wire [5:0] pyc_mux_1024; // op=pyc.mux
+wire [5:0] pyc_mux_1025; // op=pyc.mux
+wire [5:0] pyc_mux_1026; // op=pyc.mux
+wire [5:0] pyc_mux_1027; // op=pyc.mux
+wire [5:0] pyc_mux_1028; // op=pyc.mux
+wire [5:0] pyc_mux_1029; // op=pyc.mux
+wire [5:0] pyc_mux_1030; // op=pyc.mux
+wire [5:0] pyc_mux_1031; // op=pyc.mux
+wire [5:0] pyc_mux_1032; // op=pyc.mux
+wire [5:0] pyc_mux_1033; // op=pyc.mux
+wire [5:0] pyc_mux_1034; // op=pyc.mux
+wire [5:0] pyc_mux_1035; // op=pyc.mux
+wire [5:0] pyc_mux_1036; // op=pyc.mux
+wire [5:0] pyc_mux_1037; // op=pyc.mux
+wire [5:0] pyc_mux_1038; // op=pyc.mux
+wire [5:0] pyc_mux_1039; // op=pyc.mux
+wire [7:0] pyc_mux_104; // op=pyc.mux
+wire [31:0] pyc_mux_1041; // op=pyc.mux
+wire [23:0] pyc_mux_111; // op=pyc.mux
+wire pyc_mux_751; // op=pyc.mux
+wire pyc_mux_752; // op=pyc.mux
+wire pyc_mux_753; // op=pyc.mux
+wire pyc_mux_754; // op=pyc.mux
+wire pyc_mux_755; // op=pyc.mux
+wire pyc_mux_756; // op=pyc.mux
+wire pyc_mux_757; // op=pyc.mux
+wire pyc_mux_758; // op=pyc.mux
+wire [15:0] pyc_mux_807; // op=pyc.mux
+wire [9:0] pyc_mux_809; // op=pyc.mux
+wire [7:0] pyc_mux_817; // op=pyc.mux
+wire [4:0] pyc_mux_820; // op=pyc.mux
+wire [25:0] pyc_mux_823; // op=pyc.mux
+wire [25:0] pyc_mux_826; // op=pyc.mux
+wire [25:0] pyc_mux_829; // op=pyc.mux
+wire [25:0] pyc_mux_832; // op=pyc.mux
+wire [25:0] pyc_mux_835; // op=pyc.mux
+wire [25:0] pyc_mux_836; // op=pyc.mux
+wire [25:0] pyc_mux_838; // op=pyc.mux
+wire [25:0] pyc_mux_840; // op=pyc.mux
+wire [25:0] pyc_mux_842; // op=pyc.mux
+wire [25:0] pyc_mux_844; // op=pyc.mux
+wire [25:0] pyc_mux_846; // op=pyc.mux
+wire [25:0] pyc_mux_847; // op=pyc.mux
+wire [7:0] pyc_mux_848; // op=pyc.mux
+wire [25:0] pyc_mux_859; // op=pyc.mux
+wire [25:0] pyc_mux_860; // op=pyc.mux
+wire pyc_mux_861; // op=pyc.mux
+wire pyc_mux_862; // op=pyc.mux
+wire [25:0] pyc_mux_863; // op=pyc.mux
+wire [7:0] pyc_mux_864; // op=pyc.mux
+wire pyc_mux_865; // op=pyc.mux
+wire [25:0] pyc_mux_915; // op=pyc.mux
+wire [25:0] pyc_mux_918; // op=pyc.mux
+wire [25:0] pyc_mux_921; // op=pyc.mux
+wire [25:0] pyc_mux_924; // op=pyc.mux
+wire [25:0] pyc_mux_927; // op=pyc.mux
+wire [25:0] pyc_mux_930; // op=pyc.mux
+wire [25:0] pyc_mux_933; // op=pyc.mux
+wire [25:0] pyc_mux_936; // op=pyc.mux
+wire [25:0] pyc_mux_939; // op=pyc.mux
+wire [25:0] pyc_mux_942; // op=pyc.mux
+wire [25:0] pyc_mux_943; // op=pyc.mux
+wire [25:0] pyc_mux_944; // op=pyc.mux
+wire [31:0] pyc_mux_958; // op=pyc.mux
+wire [7:0] pyc_mux_97; // op=pyc.mux
+wire pyc_not_850; // op=pyc.not
+wire pyc_not_856; // op=pyc.not
+wire [7:0] pyc_or_103; // op=pyc.or
+wire [23:0] pyc_or_110; // op=pyc.or
+wire pyc_or_117; // op=pyc.or
+wire pyc_or_204; // op=pyc.or
+wire pyc_or_209; // op=pyc.or
+wire pyc_or_214; // op=pyc.or
+wire pyc_or_219; // op=pyc.or
+wire pyc_or_224; // op=pyc.or
+wire pyc_or_229; // op=pyc.or
+wire pyc_or_238; // op=pyc.or
+wire pyc_or_243; // op=pyc.or
+wire pyc_or_248; // op=pyc.or
+wire pyc_or_253; // op=pyc.or
+wire pyc_or_258; // op=pyc.or
+wire pyc_or_263; // op=pyc.or
+wire pyc_or_272; // op=pyc.or
+wire pyc_or_277; // op=pyc.or
+wire pyc_or_282; // op=pyc.or
+wire pyc_or_287; // op=pyc.or
+wire pyc_or_292; // op=pyc.or
+wire pyc_or_297; // op=pyc.or
+wire pyc_or_302; // op=pyc.or
+wire pyc_or_309; // op=pyc.or
+wire pyc_or_314; // op=pyc.or
+wire pyc_or_319; // op=pyc.or
+wire pyc_or_324; // op=pyc.or
+wire pyc_or_329; // op=pyc.or
+wire pyc_or_334; // op=pyc.or
+wire [15:0] pyc_or_340; // op=pyc.or
+wire [15:0] pyc_or_343; // op=pyc.or
+wire [15:0] pyc_or_346; // op=pyc.or
+wire [15:0] pyc_or_349; // op=pyc.or
+wire [15:0] pyc_or_352; // op=pyc.or
+wire [15:0] pyc_or_355; // op=pyc.or
+wire [15:0] pyc_or_358; // op=pyc.or
+wire [15:0] pyc_or_361; // op=pyc.or
+wire [15:0] pyc_or_364; // op=pyc.or
+wire [15:0] pyc_or_367; // op=pyc.or
+wire [15:0] pyc_or_370; // op=pyc.or
+wire [15:0] pyc_or_373; // op=pyc.or
+wire [15:0] pyc_or_378; // op=pyc.or
+wire [15:0] pyc_or_381; // op=pyc.or
+wire [15:0] pyc_or_384; // op=pyc.or
+wire [15:0] pyc_or_387; // op=pyc.or
+wire [15:0] pyc_or_390; // op=pyc.or
+wire [15:0] pyc_or_393; // op=pyc.or
+wire [15:0] pyc_or_396; // op=pyc.or
+wire [15:0] pyc_or_401; // op=pyc.or
+wire [15:0] pyc_or_404; // op=pyc.or
+wire [15:0] pyc_or_407; // op=pyc.or
+wire [15:0] pyc_or_410; // op=pyc.or
+wire [15:0] pyc_or_413; // op=pyc.or
+wire [15:0] pyc_or_416; // op=pyc.or
+wire [15:0] pyc_or_419; // op=pyc.or
+wire [15:0] pyc_or_422; // op=pyc.or
+wire [15:0] pyc_or_425; // op=pyc.or
+wire [15:0] pyc_or_430; // op=pyc.or
+wire [15:0] pyc_or_433; // op=pyc.or
+wire [15:0] pyc_or_436; // op=pyc.or
+wire [15:0] pyc_or_439; // op=pyc.or
+wire [15:0] pyc_or_442; // op=pyc.or
+wire [15:0] pyc_or_445; // op=pyc.or
+wire [15:0] pyc_or_448; // op=pyc.or
+wire pyc_or_517; // op=pyc.or
+wire pyc_or_522; // op=pyc.or
+wire pyc_or_527; // op=pyc.or
+wire pyc_or_532; // op=pyc.or
+wire pyc_or_537; // op=pyc.or
+wire pyc_or_542; // op=pyc.or
+wire pyc_or_547; // op=pyc.or
+wire pyc_or_552; // op=pyc.or
+wire pyc_or_557; // op=pyc.or
+wire pyc_or_562; // op=pyc.or
+wire pyc_or_567; // op=pyc.or
+wire pyc_or_572; // op=pyc.or
+wire pyc_or_577; // op=pyc.or
+wire pyc_or_582; // op=pyc.or
+wire pyc_or_587; // op=pyc.or
+wire pyc_or_596; // op=pyc.or
+wire pyc_or_601; // op=pyc.or
+wire pyc_or_606; // op=pyc.or
+wire pyc_or_611; // op=pyc.or
+wire pyc_or_616; // op=pyc.or
+wire pyc_or_621; // op=pyc.or
+wire pyc_or_626; // op=pyc.or
+wire pyc_or_631; // op=pyc.or
+wire pyc_or_636; // op=pyc.or
+wire pyc_or_641; // op=pyc.or
+wire pyc_or_646; // op=pyc.or
+wire pyc_or_651; // op=pyc.or
+wire pyc_or_656; // op=pyc.or
+wire pyc_or_661; // op=pyc.or
+wire pyc_or_670; // op=pyc.or
+wire pyc_or_675; // op=pyc.or
+wire pyc_or_680; // op=pyc.or
+wire pyc_or_685; // op=pyc.or
+wire pyc_or_690; // op=pyc.or
+wire pyc_or_695; // op=pyc.or
+wire pyc_or_702; // op=pyc.or
+wire pyc_or_707; // op=pyc.or
+wire pyc_or_712; // op=pyc.or
+wire pyc_or_717; // op=pyc.or
+wire pyc_or_722; // op=pyc.or
+wire pyc_or_727; // op=pyc.or
+wire pyc_or_731; // op=pyc.or
+wire pyc_or_734; // op=pyc.or
+wire pyc_or_737; // op=pyc.or
+wire pyc_or_740; // op=pyc.or
+wire pyc_or_743; // op=pyc.or
+wire pyc_or_746; // op=pyc.or
+wire pyc_or_749; // op=pyc.or
+wire [15:0] pyc_or_762; // op=pyc.or
+wire [15:0] pyc_or_765; // op=pyc.or
+wire [15:0] pyc_or_768; // op=pyc.or
+wire [15:0] pyc_or_771; // op=pyc.or
+wire [15:0] pyc_or_774; // op=pyc.or
+wire [15:0] pyc_or_777; // op=pyc.or
+wire [15:0] pyc_or_780; // op=pyc.or
+wire [15:0] pyc_or_783; // op=pyc.or
+wire [15:0] pyc_or_786; // op=pyc.or
+wire [15:0] pyc_or_789; // op=pyc.or
+wire [15:0] pyc_or_792; // op=pyc.or
+wire [15:0] pyc_or_795; // op=pyc.or
+wire [15:0] pyc_or_798; // op=pyc.or
+wire [15:0] pyc_or_801; // op=pyc.or
+wire [15:0] pyc_or_804; // op=pyc.or
+wire [31:0] pyc_or_955; // op=pyc.or
+wire [31:0] pyc_or_957; // op=pyc.or
+wire [7:0] pyc_or_96; // op=pyc.or
+wire [3:0] pyc_reg_1000; // op=pyc.reg
+wire [15:0] pyc_reg_1001; // op=pyc.reg
+wire pyc_reg_1002; // op=pyc.reg
+wire [9:0] pyc_reg_1003; // op=pyc.reg
+wire pyc_reg_1004; // op=pyc.reg
+wire [7:0] pyc_reg_1005; // op=pyc.reg
+wire [23:0] pyc_reg_1006; // op=pyc.reg
+wire pyc_reg_1007; // op=pyc.reg
+wire pyc_reg_1008; // op=pyc.reg
+wire pyc_reg_1009; // op=pyc.reg
+wire pyc_reg_1010; // op=pyc.reg
+wire [9:0] pyc_reg_1011; // op=pyc.reg
+wire [25:0] pyc_reg_1012; // op=pyc.reg
+wire pyc_reg_1013; // op=pyc.reg
+wire [31:0] pyc_reg_1042; // op=pyc.reg
+wire pyc_reg_1043; // op=pyc.reg
+wire pyc_reg_986; // op=pyc.reg
+wire [9:0] pyc_reg_987; // op=pyc.reg
+wire pyc_reg_988; // op=pyc.reg
+wire [7:0] pyc_reg_989; // op=pyc.reg
+wire [23:0] pyc_reg_990; // op=pyc.reg
+wire pyc_reg_991; // op=pyc.reg
+wire pyc_reg_992; // op=pyc.reg
+wire pyc_reg_993; // op=pyc.reg
+wire [15:0] pyc_reg_994; // op=pyc.reg
+wire [15:0] pyc_reg_995; // op=pyc.reg
+wire [15:0] pyc_reg_996; // op=pyc.reg
+wire [15:0] pyc_reg_997; // op=pyc.reg
+wire [15:0] pyc_reg_998; // op=pyc.reg
+wire [15:0] pyc_reg_999; // op=pyc.reg
+wire [15:0] pyc_shli_339; // op=pyc.shli
+wire [15:0] pyc_shli_342; // op=pyc.shli
+wire [15:0] pyc_shli_345; // op=pyc.shli
+wire [15:0] pyc_shli_348; // op=pyc.shli
+wire [15:0] pyc_shli_351; // op=pyc.shli
+wire [15:0] pyc_shli_354; // op=pyc.shli
+wire [15:0] pyc_shli_357; // op=pyc.shli
+wire [15:0] pyc_shli_360; // op=pyc.shli
+wire [15:0] pyc_shli_363; // op=pyc.shli
+wire [15:0] pyc_shli_366; // op=pyc.shli
+wire [15:0] pyc_shli_369; // op=pyc.shli
+wire [15:0] pyc_shli_372; // op=pyc.shli
+wire [15:0] pyc_shli_375; // op=pyc.shli
+wire [15:0] pyc_shli_377; // op=pyc.shli
+wire [15:0] pyc_shli_380; // op=pyc.shli
+wire [15:0] pyc_shli_383; // op=pyc.shli
+wire [15:0] pyc_shli_386; // op=pyc.shli
+wire [15:0] pyc_shli_389; // op=pyc.shli
+wire [15:0] pyc_shli_392; // op=pyc.shli
+wire [15:0] pyc_shli_395; // op=pyc.shli
+wire [15:0] pyc_shli_398; // op=pyc.shli
+wire [15:0] pyc_shli_400; // op=pyc.shli
+wire [15:0] pyc_shli_403; // op=pyc.shli
+wire [15:0] pyc_shli_406; // op=pyc.shli
+wire [15:0] pyc_shli_409; // op=pyc.shli
+wire [15:0] pyc_shli_412; // op=pyc.shli
+wire [15:0] pyc_shli_415; // op=pyc.shli
+wire [15:0] pyc_shli_418; // op=pyc.shli
+wire [15:0] pyc_shli_421; // op=pyc.shli
+wire [15:0] pyc_shli_424; // op=pyc.shli
+wire [15:0] pyc_shli_427; // op=pyc.shli
+wire [15:0] pyc_shli_429; // op=pyc.shli
+wire [15:0] pyc_shli_432; // op=pyc.shli
+wire [15:0] pyc_shli_435; // op=pyc.shli
+wire [15:0] pyc_shli_438; // op=pyc.shli
+wire [15:0] pyc_shli_441; // op=pyc.shli
+wire [15:0] pyc_shli_444; // op=pyc.shli
+wire [15:0] pyc_shli_447; // op=pyc.shli
+wire [15:0] pyc_shli_761; // op=pyc.shli
+wire [15:0] pyc_shli_764; // op=pyc.shli
+wire [15:0] pyc_shli_767; // op=pyc.shli
+wire [15:0] pyc_shli_770; // op=pyc.shli
+wire [15:0] pyc_shli_773; // op=pyc.shli
+wire [15:0] pyc_shli_776; // op=pyc.shli
+wire [15:0] pyc_shli_779; // op=pyc.shli
+wire [15:0] pyc_shli_782; // op=pyc.shli
+wire [15:0] pyc_shli_785; // op=pyc.shli
+wire [15:0] pyc_shli_788; // op=pyc.shli
+wire [15:0] pyc_shli_791; // op=pyc.shli
+wire [15:0] pyc_shli_794; // op=pyc.shli
+wire [15:0] pyc_shli_797; // op=pyc.shli
+wire [15:0] pyc_shli_800; // op=pyc.shli
+wire [15:0] pyc_shli_803; // op=pyc.shli
+wire [25:0] pyc_shli_811; // op=pyc.shli
+wire [25:0] pyc_shli_913; // op=pyc.shli
+wire [25:0] pyc_shli_916; // op=pyc.shli
+wire [25:0] pyc_shli_919; // op=pyc.shli
+wire [25:0] pyc_shli_922; // op=pyc.shli
+wire [25:0] pyc_shli_925; // op=pyc.shli
+wire [31:0] pyc_shli_952; // op=pyc.shli
+wire [31:0] pyc_shli_954; // op=pyc.shli
+wire [9:0] pyc_sub_116; // op=pyc.sub
+wire [7:0] pyc_sub_815; // op=pyc.sub
+wire [7:0] pyc_sub_816; // op=pyc.sub
+wire [25:0] pyc_sub_857; // op=pyc.sub
+wire [25:0] pyc_sub_858; // op=pyc.sub
+wire [4:0] pyc_sub_911; // op=pyc.sub
+wire [4:0] pyc_sub_912; // op=pyc.sub
+wire [9:0] pyc_sub_947; // op=pyc.sub
+wire [7:0] pyc_trunc_813; // op=pyc.trunc
+wire [4:0] pyc_trunc_818; // op=pyc.trunc
+wire [25:0] pyc_trunc_854; // op=pyc.trunc
+wire [4:0] pyc_trunc_908; // op=pyc.trunc
+wire [7:0] pyc_trunc_949; // op=pyc.trunc
+wire pyc_ult_814; // op=pyc.ult
+wire pyc_ult_819; // op=pyc.ult
+wire pyc_ult_855; // op=pyc.ult
+wire pyc_ult_909; // op=pyc.ult
+wire pyc_ult_910; // op=pyc.ult
+wire pyc_xor_112; // op=pyc.xor
+wire pyc_xor_198; // op=pyc.xor
+wire pyc_xor_200; // op=pyc.xor
 wire pyc_xor_201; // op=pyc.xor
-wire pyc_xor_202; // op=pyc.xor
+wire pyc_xor_205; // op=pyc.xor
 wire pyc_xor_206; // op=pyc.xor
-wire pyc_xor_207; // op=pyc.xor
+wire pyc_xor_210; // op=pyc.xor
 wire pyc_xor_211; // op=pyc.xor
-wire pyc_xor_212; // op=pyc.xor
+wire pyc_xor_215; // op=pyc.xor
 wire pyc_xor_216; // op=pyc.xor
-wire pyc_xor_217; // op=pyc.xor
+wire pyc_xor_220; // op=pyc.xor
 wire pyc_xor_221; // op=pyc.xor
-wire pyc_xor_222; // op=pyc.xor
+wire pyc_xor_225; // op=pyc.xor
 wire pyc_xor_226; // op=pyc.xor
-wire pyc_xor_228; // op=pyc.xor
 wire pyc_xor_230; // op=pyc.xor
-wire pyc_xor_231; // op=pyc.xor
+wire pyc_xor_232; // op=pyc.xor
+wire pyc_xor_234; // op=pyc.xor
 wire pyc_xor_235; // op=pyc.xor
-wire pyc_xor_236; // op=pyc.xor
+wire pyc_xor_239; // op=pyc.xor
 wire pyc_xor_240; // op=pyc.xor
-wire pyc_xor_241; // op=pyc.xor
+wire pyc_xor_244; // op=pyc.xor
 wire pyc_xor_245; // op=pyc.xor
-wire pyc_xor_246; // op=pyc.xor
+wire pyc_xor_249; // op=pyc.xor
 wire pyc_xor_250; // op=pyc.xor
-wire pyc_xor_251; // op=pyc.xor
+wire pyc_xor_254; // op=pyc.xor
 wire pyc_xor_255; // op=pyc.xor
-wire pyc_xor_256; // op=pyc.xor
+wire pyc_xor_259; // op=pyc.xor
 wire pyc_xor_260; // op=pyc.xor
-wire pyc_xor_262; // op=pyc.xor
 wire pyc_xor_264; // op=pyc.xor
-wire pyc_xor_265; // op=pyc.xor
+wire pyc_xor_266; // op=pyc.xor
+wire pyc_xor_268; // op=pyc.xor
 wire pyc_xor_269; // op=pyc.xor
-wire pyc_xor_270; // op=pyc.xor
+wire pyc_xor_273; // op=pyc.xor
 wire pyc_xor_274; // op=pyc.xor
-wire pyc_xor_275; // op=pyc.xor
+wire pyc_xor_278; // op=pyc.xor
 wire pyc_xor_279; // op=pyc.xor
-wire pyc_xor_280; // op=pyc.xor
+wire pyc_xor_283; // op=pyc.xor
 wire pyc_xor_284; // op=pyc.xor
-wire pyc_xor_285; // op=pyc.xor
+wire pyc_xor_288; // op=pyc.xor
 wire pyc_xor_289; // op=pyc.xor
-wire pyc_xor_290; // op=pyc.xor
+wire pyc_xor_293; // op=pyc.xor
 wire pyc_xor_294; // op=pyc.xor
-wire pyc_xor_295; // op=pyc.xor
+wire pyc_xor_298; // op=pyc.xor
 wire pyc_xor_299; // op=pyc.xor
-wire pyc_xor_301; // op=pyc.xor
-wire pyc_xor_302; // op=pyc.xor
+wire pyc_xor_303; // op=pyc.xor
+wire pyc_xor_305; // op=pyc.xor
 wire pyc_xor_306; // op=pyc.xor
-wire pyc_xor_307; // op=pyc.xor
+wire pyc_xor_310; // op=pyc.xor
 wire pyc_xor_311; // op=pyc.xor
-wire pyc_xor_312; // op=pyc.xor
+wire pyc_xor_315; // op=pyc.xor
 wire pyc_xor_316; // op=pyc.xor
-wire pyc_xor_317; // op=pyc.xor
+wire pyc_xor_320; // op=pyc.xor
 wire pyc_xor_321; // op=pyc.xor
-wire pyc_xor_322; // op=pyc.xor
+wire pyc_xor_325; // op=pyc.xor
 wire pyc_xor_326; // op=pyc.xor
-wire pyc_xor_327; // op=pyc.xor
+wire pyc_xor_330; // op=pyc.xor
 wire pyc_xor_331; // op=pyc.xor
-wire pyc_xor_333; // op=pyc.xor
 wire pyc_xor_335; // op=pyc.xor
-wire pyc_xor_337; // op=pyc.xor
-wire pyc_xor_338; // op=pyc.xor
-wire pyc_xor_342; // op=pyc.xor
-wire pyc_xor_343; // op=pyc.xor
-wire pyc_xor_347; // op=pyc.xor
-wire pyc_xor_348; // op=pyc.xor
-wire pyc_xor_352; // op=pyc.xor
-wire pyc_xor_353; // op=pyc.xor
-wire pyc_xor_357; // op=pyc.xor
-wire pyc_xor_358; // op=pyc.xor
-wire pyc_xor_362; // op=pyc.xor
-wire pyc_xor_363; // op=pyc.xor
-wire pyc_xor_367; // op=pyc.xor
-wire pyc_xor_369; // op=pyc.xor
-wire pyc_xor_371; // op=pyc.xor
-wire pyc_xor_373; // op=pyc.xor
-wire pyc_xor_375; // op=pyc.xor
-wire pyc_xor_377; // op=pyc.xor
-wire pyc_xor_378; // op=pyc.xor
-wire pyc_xor_382; // op=pyc.xor
-wire pyc_xor_383; // op=pyc.xor
-wire pyc_xor_387; // op=pyc.xor
-wire pyc_xor_388; // op=pyc.xor
-wire pyc_xor_392; // op=pyc.xor
-wire pyc_xor_393; // op=pyc.xor
-wire pyc_xor_397; // op=pyc.xor
-wire pyc_xor_398; // op=pyc.xor
-wire pyc_xor_402; // op=pyc.xor
-wire pyc_xor_403; // op=pyc.xor
-wire pyc_xor_407; // op=pyc.xor
-wire pyc_xor_408; // op=pyc.xor
-wire pyc_xor_412; // op=pyc.xor
-wire pyc_xor_414; // op=pyc.xor
-wire pyc_xor_416; // op=pyc.xor
-wire pyc_xor_417; // op=pyc.xor
-wire pyc_xor_421; // op=pyc.xor
-wire pyc_xor_422; // op=pyc.xor
-wire pyc_xor_426; // op=pyc.xor
-wire pyc_xor_428; // op=pyc.xor
-wire pyc_xor_429; // op=pyc.xor
-wire pyc_xor_433; // op=pyc.xor
-wire pyc_xor_434; // op=pyc.xor
-wire pyc_xor_438; // op=pyc.xor
-wire pyc_xor_439; // op=pyc.xor
-wire pyc_xor_443; // op=pyc.xor
-wire pyc_xor_444; // op=pyc.xor
-wire pyc_xor_448; // op=pyc.xor
-wire pyc_xor_449; // op=pyc.xor
-wire pyc_xor_453; // op=pyc.xor
-wire pyc_xor_454; // op=pyc.xor
-wire pyc_xor_458; // op=pyc.xor
-wire pyc_xor_459; // op=pyc.xor
-wire pyc_xor_461; // op=pyc.xor
-wire pyc_xor_464; // op=pyc.xor
-wire pyc_xor_467; // op=pyc.xor
-wire pyc_xor_470; // op=pyc.xor
-wire pyc_xor_473; // op=pyc.xor
-wire pyc_xor_476; // op=pyc.xor
-wire pyc_xor_479; // op=pyc.xor
+wire pyc_xor_513; // op=pyc.xor
+wire pyc_xor_514; // op=pyc.xor
+wire pyc_xor_518; // op=pyc.xor
+wire pyc_xor_519; // op=pyc.xor
+wire pyc_xor_523; // op=pyc.xor
+wire pyc_xor_524; // op=pyc.xor
+wire pyc_xor_528; // op=pyc.xor
+wire pyc_xor_529; // op=pyc.xor
+wire pyc_xor_533; // op=pyc.xor
+wire pyc_xor_534; // op=pyc.xor
+wire pyc_xor_538; // op=pyc.xor
+wire pyc_xor_539; // op=pyc.xor
+wire pyc_xor_543; // op=pyc.xor
+wire pyc_xor_544; // op=pyc.xor
+wire pyc_xor_548; // op=pyc.xor
+wire pyc_xor_549; // op=pyc.xor
+wire pyc_xor_553; // op=pyc.xor
+wire pyc_xor_554; // op=pyc.xor
+wire pyc_xor_558; // op=pyc.xor
+wire pyc_xor_559; // op=pyc.xor
+wire pyc_xor_563; // op=pyc.xor
+wire pyc_xor_564; // op=pyc.xor
+wire pyc_xor_568; // op=pyc.xor
+wire pyc_xor_569; // op=pyc.xor
+wire pyc_xor_573; // op=pyc.xor
+wire pyc_xor_574; // op=pyc.xor
 wire pyc_xor_578; // op=pyc.xor
-wire [23:0] pyc_zext_105; // op=pyc.zext
-wire [9:0] pyc_zext_109; // op=pyc.zext
-wire [9:0] pyc_zext_110; // op=pyc.zext
-wire [15:0] pyc_zext_488; // op=pyc.zext
-wire [15:0] pyc_zext_489; // op=pyc.zext
-wire [15:0] pyc_zext_492; // op=pyc.zext
-wire [15:0] pyc_zext_495; // op=pyc.zext
-wire [15:0] pyc_zext_498; // op=pyc.zext
-wire [15:0] pyc_zext_501; // op=pyc.zext
-wire [15:0] pyc_zext_504; // op=pyc.zext
-wire [15:0] pyc_zext_507; // op=pyc.zext
-wire [15:0] pyc_zext_510; // op=pyc.zext
-wire [15:0] pyc_zext_513; // op=pyc.zext
-wire [15:0] pyc_zext_516; // op=pyc.zext
-wire [15:0] pyc_zext_519; // op=pyc.zext
-wire [15:0] pyc_zext_522; // op=pyc.zext
-wire [15:0] pyc_zext_525; // op=pyc.zext
-wire [15:0] pyc_zext_528; // op=pyc.zext
-wire [15:0] pyc_zext_531; // op=pyc.zext
-wire [25:0] pyc_zext_539; // op=pyc.zext
-wire [25:0] pyc_zext_541; // op=pyc.zext
-wire [26:0] pyc_zext_580; // op=pyc.zext
-wire [26:0] pyc_zext_581; // op=pyc.zext
-wire [9:0] pyc_zext_595; // op=pyc.zext
-wire [9:0] pyc_zext_673; // op=pyc.zext
-wire [31:0] pyc_zext_678; // op=pyc.zext
-wire [31:0] pyc_zext_680; // op=pyc.zext
-wire [31:0] pyc_zext_683; // op=pyc.zext
-wire [7:0] pyc_zext_91; // op=pyc.zext
-wire [7:0] pyc_zext_98; // op=pyc.zext
+wire pyc_xor_579; // op=pyc.xor
+wire pyc_xor_583; // op=pyc.xor
+wire pyc_xor_584; // op=pyc.xor
+wire pyc_xor_588; // op=pyc.xor
+wire pyc_xor_589; // op=pyc.xor
+wire pyc_xor_590; // op=pyc.xor
+wire pyc_xor_592; // op=pyc.xor
+wire pyc_xor_593; // op=pyc.xor
+wire pyc_xor_597; // op=pyc.xor
+wire pyc_xor_598; // op=pyc.xor
+wire pyc_xor_602; // op=pyc.xor
+wire pyc_xor_603; // op=pyc.xor
+wire pyc_xor_607; // op=pyc.xor
+wire pyc_xor_608; // op=pyc.xor
+wire pyc_xor_612; // op=pyc.xor
+wire pyc_xor_613; // op=pyc.xor
+wire pyc_xor_617; // op=pyc.xor
+wire pyc_xor_618; // op=pyc.xor
+wire pyc_xor_622; // op=pyc.xor
+wire pyc_xor_623; // op=pyc.xor
+wire pyc_xor_627; // op=pyc.xor
+wire pyc_xor_628; // op=pyc.xor
+wire pyc_xor_632; // op=pyc.xor
+wire pyc_xor_633; // op=pyc.xor
+wire pyc_xor_637; // op=pyc.xor
+wire pyc_xor_638; // op=pyc.xor
+wire pyc_xor_642; // op=pyc.xor
+wire pyc_xor_643; // op=pyc.xor
+wire pyc_xor_647; // op=pyc.xor
+wire pyc_xor_648; // op=pyc.xor
+wire pyc_xor_652; // op=pyc.xor
+wire pyc_xor_653; // op=pyc.xor
+wire pyc_xor_657; // op=pyc.xor
+wire pyc_xor_658; // op=pyc.xor
+wire pyc_xor_662; // op=pyc.xor
+wire pyc_xor_663; // op=pyc.xor
+wire pyc_xor_664; // op=pyc.xor
+wire pyc_xor_666; // op=pyc.xor
+wire pyc_xor_667; // op=pyc.xor
+wire pyc_xor_671; // op=pyc.xor
+wire pyc_xor_672; // op=pyc.xor
+wire pyc_xor_676; // op=pyc.xor
+wire pyc_xor_677; // op=pyc.xor
+wire pyc_xor_681; // op=pyc.xor
+wire pyc_xor_682; // op=pyc.xor
+wire pyc_xor_686; // op=pyc.xor
+wire pyc_xor_687; // op=pyc.xor
+wire pyc_xor_691; // op=pyc.xor
+wire pyc_xor_692; // op=pyc.xor
+wire pyc_xor_696; // op=pyc.xor
+wire pyc_xor_698; // op=pyc.xor
+wire pyc_xor_699; // op=pyc.xor
+wire pyc_xor_703; // op=pyc.xor
+wire pyc_xor_704; // op=pyc.xor
+wire pyc_xor_708; // op=pyc.xor
+wire pyc_xor_709; // op=pyc.xor
+wire pyc_xor_713; // op=pyc.xor
+wire pyc_xor_714; // op=pyc.xor
+wire pyc_xor_718; // op=pyc.xor
+wire pyc_xor_719; // op=pyc.xor
+wire pyc_xor_723; // op=pyc.xor
+wire pyc_xor_724; // op=pyc.xor
+wire pyc_xor_728; // op=pyc.xor
+wire pyc_xor_729; // op=pyc.xor
+wire pyc_xor_730; // op=pyc.xor
+wire pyc_xor_732; // op=pyc.xor
+wire pyc_xor_735; // op=pyc.xor
+wire pyc_xor_738; // op=pyc.xor
+wire pyc_xor_741; // op=pyc.xor
+wire pyc_xor_744; // op=pyc.xor
+wire pyc_xor_747; // op=pyc.xor
+wire pyc_xor_750; // op=pyc.xor
+wire pyc_xor_849; // op=pyc.xor
+wire [7:0] pyc_zext_102; // op=pyc.zext
+wire [23:0] pyc_zext_109; // op=pyc.zext
+wire [9:0] pyc_zext_113; // op=pyc.zext
+wire [9:0] pyc_zext_114; // op=pyc.zext
+wire [15:0] pyc_zext_337; // op=pyc.zext
+wire [15:0] pyc_zext_338; // op=pyc.zext
+wire [15:0] pyc_zext_341; // op=pyc.zext
+wire [15:0] pyc_zext_344; // op=pyc.zext
+wire [15:0] pyc_zext_347; // op=pyc.zext
+wire [15:0] pyc_zext_350; // op=pyc.zext
+wire [15:0] pyc_zext_353; // op=pyc.zext
+wire [15:0] pyc_zext_356; // op=pyc.zext
+wire [15:0] pyc_zext_359; // op=pyc.zext
+wire [15:0] pyc_zext_362; // op=pyc.zext
+wire [15:0] pyc_zext_365; // op=pyc.zext
+wire [15:0] pyc_zext_368; // op=pyc.zext
+wire [15:0] pyc_zext_371; // op=pyc.zext
+wire [15:0] pyc_zext_374; // op=pyc.zext
+wire [15:0] pyc_zext_376; // op=pyc.zext
+wire [15:0] pyc_zext_379; // op=pyc.zext
+wire [15:0] pyc_zext_382; // op=pyc.zext
+wire [15:0] pyc_zext_385; // op=pyc.zext
+wire [15:0] pyc_zext_388; // op=pyc.zext
+wire [15:0] pyc_zext_391; // op=pyc.zext
+wire [15:0] pyc_zext_394; // op=pyc.zext
+wire [15:0] pyc_zext_397; // op=pyc.zext
+wire [15:0] pyc_zext_399; // op=pyc.zext
+wire [15:0] pyc_zext_402; // op=pyc.zext
+wire [15:0] pyc_zext_405; // op=pyc.zext
+wire [15:0] pyc_zext_408; // op=pyc.zext
+wire [15:0] pyc_zext_411; // op=pyc.zext
+wire [15:0] pyc_zext_414; // op=pyc.zext
+wire [15:0] pyc_zext_417; // op=pyc.zext
+wire [15:0] pyc_zext_420; // op=pyc.zext
+wire [15:0] pyc_zext_423; // op=pyc.zext
+wire [15:0] pyc_zext_426; // op=pyc.zext
+wire [15:0] pyc_zext_428; // op=pyc.zext
+wire [15:0] pyc_zext_431; // op=pyc.zext
+wire [15:0] pyc_zext_434; // op=pyc.zext
+wire [15:0] pyc_zext_437; // op=pyc.zext
+wire [15:0] pyc_zext_440; // op=pyc.zext
+wire [15:0] pyc_zext_443; // op=pyc.zext
+wire [15:0] pyc_zext_446; // op=pyc.zext
+wire [15:0] pyc_zext_759; // op=pyc.zext
+wire [15:0] pyc_zext_760; // op=pyc.zext
+wire [15:0] pyc_zext_763; // op=pyc.zext
+wire [15:0] pyc_zext_766; // op=pyc.zext
+wire [15:0] pyc_zext_769; // op=pyc.zext
+wire [15:0] pyc_zext_772; // op=pyc.zext
+wire [15:0] pyc_zext_775; // op=pyc.zext
+wire [15:0] pyc_zext_778; // op=pyc.zext
+wire [15:0] pyc_zext_781; // op=pyc.zext
+wire [15:0] pyc_zext_784; // op=pyc.zext
+wire [15:0] pyc_zext_787; // op=pyc.zext
+wire [15:0] pyc_zext_790; // op=pyc.zext
+wire [15:0] pyc_zext_793; // op=pyc.zext
+wire [15:0] pyc_zext_796; // op=pyc.zext
+wire [15:0] pyc_zext_799; // op=pyc.zext
+wire [15:0] pyc_zext_802; // op=pyc.zext
+wire [25:0] pyc_zext_810; // op=pyc.zext
+wire [25:0] pyc_zext_812; // op=pyc.zext
+wire [26:0] pyc_zext_851; // op=pyc.zext
+wire [26:0] pyc_zext_852; // op=pyc.zext
+wire [9:0] pyc_zext_866; // op=pyc.zext
+wire [9:0] pyc_zext_946; // op=pyc.zext
+wire [7:0] pyc_zext_95; // op=pyc.zext
+wire [31:0] pyc_zext_951; // op=pyc.zext
+wire [31:0] pyc_zext_953; // op=pyc.zext
+wire [31:0] pyc_zext_956; // op=pyc.zext
 wire [31:0] result_2; // pyc.name="result"
 wire result_valid_2; // pyc.name="result_valid"
-wire [7:0] s1_a_mant; // pyc.name="s1_a_mant"
 wire [7:0] s1_acc_exp; // pyc.name="s1_acc_exp"
 wire [23:0] s1_acc_mant; // pyc.name="s1_acc_mant"
 wire s1_acc_sign; // pyc.name="s1_acc_sign"
 wire s1_acc_zero; // pyc.name="s1_acc_zero"
-wire [7:0] s1_b_mant; // pyc.name="s1_b_mant"
+wire [3:0] s1_mul_nrows; // pyc.name="s1_mul_nrows"
+wire [15:0] s1_mul_row0; // pyc.name="s1_mul_row0"
+wire [15:0] s1_mul_row1; // pyc.name="s1_mul_row1"
+wire [15:0] s1_mul_row2; // pyc.name="s1_mul_row2"
+wire [15:0] s1_mul_row3; // pyc.name="s1_mul_row3"
+wire [15:0] s1_mul_row4; // pyc.name="s1_mul_row4"
+wire [15:0] s1_mul_row5; // pyc.name="s1_mul_row5"
 wire [9:0] s1_prod_exp; // pyc.name="s1_prod_exp"
 wire s1_prod_sign; // pyc.name="s1_prod_sign"
 wire s1_prod_zero; // pyc.name="s1_prod_zero"
@@ -815,10 +1098,37 @@ wire s3_result_sign; // pyc.name="s3_result_sign"
 wire s3_valid; // pyc.name="s3_valid"
 
 // --- Combinational (netlist)
-assign norm_lzc_cnt = pyc_comb_762;
+assign norm_lzc_cnt = pyc_comb_1040;
+assign pyc_mux_1014 = (pyc_comb_959 ? pyc_comb_79 : pyc_comb_80);
+assign pyc_mux_1015 = (pyc_comb_960 ? pyc_comb_78 : pyc_mux_1014);
+assign pyc_mux_1016 = (pyc_comb_961 ? pyc_comb_77 : pyc_mux_1015);
+assign pyc_mux_1017 = (pyc_comb_962 ? pyc_comb_76 : pyc_mux_1016);
+assign pyc_mux_1018 = (pyc_comb_963 ? pyc_comb_75 : pyc_mux_1017);
+assign pyc_mux_1019 = (pyc_comb_964 ? pyc_comb_74 : pyc_mux_1018);
+assign pyc_mux_1020 = (pyc_comb_965 ? pyc_comb_73 : pyc_mux_1019);
+assign pyc_mux_1021 = (pyc_comb_966 ? pyc_comb_72 : pyc_mux_1020);
+assign pyc_mux_1022 = (pyc_comb_967 ? pyc_comb_71 : pyc_mux_1021);
+assign pyc_mux_1023 = (pyc_comb_968 ? pyc_comb_70 : pyc_mux_1022);
+assign pyc_mux_1024 = (pyc_comb_969 ? pyc_comb_69 : pyc_mux_1023);
+assign pyc_mux_1025 = (pyc_comb_970 ? pyc_comb_68 : pyc_mux_1024);
+assign pyc_mux_1026 = (pyc_comb_971 ? pyc_comb_67 : pyc_mux_1025);
+assign pyc_mux_1027 = (pyc_comb_972 ? pyc_comb_66 : pyc_mux_1026);
+assign pyc_mux_1028 = (pyc_comb_973 ? pyc_comb_65 : pyc_mux_1027);
+assign pyc_mux_1029 = (pyc_comb_974 ? pyc_comb_64 : pyc_mux_1028);
+assign pyc_mux_1030 = (pyc_comb_975 ? pyc_comb_63 : pyc_mux_1029);
+assign pyc_mux_1031 = (pyc_comb_976 ? pyc_comb_62 : pyc_mux_1030);
+assign pyc_mux_1032 = (pyc_comb_977 ? pyc_comb_61 : pyc_mux_1031);
+assign pyc_mux_1033 = (pyc_comb_978 ? pyc_comb_60 : pyc_mux_1032);
+assign pyc_mux_1034 = (pyc_comb_979 ? pyc_comb_59 : pyc_mux_1033);
+assign pyc_mux_1035 = (pyc_comb_980 ? pyc_comb_58 : pyc_mux_1034);
+assign pyc_mux_1036 = (pyc_comb_981 ? pyc_comb_57 : pyc_mux_1035);
+assign pyc_mux_1037 = (pyc_comb_982 ? pyc_comb_56 : pyc_mux_1036);
+assign pyc_mux_1038 = (pyc_comb_983 ? pyc_comb_55 : pyc_mux_1037);
+assign pyc_mux_1039 = (pyc_comb_984 ? pyc_comb_54 : pyc_mux_1038);
+assign pyc_comb_1040 = pyc_mux_1039;
 assign pyc_constant_1 = 24'd8388608;
 assign pyc_constant_2 = 8'd128;
-assign pyc_constant_3 = 16'd0;
+assign pyc_constant_3 = 4'd0;
 assign pyc_constant_4 = 10'd0;
 assign pyc_constant_5 = 32'd0;
 assign pyc_constant_6 = 26'd0;
@@ -854,934 +1164,1225 @@ assign pyc_constant_35 = 6'd26;
 assign pyc_constant_36 = 5'd26;
 assign pyc_constant_37 = 8'd26;
 assign pyc_constant_38 = 10'd1;
-assign pyc_constant_39 = 1'd0;
-assign pyc_constant_40 = 10'd127;
-assign pyc_constant_41 = 24'd0;
-assign pyc_constant_42 = 1'd1;
-assign pyc_constant_43 = 8'd0;
-assign pyc_comb_44 = pyc_constant_1;
-assign pyc_comb_45 = pyc_constant_2;
-assign pyc_comb_46 = pyc_constant_3;
-assign pyc_comb_47 = pyc_constant_4;
-assign pyc_comb_48 = pyc_constant_5;
-assign pyc_comb_49 = pyc_constant_6;
-assign pyc_comb_50 = pyc_constant_7;
-assign pyc_comb_51 = pyc_constant_8;
-assign pyc_comb_52 = pyc_constant_9;
-assign pyc_comb_53 = pyc_constant_10;
-assign pyc_comb_54 = pyc_constant_11;
-assign pyc_comb_55 = pyc_constant_12;
-assign pyc_comb_56 = pyc_constant_13;
-assign pyc_comb_57 = pyc_constant_14;
-assign pyc_comb_58 = pyc_constant_15;
-assign pyc_comb_59 = pyc_constant_16;
-assign pyc_comb_60 = pyc_constant_17;
-assign pyc_comb_61 = pyc_constant_18;
-assign pyc_comb_62 = pyc_constant_19;
-assign pyc_comb_63 = pyc_constant_20;
-assign pyc_comb_64 = pyc_constant_21;
-assign pyc_comb_65 = pyc_constant_22;
-assign pyc_comb_66 = pyc_constant_23;
-assign pyc_comb_67 = pyc_constant_24;
-assign pyc_comb_68 = pyc_constant_25;
-assign pyc_comb_69 = pyc_constant_26;
-assign pyc_comb_70 = pyc_constant_27;
-assign pyc_comb_71 = pyc_constant_28;
-assign pyc_comb_72 = pyc_constant_29;
-assign pyc_comb_73 = pyc_constant_30;
-assign pyc_comb_74 = pyc_constant_31;
-assign pyc_comb_75 = pyc_constant_32;
-assign pyc_comb_76 = pyc_constant_33;
-assign pyc_comb_77 = pyc_constant_34;
-assign pyc_comb_78 = pyc_constant_35;
-assign pyc_comb_79 = pyc_constant_36;
-assign pyc_comb_80 = pyc_constant_37;
-assign pyc_comb_81 = pyc_constant_38;
-assign pyc_comb_82 = pyc_constant_39;
-assign pyc_comb_83 = pyc_constant_40;
-assign pyc_comb_84 = pyc_constant_41;
-assign pyc_comb_85 = pyc_constant_42;
-assign pyc_comb_86 = pyc_constant_43;
-assign pyc_extract_87 = a_in[15];
-assign pyc_extract_88 = a_in[14:7];
-assign pyc_extract_89 = a_in[6:0];
-assign pyc_eq_90 = (pyc_extract_88 == pyc_comb_86);
-assign pyc_zext_91 = {{1{1'b0}}, pyc_extract_89};
-assign pyc_or_92 = (pyc_comb_45 | pyc_zext_91);
-assign pyc_mux_93 = (pyc_eq_90 ? pyc_comb_86 : pyc_or_92);
-assign pyc_extract_94 = b_in[15];
-assign pyc_extract_95 = b_in[14:7];
-assign pyc_extract_96 = b_in[6:0];
-assign pyc_eq_97 = (pyc_extract_95 == pyc_comb_86);
-assign pyc_zext_98 = {{1{1'b0}}, pyc_extract_96};
-assign pyc_or_99 = (pyc_comb_45 | pyc_zext_98);
-assign pyc_mux_100 = (pyc_eq_97 ? pyc_comb_86 : pyc_or_99);
-assign pyc_extract_101 = acc_in[31];
-assign pyc_extract_102 = acc_in[30:23];
-assign pyc_extract_103 = acc_in[22:0];
-assign pyc_eq_104 = (pyc_extract_102 == pyc_comb_86);
-assign pyc_zext_105 = {{1{1'b0}}, pyc_extract_103};
-assign pyc_or_106 = (pyc_comb_44 | pyc_zext_105);
-assign pyc_mux_107 = (pyc_eq_104 ? pyc_comb_84 : pyc_or_106);
-assign pyc_xor_108 = (pyc_extract_87 ^ pyc_extract_94);
-assign pyc_zext_109 = {{2{1'b0}}, pyc_extract_88};
-assign pyc_zext_110 = {{2{1'b0}}, pyc_extract_95};
-assign pyc_add_111 = (pyc_zext_109 + pyc_zext_110);
-assign pyc_sub_112 = (pyc_add_111 - pyc_comb_83);
-assign pyc_or_113 = (pyc_eq_90 | pyc_eq_97);
-assign pyc_extract_114 = s1_a_mant[0];
-assign pyc_extract_115 = s1_a_mant[1];
-assign pyc_extract_116 = s1_a_mant[2];
-assign pyc_extract_117 = s1_a_mant[3];
-assign pyc_extract_118 = s1_a_mant[4];
-assign pyc_extract_119 = s1_a_mant[5];
-assign pyc_extract_120 = s1_a_mant[6];
-assign pyc_extract_121 = s1_a_mant[7];
-assign pyc_extract_122 = s1_b_mant[0];
-assign pyc_extract_123 = s1_b_mant[1];
-assign pyc_extract_124 = s1_b_mant[2];
-assign pyc_extract_125 = s1_b_mant[3];
-assign pyc_extract_126 = s1_b_mant[4];
-assign pyc_extract_127 = s1_b_mant[5];
-assign pyc_extract_128 = s1_b_mant[6];
-assign pyc_extract_129 = s1_b_mant[7];
-assign pyc_and_130 = (pyc_extract_114 & pyc_extract_122);
-assign pyc_and_131 = (pyc_extract_114 & pyc_extract_123);
-assign pyc_and_132 = (pyc_extract_114 & pyc_extract_124);
-assign pyc_and_133 = (pyc_extract_114 & pyc_extract_125);
-assign pyc_and_134 = (pyc_extract_114 & pyc_extract_126);
-assign pyc_and_135 = (pyc_extract_114 & pyc_extract_127);
-assign pyc_and_136 = (pyc_extract_114 & pyc_extract_128);
-assign pyc_and_137 = (pyc_extract_114 & pyc_extract_129);
-assign pyc_and_138 = (pyc_extract_115 & pyc_extract_122);
-assign pyc_and_139 = (pyc_extract_115 & pyc_extract_123);
-assign pyc_and_140 = (pyc_extract_115 & pyc_extract_124);
-assign pyc_and_141 = (pyc_extract_115 & pyc_extract_125);
-assign pyc_and_142 = (pyc_extract_115 & pyc_extract_126);
-assign pyc_and_143 = (pyc_extract_115 & pyc_extract_127);
-assign pyc_and_144 = (pyc_extract_115 & pyc_extract_128);
-assign pyc_and_145 = (pyc_extract_115 & pyc_extract_129);
-assign pyc_and_146 = (pyc_extract_116 & pyc_extract_122);
-assign pyc_and_147 = (pyc_extract_116 & pyc_extract_123);
-assign pyc_and_148 = (pyc_extract_116 & pyc_extract_124);
-assign pyc_and_149 = (pyc_extract_116 & pyc_extract_125);
-assign pyc_and_150 = (pyc_extract_116 & pyc_extract_126);
-assign pyc_and_151 = (pyc_extract_116 & pyc_extract_127);
-assign pyc_and_152 = (pyc_extract_116 & pyc_extract_128);
-assign pyc_and_153 = (pyc_extract_116 & pyc_extract_129);
-assign pyc_and_154 = (pyc_extract_117 & pyc_extract_122);
-assign pyc_and_155 = (pyc_extract_117 & pyc_extract_123);
-assign pyc_and_156 = (pyc_extract_117 & pyc_extract_124);
-assign pyc_and_157 = (pyc_extract_117 & pyc_extract_125);
-assign pyc_and_158 = (pyc_extract_117 & pyc_extract_126);
-assign pyc_and_159 = (pyc_extract_117 & pyc_extract_127);
-assign pyc_and_160 = (pyc_extract_117 & pyc_extract_128);
-assign pyc_and_161 = (pyc_extract_117 & pyc_extract_129);
-assign pyc_and_162 = (pyc_extract_118 & pyc_extract_122);
-assign pyc_and_163 = (pyc_extract_118 & pyc_extract_123);
-assign pyc_and_164 = (pyc_extract_118 & pyc_extract_124);
-assign pyc_and_165 = (pyc_extract_118 & pyc_extract_125);
-assign pyc_and_166 = (pyc_extract_118 & pyc_extract_126);
-assign pyc_and_167 = (pyc_extract_118 & pyc_extract_127);
-assign pyc_and_168 = (pyc_extract_118 & pyc_extract_128);
-assign pyc_and_169 = (pyc_extract_118 & pyc_extract_129);
-assign pyc_and_170 = (pyc_extract_119 & pyc_extract_122);
-assign pyc_and_171 = (pyc_extract_119 & pyc_extract_123);
-assign pyc_and_172 = (pyc_extract_119 & pyc_extract_124);
-assign pyc_and_173 = (pyc_extract_119 & pyc_extract_125);
-assign pyc_and_174 = (pyc_extract_119 & pyc_extract_126);
-assign pyc_and_175 = (pyc_extract_119 & pyc_extract_127);
-assign pyc_and_176 = (pyc_extract_119 & pyc_extract_128);
-assign pyc_and_177 = (pyc_extract_119 & pyc_extract_129);
-assign pyc_and_178 = (pyc_extract_120 & pyc_extract_122);
-assign pyc_and_179 = (pyc_extract_120 & pyc_extract_123);
-assign pyc_and_180 = (pyc_extract_120 & pyc_extract_124);
-assign pyc_and_181 = (pyc_extract_120 & pyc_extract_125);
-assign pyc_and_182 = (pyc_extract_120 & pyc_extract_126);
-assign pyc_and_183 = (pyc_extract_120 & pyc_extract_127);
-assign pyc_and_184 = (pyc_extract_120 & pyc_extract_128);
-assign pyc_and_185 = (pyc_extract_120 & pyc_extract_129);
-assign pyc_and_186 = (pyc_extract_121 & pyc_extract_122);
-assign pyc_and_187 = (pyc_extract_121 & pyc_extract_123);
-assign pyc_and_188 = (pyc_extract_121 & pyc_extract_124);
-assign pyc_and_189 = (pyc_extract_121 & pyc_extract_125);
-assign pyc_and_190 = (pyc_extract_121 & pyc_extract_126);
-assign pyc_and_191 = (pyc_extract_121 & pyc_extract_127);
-assign pyc_and_192 = (pyc_extract_121 & pyc_extract_128);
-assign pyc_and_193 = (pyc_extract_121 & pyc_extract_129);
-assign pyc_xor_194 = (pyc_and_131 ^ pyc_and_138);
-assign pyc_and_195 = (pyc_and_131 & pyc_and_138);
-assign pyc_xor_196 = (pyc_and_132 ^ pyc_and_139);
-assign pyc_xor_197 = (pyc_xor_196 ^ pyc_and_146);
-assign pyc_and_198 = (pyc_and_132 & pyc_and_139);
-assign pyc_and_199 = (pyc_and_146 & pyc_xor_196);
-assign pyc_or_200 = (pyc_and_198 | pyc_and_199);
-assign pyc_xor_201 = (pyc_and_133 ^ pyc_and_140);
-assign pyc_xor_202 = (pyc_xor_201 ^ pyc_and_147);
-assign pyc_and_203 = (pyc_and_133 & pyc_and_140);
-assign pyc_and_204 = (pyc_and_147 & pyc_xor_201);
-assign pyc_or_205 = (pyc_and_203 | pyc_and_204);
-assign pyc_xor_206 = (pyc_and_134 ^ pyc_and_141);
-assign pyc_xor_207 = (pyc_xor_206 ^ pyc_and_148);
-assign pyc_and_208 = (pyc_and_134 & pyc_and_141);
-assign pyc_and_209 = (pyc_and_148 & pyc_xor_206);
-assign pyc_or_210 = (pyc_and_208 | pyc_and_209);
-assign pyc_xor_211 = (pyc_and_135 ^ pyc_and_142);
-assign pyc_xor_212 = (pyc_xor_211 ^ pyc_and_149);
-assign pyc_and_213 = (pyc_and_135 & pyc_and_142);
-assign pyc_and_214 = (pyc_and_149 & pyc_xor_211);
-assign pyc_or_215 = (pyc_and_213 | pyc_and_214);
-assign pyc_xor_216 = (pyc_and_136 ^ pyc_and_143);
-assign pyc_xor_217 = (pyc_xor_216 ^ pyc_and_150);
-assign pyc_and_218 = (pyc_and_136 & pyc_and_143);
-assign pyc_and_219 = (pyc_and_150 & pyc_xor_216);
-assign pyc_or_220 = (pyc_and_218 | pyc_and_219);
-assign pyc_xor_221 = (pyc_and_137 ^ pyc_and_144);
-assign pyc_xor_222 = (pyc_xor_221 ^ pyc_and_151);
-assign pyc_and_223 = (pyc_and_137 & pyc_and_144);
-assign pyc_and_224 = (pyc_and_151 & pyc_xor_221);
-assign pyc_or_225 = (pyc_and_223 | pyc_and_224);
-assign pyc_xor_226 = (pyc_and_145 ^ pyc_and_152);
-assign pyc_and_227 = (pyc_and_152 & pyc_and_145);
-assign pyc_xor_228 = (pyc_and_155 ^ pyc_and_162);
-assign pyc_and_229 = (pyc_and_155 & pyc_and_162);
-assign pyc_xor_230 = (pyc_and_156 ^ pyc_and_163);
-assign pyc_xor_231 = (pyc_xor_230 ^ pyc_and_170);
-assign pyc_and_232 = (pyc_and_156 & pyc_and_163);
-assign pyc_and_233 = (pyc_and_170 & pyc_xor_230);
-assign pyc_or_234 = (pyc_and_232 | pyc_and_233);
-assign pyc_xor_235 = (pyc_and_157 ^ pyc_and_164);
-assign pyc_xor_236 = (pyc_xor_235 ^ pyc_and_171);
-assign pyc_and_237 = (pyc_and_157 & pyc_and_164);
-assign pyc_and_238 = (pyc_and_171 & pyc_xor_235);
-assign pyc_or_239 = (pyc_and_237 | pyc_and_238);
-assign pyc_xor_240 = (pyc_and_158 ^ pyc_and_165);
-assign pyc_xor_241 = (pyc_xor_240 ^ pyc_and_172);
-assign pyc_and_242 = (pyc_and_158 & pyc_and_165);
-assign pyc_and_243 = (pyc_and_172 & pyc_xor_240);
-assign pyc_or_244 = (pyc_and_242 | pyc_and_243);
-assign pyc_xor_245 = (pyc_and_159 ^ pyc_and_166);
-assign pyc_xor_246 = (pyc_xor_245 ^ pyc_and_173);
-assign pyc_and_247 = (pyc_and_159 & pyc_and_166);
-assign pyc_and_248 = (pyc_and_173 & pyc_xor_245);
-assign pyc_or_249 = (pyc_and_247 | pyc_and_248);
-assign pyc_xor_250 = (pyc_and_160 ^ pyc_and_167);
-assign pyc_xor_251 = (pyc_xor_250 ^ pyc_and_174);
-assign pyc_and_252 = (pyc_and_160 & pyc_and_167);
-assign pyc_and_253 = (pyc_and_174 & pyc_xor_250);
-assign pyc_or_254 = (pyc_and_252 | pyc_and_253);
-assign pyc_xor_255 = (pyc_and_161 ^ pyc_and_168);
-assign pyc_xor_256 = (pyc_xor_255 ^ pyc_and_175);
-assign pyc_and_257 = (pyc_and_161 & pyc_and_168);
-assign pyc_and_258 = (pyc_and_175 & pyc_xor_255);
-assign pyc_or_259 = (pyc_and_257 | pyc_and_258);
-assign pyc_xor_260 = (pyc_and_169 ^ pyc_and_176);
-assign pyc_and_261 = (pyc_and_176 & pyc_and_169);
-assign pyc_xor_262 = (pyc_xor_197 ^ pyc_and_195);
-assign pyc_and_263 = (pyc_xor_197 & pyc_and_195);
-assign pyc_xor_264 = (pyc_xor_202 ^ pyc_or_200);
-assign pyc_xor_265 = (pyc_xor_264 ^ pyc_and_154);
-assign pyc_and_266 = (pyc_xor_202 & pyc_or_200);
-assign pyc_and_267 = (pyc_and_154 & pyc_xor_264);
-assign pyc_or_268 = (pyc_and_266 | pyc_and_267);
-assign pyc_xor_269 = (pyc_xor_207 ^ pyc_or_205);
-assign pyc_xor_270 = (pyc_xor_269 ^ pyc_xor_228);
-assign pyc_and_271 = (pyc_xor_207 & pyc_or_205);
-assign pyc_and_272 = (pyc_xor_228 & pyc_xor_269);
-assign pyc_or_273 = (pyc_and_271 | pyc_and_272);
-assign pyc_xor_274 = (pyc_xor_212 ^ pyc_or_210);
-assign pyc_xor_275 = (pyc_xor_274 ^ pyc_xor_231);
-assign pyc_and_276 = (pyc_xor_212 & pyc_or_210);
-assign pyc_and_277 = (pyc_xor_231 & pyc_xor_274);
-assign pyc_or_278 = (pyc_and_276 | pyc_and_277);
-assign pyc_xor_279 = (pyc_xor_217 ^ pyc_or_215);
-assign pyc_xor_280 = (pyc_xor_279 ^ pyc_xor_236);
-assign pyc_and_281 = (pyc_xor_217 & pyc_or_215);
-assign pyc_and_282 = (pyc_xor_236 & pyc_xor_279);
-assign pyc_or_283 = (pyc_and_281 | pyc_and_282);
-assign pyc_xor_284 = (pyc_xor_222 ^ pyc_or_220);
-assign pyc_xor_285 = (pyc_xor_284 ^ pyc_xor_241);
-assign pyc_and_286 = (pyc_xor_222 & pyc_or_220);
-assign pyc_and_287 = (pyc_xor_241 & pyc_xor_284);
-assign pyc_or_288 = (pyc_and_286 | pyc_and_287);
-assign pyc_xor_289 = (pyc_xor_226 ^ pyc_or_225);
-assign pyc_xor_290 = (pyc_xor_289 ^ pyc_xor_246);
-assign pyc_and_291 = (pyc_xor_226 & pyc_or_225);
-assign pyc_and_292 = (pyc_xor_246 & pyc_xor_289);
-assign pyc_or_293 = (pyc_and_291 | pyc_and_292);
-assign pyc_xor_294 = (pyc_and_153 ^ pyc_and_227);
-assign pyc_xor_295 = (pyc_xor_294 ^ pyc_xor_251);
-assign pyc_and_296 = (pyc_and_153 & pyc_and_227);
-assign pyc_and_297 = (pyc_xor_251 & pyc_xor_294);
-assign pyc_or_298 = (pyc_and_296 | pyc_and_297);
-assign pyc_xor_299 = (pyc_or_234 ^ pyc_and_178);
-assign pyc_and_300 = (pyc_or_234 & pyc_and_178);
-assign pyc_xor_301 = (pyc_or_239 ^ pyc_and_179);
-assign pyc_xor_302 = (pyc_xor_301 ^ pyc_and_186);
-assign pyc_and_303 = (pyc_or_239 & pyc_and_179);
-assign pyc_and_304 = (pyc_and_186 & pyc_xor_301);
-assign pyc_or_305 = (pyc_and_303 | pyc_and_304);
-assign pyc_xor_306 = (pyc_or_244 ^ pyc_and_180);
-assign pyc_xor_307 = (pyc_xor_306 ^ pyc_and_187);
-assign pyc_and_308 = (pyc_or_244 & pyc_and_180);
-assign pyc_and_309 = (pyc_and_187 & pyc_xor_306);
-assign pyc_or_310 = (pyc_and_308 | pyc_and_309);
-assign pyc_xor_311 = (pyc_or_249 ^ pyc_and_181);
-assign pyc_xor_312 = (pyc_xor_311 ^ pyc_and_188);
-assign pyc_and_313 = (pyc_or_249 & pyc_and_181);
-assign pyc_and_314 = (pyc_and_188 & pyc_xor_311);
-assign pyc_or_315 = (pyc_and_313 | pyc_and_314);
-assign pyc_xor_316 = (pyc_or_254 ^ pyc_and_182);
-assign pyc_xor_317 = (pyc_xor_316 ^ pyc_and_189);
-assign pyc_and_318 = (pyc_or_254 & pyc_and_182);
-assign pyc_and_319 = (pyc_and_189 & pyc_xor_316);
-assign pyc_or_320 = (pyc_and_318 | pyc_and_319);
-assign pyc_xor_321 = (pyc_or_259 ^ pyc_and_183);
-assign pyc_xor_322 = (pyc_xor_321 ^ pyc_and_190);
-assign pyc_and_323 = (pyc_or_259 & pyc_and_183);
-assign pyc_and_324 = (pyc_and_190 & pyc_xor_321);
-assign pyc_or_325 = (pyc_and_323 | pyc_and_324);
-assign pyc_xor_326 = (pyc_and_261 ^ pyc_and_184);
-assign pyc_xor_327 = (pyc_xor_326 ^ pyc_and_191);
-assign pyc_and_328 = (pyc_and_261 & pyc_and_184);
-assign pyc_and_329 = (pyc_and_191 & pyc_xor_326);
-assign pyc_or_330 = (pyc_and_328 | pyc_and_329);
-assign pyc_xor_331 = (pyc_and_185 ^ pyc_and_192);
-assign pyc_and_332 = (pyc_and_192 & pyc_and_185);
-assign pyc_xor_333 = (pyc_xor_265 ^ pyc_and_263);
-assign pyc_and_334 = (pyc_xor_265 & pyc_and_263);
-assign pyc_xor_335 = (pyc_xor_270 ^ pyc_or_268);
-assign pyc_and_336 = (pyc_xor_270 & pyc_or_268);
-assign pyc_xor_337 = (pyc_xor_275 ^ pyc_or_273);
-assign pyc_xor_338 = (pyc_xor_337 ^ pyc_and_229);
-assign pyc_and_339 = (pyc_xor_275 & pyc_or_273);
-assign pyc_and_340 = (pyc_and_229 & pyc_xor_337);
-assign pyc_or_341 = (pyc_and_339 | pyc_and_340);
-assign pyc_xor_342 = (pyc_xor_280 ^ pyc_or_278);
-assign pyc_xor_343 = (pyc_xor_342 ^ pyc_xor_299);
-assign pyc_and_344 = (pyc_xor_280 & pyc_or_278);
-assign pyc_and_345 = (pyc_xor_299 & pyc_xor_342);
-assign pyc_or_346 = (pyc_and_344 | pyc_and_345);
-assign pyc_xor_347 = (pyc_xor_285 ^ pyc_or_283);
-assign pyc_xor_348 = (pyc_xor_347 ^ pyc_xor_302);
-assign pyc_and_349 = (pyc_xor_285 & pyc_or_283);
-assign pyc_and_350 = (pyc_xor_302 & pyc_xor_347);
-assign pyc_or_351 = (pyc_and_349 | pyc_and_350);
-assign pyc_xor_352 = (pyc_xor_290 ^ pyc_or_288);
-assign pyc_xor_353 = (pyc_xor_352 ^ pyc_xor_307);
-assign pyc_and_354 = (pyc_xor_290 & pyc_or_288);
-assign pyc_and_355 = (pyc_xor_307 & pyc_xor_352);
-assign pyc_or_356 = (pyc_and_354 | pyc_and_355);
-assign pyc_xor_357 = (pyc_xor_295 ^ pyc_or_293);
-assign pyc_xor_358 = (pyc_xor_357 ^ pyc_xor_312);
-assign pyc_and_359 = (pyc_xor_295 & pyc_or_293);
-assign pyc_and_360 = (pyc_xor_312 & pyc_xor_357);
-assign pyc_or_361 = (pyc_and_359 | pyc_and_360);
-assign pyc_xor_362 = (pyc_xor_256 ^ pyc_or_298);
-assign pyc_xor_363 = (pyc_xor_362 ^ pyc_xor_317);
-assign pyc_and_364 = (pyc_xor_256 & pyc_or_298);
-assign pyc_and_365 = (pyc_xor_317 & pyc_xor_362);
-assign pyc_or_366 = (pyc_and_364 | pyc_and_365);
-assign pyc_xor_367 = (pyc_xor_260 ^ pyc_xor_322);
-assign pyc_and_368 = (pyc_xor_322 & pyc_xor_260);
-assign pyc_xor_369 = (pyc_and_177 ^ pyc_xor_327);
-assign pyc_and_370 = (pyc_xor_327 & pyc_and_177);
-assign pyc_xor_371 = (pyc_xor_335 ^ pyc_and_334);
-assign pyc_and_372 = (pyc_xor_335 & pyc_and_334);
-assign pyc_xor_373 = (pyc_xor_338 ^ pyc_and_336);
-assign pyc_and_374 = (pyc_xor_338 & pyc_and_336);
-assign pyc_xor_375 = (pyc_xor_343 ^ pyc_or_341);
-assign pyc_and_376 = (pyc_xor_343 & pyc_or_341);
-assign pyc_xor_377 = (pyc_xor_348 ^ pyc_or_346);
-assign pyc_xor_378 = (pyc_xor_377 ^ pyc_and_300);
-assign pyc_and_379 = (pyc_xor_348 & pyc_or_346);
-assign pyc_and_380 = (pyc_and_300 & pyc_xor_377);
-assign pyc_or_381 = (pyc_and_379 | pyc_and_380);
-assign pyc_xor_382 = (pyc_xor_353 ^ pyc_or_351);
-assign pyc_xor_383 = (pyc_xor_382 ^ pyc_or_305);
-assign pyc_and_384 = (pyc_xor_353 & pyc_or_351);
-assign pyc_and_385 = (pyc_or_305 & pyc_xor_382);
-assign pyc_or_386 = (pyc_and_384 | pyc_and_385);
-assign pyc_xor_387 = (pyc_xor_358 ^ pyc_or_356);
-assign pyc_xor_388 = (pyc_xor_387 ^ pyc_or_310);
-assign pyc_and_389 = (pyc_xor_358 & pyc_or_356);
-assign pyc_and_390 = (pyc_or_310 & pyc_xor_387);
-assign pyc_or_391 = (pyc_and_389 | pyc_and_390);
-assign pyc_xor_392 = (pyc_xor_363 ^ pyc_or_361);
-assign pyc_xor_393 = (pyc_xor_392 ^ pyc_or_315);
-assign pyc_and_394 = (pyc_xor_363 & pyc_or_361);
-assign pyc_and_395 = (pyc_or_315 & pyc_xor_392);
-assign pyc_or_396 = (pyc_and_394 | pyc_and_395);
-assign pyc_xor_397 = (pyc_xor_367 ^ pyc_or_366);
-assign pyc_xor_398 = (pyc_xor_397 ^ pyc_or_320);
-assign pyc_and_399 = (pyc_xor_367 & pyc_or_366);
-assign pyc_and_400 = (pyc_or_320 & pyc_xor_397);
-assign pyc_or_401 = (pyc_and_399 | pyc_and_400);
-assign pyc_xor_402 = (pyc_xor_369 ^ pyc_and_368);
-assign pyc_xor_403 = (pyc_xor_402 ^ pyc_or_325);
-assign pyc_and_404 = (pyc_xor_369 & pyc_and_368);
-assign pyc_and_405 = (pyc_or_325 & pyc_xor_402);
-assign pyc_or_406 = (pyc_and_404 | pyc_and_405);
-assign pyc_xor_407 = (pyc_xor_331 ^ pyc_and_370);
-assign pyc_xor_408 = (pyc_xor_407 ^ pyc_or_330);
-assign pyc_and_409 = (pyc_xor_331 & pyc_and_370);
-assign pyc_and_410 = (pyc_or_330 & pyc_xor_407);
-assign pyc_or_411 = (pyc_and_409 | pyc_and_410);
-assign pyc_xor_412 = (pyc_and_193 ^ pyc_and_332);
-assign pyc_and_413 = (pyc_and_332 & pyc_and_193);
-assign pyc_xor_414 = (pyc_xor_373 ^ pyc_and_372);
-assign pyc_and_415 = (pyc_xor_373 & pyc_and_372);
-assign pyc_xor_416 = (pyc_xor_375 ^ pyc_and_374);
-assign pyc_xor_417 = (pyc_xor_416 ^ pyc_and_415);
-assign pyc_and_418 = (pyc_xor_375 & pyc_and_374);
-assign pyc_and_419 = (pyc_and_415 & pyc_xor_416);
-assign pyc_or_420 = (pyc_and_418 | pyc_and_419);
-assign pyc_xor_421 = (pyc_xor_378 ^ pyc_and_376);
-assign pyc_xor_422 = (pyc_xor_421 ^ pyc_or_420);
-assign pyc_and_423 = (pyc_xor_378 & pyc_and_376);
-assign pyc_and_424 = (pyc_or_420 & pyc_xor_421);
-assign pyc_or_425 = (pyc_and_423 | pyc_and_424);
-assign pyc_xor_426 = (pyc_xor_383 ^ pyc_or_381);
-assign pyc_and_427 = (pyc_xor_383 & pyc_or_381);
-assign pyc_xor_428 = (pyc_xor_388 ^ pyc_or_386);
-assign pyc_xor_429 = (pyc_xor_428 ^ pyc_and_427);
-assign pyc_and_430 = (pyc_xor_388 & pyc_or_386);
-assign pyc_and_431 = (pyc_and_427 & pyc_xor_428);
-assign pyc_or_432 = (pyc_and_430 | pyc_and_431);
-assign pyc_xor_433 = (pyc_xor_393 ^ pyc_or_391);
-assign pyc_xor_434 = (pyc_xor_433 ^ pyc_or_432);
-assign pyc_and_435 = (pyc_xor_393 & pyc_or_391);
-assign pyc_and_436 = (pyc_or_432 & pyc_xor_433);
-assign pyc_or_437 = (pyc_and_435 | pyc_and_436);
-assign pyc_xor_438 = (pyc_xor_398 ^ pyc_or_396);
-assign pyc_xor_439 = (pyc_xor_438 ^ pyc_or_437);
-assign pyc_and_440 = (pyc_xor_398 & pyc_or_396);
-assign pyc_and_441 = (pyc_or_437 & pyc_xor_438);
-assign pyc_or_442 = (pyc_and_440 | pyc_and_441);
-assign pyc_xor_443 = (pyc_xor_403 ^ pyc_or_401);
-assign pyc_xor_444 = (pyc_xor_443 ^ pyc_or_442);
-assign pyc_and_445 = (pyc_xor_403 & pyc_or_401);
-assign pyc_and_446 = (pyc_or_442 & pyc_xor_443);
-assign pyc_or_447 = (pyc_and_445 | pyc_and_446);
-assign pyc_xor_448 = (pyc_xor_408 ^ pyc_or_406);
-assign pyc_xor_449 = (pyc_xor_448 ^ pyc_or_447);
-assign pyc_and_450 = (pyc_xor_408 & pyc_or_406);
-assign pyc_and_451 = (pyc_or_447 & pyc_xor_448);
-assign pyc_or_452 = (pyc_and_450 | pyc_and_451);
-assign pyc_xor_453 = (pyc_xor_412 ^ pyc_or_411);
-assign pyc_xor_454 = (pyc_xor_453 ^ pyc_or_452);
-assign pyc_and_455 = (pyc_xor_412 & pyc_or_411);
-assign pyc_and_456 = (pyc_or_452 & pyc_xor_453);
-assign pyc_or_457 = (pyc_and_455 | pyc_and_456);
-assign pyc_xor_458 = (pyc_and_413 ^ pyc_or_457);
-assign pyc_xor_459 = (pyc_xor_426 ^ pyc_comb_85);
-assign pyc_or_460 = (pyc_and_427 | pyc_xor_426);
-assign pyc_xor_461 = (pyc_xor_428 ^ pyc_or_460);
-assign pyc_and_462 = (pyc_or_460 & pyc_xor_428);
-assign pyc_or_463 = (pyc_and_430 | pyc_and_462);
-assign pyc_xor_464 = (pyc_xor_433 ^ pyc_or_463);
-assign pyc_and_465 = (pyc_or_463 & pyc_xor_433);
-assign pyc_or_466 = (pyc_and_435 | pyc_and_465);
-assign pyc_xor_467 = (pyc_xor_438 ^ pyc_or_466);
-assign pyc_and_468 = (pyc_or_466 & pyc_xor_438);
-assign pyc_or_469 = (pyc_and_440 | pyc_and_468);
-assign pyc_xor_470 = (pyc_xor_443 ^ pyc_or_469);
-assign pyc_and_471 = (pyc_or_469 & pyc_xor_443);
-assign pyc_or_472 = (pyc_and_445 | pyc_and_471);
-assign pyc_xor_473 = (pyc_xor_448 ^ pyc_or_472);
-assign pyc_and_474 = (pyc_or_472 & pyc_xor_448);
-assign pyc_or_475 = (pyc_and_450 | pyc_and_474);
-assign pyc_xor_476 = (pyc_xor_453 ^ pyc_or_475);
-assign pyc_and_477 = (pyc_or_475 & pyc_xor_453);
-assign pyc_or_478 = (pyc_and_455 | pyc_and_477);
-assign pyc_xor_479 = (pyc_and_413 ^ pyc_or_478);
-assign pyc_mux_480 = (pyc_or_425 ? pyc_xor_459 : pyc_xor_426);
-assign pyc_mux_481 = (pyc_or_425 ? pyc_xor_461 : pyc_xor_429);
-assign pyc_mux_482 = (pyc_or_425 ? pyc_xor_464 : pyc_xor_434);
-assign pyc_mux_483 = (pyc_or_425 ? pyc_xor_467 : pyc_xor_439);
-assign pyc_mux_484 = (pyc_or_425 ? pyc_xor_470 : pyc_xor_444);
-assign pyc_mux_485 = (pyc_or_425 ? pyc_xor_473 : pyc_xor_449);
-assign pyc_mux_486 = (pyc_or_425 ? pyc_xor_476 : pyc_xor_454);
-assign pyc_mux_487 = (pyc_or_425 ? pyc_xor_479 : pyc_xor_458);
-assign pyc_zext_488 = {{15{1'b0}}, pyc_and_130};
-assign pyc_zext_489 = {{15{1'b0}}, pyc_xor_194};
-assign pyc_shli_490 = (pyc_zext_489 << 1);
-assign pyc_or_491 = (pyc_zext_488 | pyc_shli_490);
-assign pyc_zext_492 = {{15{1'b0}}, pyc_xor_262};
-assign pyc_shli_493 = (pyc_zext_492 << 2);
-assign pyc_or_494 = (pyc_or_491 | pyc_shli_493);
-assign pyc_zext_495 = {{15{1'b0}}, pyc_xor_333};
-assign pyc_shli_496 = (pyc_zext_495 << 3);
-assign pyc_or_497 = (pyc_or_494 | pyc_shli_496);
-assign pyc_zext_498 = {{15{1'b0}}, pyc_xor_371};
-assign pyc_shli_499 = (pyc_zext_498 << 4);
-assign pyc_or_500 = (pyc_or_497 | pyc_shli_499);
-assign pyc_zext_501 = {{15{1'b0}}, pyc_xor_414};
-assign pyc_shli_502 = (pyc_zext_501 << 5);
-assign pyc_or_503 = (pyc_or_500 | pyc_shli_502);
-assign pyc_zext_504 = {{15{1'b0}}, pyc_xor_417};
-assign pyc_shli_505 = (pyc_zext_504 << 6);
-assign pyc_or_506 = (pyc_or_503 | pyc_shli_505);
-assign pyc_zext_507 = {{15{1'b0}}, pyc_xor_422};
-assign pyc_shli_508 = (pyc_zext_507 << 7);
-assign pyc_or_509 = (pyc_or_506 | pyc_shli_508);
-assign pyc_zext_510 = {{15{1'b0}}, pyc_mux_480};
-assign pyc_shli_511 = (pyc_zext_510 << 8);
-assign pyc_or_512 = (pyc_or_509 | pyc_shli_511);
-assign pyc_zext_513 = {{15{1'b0}}, pyc_mux_481};
-assign pyc_shli_514 = (pyc_zext_513 << 9);
-assign pyc_or_515 = (pyc_or_512 | pyc_shli_514);
-assign pyc_zext_516 = {{15{1'b0}}, pyc_mux_482};
-assign pyc_shli_517 = (pyc_zext_516 << 10);
-assign pyc_or_518 = (pyc_or_515 | pyc_shli_517);
-assign pyc_zext_519 = {{15{1'b0}}, pyc_mux_483};
-assign pyc_shli_520 = (pyc_zext_519 << 11);
-assign pyc_or_521 = (pyc_or_518 | pyc_shli_520);
-assign pyc_zext_522 = {{15{1'b0}}, pyc_mux_484};
-assign pyc_shli_523 = (pyc_zext_522 << 12);
-assign pyc_or_524 = (pyc_or_521 | pyc_shli_523);
-assign pyc_zext_525 = {{15{1'b0}}, pyc_mux_485};
-assign pyc_shli_526 = (pyc_zext_525 << 13);
-assign pyc_or_527 = (pyc_or_524 | pyc_shli_526);
-assign pyc_zext_528 = {{15{1'b0}}, pyc_mux_486};
-assign pyc_shli_529 = (pyc_zext_528 << 14);
-assign pyc_or_530 = (pyc_or_527 | pyc_shli_529);
-assign pyc_zext_531 = {{15{1'b0}}, pyc_mux_487};
-assign pyc_shli_532 = (pyc_zext_531 << 15);
-assign pyc_or_533 = (pyc_or_530 | pyc_shli_532);
-assign pyc_extract_534 = s2_prod_mant[15];
-assign pyc_lshri_535 = (s2_prod_mant >> 1);
-assign pyc_mux_536 = (pyc_extract_534 ? pyc_lshri_535 : s2_prod_mant);
-assign pyc_add_537 = (s2_prod_exp + pyc_comb_81);
-assign pyc_mux_538 = (pyc_extract_534 ? pyc_add_537 : s2_prod_exp);
-assign pyc_zext_539 = {{10{1'b0}}, pyc_mux_536};
-assign pyc_shli_540 = (pyc_zext_539 << 9);
-assign pyc_zext_541 = {{2{1'b0}}, s2_acc_mant};
-assign pyc_trunc_542 = pyc_mux_538[7:0];
-assign pyc_ult_543 = (s2_acc_exp < pyc_trunc_542);
-assign pyc_sub_544 = (pyc_trunc_542 - s2_acc_exp);
-assign pyc_sub_545 = (s2_acc_exp - pyc_trunc_542);
-assign pyc_mux_546 = (pyc_ult_543 ? pyc_sub_544 : pyc_sub_545);
-assign pyc_trunc_547 = pyc_mux_546[4:0];
-assign pyc_ult_548 = (pyc_comb_80 < pyc_mux_546);
-assign pyc_mux_549 = (pyc_ult_548 ? pyc_comb_79 : pyc_trunc_547);
-assign pyc_lshri_550 = (pyc_shli_540 >> 1);
-assign pyc_extract_551 = pyc_mux_549[0];
-assign pyc_mux_552 = (pyc_extract_551 ? pyc_lshri_550 : pyc_shli_540);
-assign pyc_lshri_553 = (pyc_mux_552 >> 2);
-assign pyc_extract_554 = pyc_mux_549[1];
-assign pyc_mux_555 = (pyc_extract_554 ? pyc_lshri_553 : pyc_mux_552);
-assign pyc_lshri_556 = (pyc_mux_555 >> 4);
-assign pyc_extract_557 = pyc_mux_549[2];
-assign pyc_mux_558 = (pyc_extract_557 ? pyc_lshri_556 : pyc_mux_555);
-assign pyc_lshri_559 = (pyc_mux_558 >> 8);
-assign pyc_extract_560 = pyc_mux_549[3];
-assign pyc_mux_561 = (pyc_extract_560 ? pyc_lshri_559 : pyc_mux_558);
-assign pyc_lshri_562 = (pyc_mux_561 >> 16);
-assign pyc_extract_563 = pyc_mux_549[4];
-assign pyc_mux_564 = (pyc_extract_563 ? pyc_lshri_562 : pyc_mux_561);
-assign pyc_mux_565 = (pyc_ult_543 ? pyc_shli_540 : pyc_mux_564);
-assign pyc_lshri_566 = (pyc_zext_541 >> 1);
-assign pyc_mux_567 = (pyc_extract_551 ? pyc_lshri_566 : pyc_zext_541);
-assign pyc_lshri_568 = (pyc_mux_567 >> 2);
-assign pyc_mux_569 = (pyc_extract_554 ? pyc_lshri_568 : pyc_mux_567);
-assign pyc_lshri_570 = (pyc_mux_569 >> 4);
-assign pyc_mux_571 = (pyc_extract_557 ? pyc_lshri_570 : pyc_mux_569);
-assign pyc_lshri_572 = (pyc_mux_571 >> 8);
-assign pyc_mux_573 = (pyc_extract_560 ? pyc_lshri_572 : pyc_mux_571);
-assign pyc_lshri_574 = (pyc_mux_573 >> 16);
-assign pyc_mux_575 = (pyc_extract_563 ? pyc_lshri_574 : pyc_mux_573);
-assign pyc_mux_576 = (pyc_ult_543 ? pyc_mux_575 : pyc_zext_541);
-assign pyc_mux_577 = (pyc_ult_543 ? pyc_trunc_542 : s2_acc_exp);
-assign pyc_xor_578 = (s2_prod_sign ^ s2_acc_sign);
-assign pyc_not_579 = (~pyc_xor_578);
-assign pyc_zext_580 = {{1{1'b0}}, pyc_mux_565};
-assign pyc_zext_581 = {{1{1'b0}}, pyc_mux_576};
-assign pyc_add_582 = (pyc_zext_580 + pyc_zext_581);
-assign pyc_trunc_583 = pyc_add_582[25:0];
-assign pyc_ult_584 = (pyc_mux_565 < pyc_mux_576);
-assign pyc_not_585 = (~pyc_ult_584);
-assign pyc_sub_586 = (pyc_mux_565 - pyc_mux_576);
-assign pyc_sub_587 = (pyc_mux_576 - pyc_mux_565);
-assign pyc_mux_588 = (pyc_not_585 ? pyc_sub_586 : pyc_sub_587);
-assign pyc_mux_589 = (pyc_not_579 ? pyc_trunc_583 : pyc_mux_588);
-assign pyc_mux_590 = (pyc_not_585 ? s2_prod_sign : s2_acc_sign);
-assign pyc_mux_591 = (pyc_not_579 ? s2_prod_sign : pyc_mux_590);
-assign pyc_mux_592 = (s2_prod_zero ? pyc_zext_541 : pyc_mux_589);
-assign pyc_mux_593 = (s2_prod_zero ? s2_acc_exp : pyc_mux_577);
-assign pyc_mux_594 = (s2_prod_zero ? s2_acc_sign : pyc_mux_591);
-assign pyc_zext_595 = {{2{1'b0}}, pyc_mux_593};
-assign pyc_comb_596 = pyc_mux_93;
-assign pyc_comb_597 = pyc_mux_100;
-assign pyc_comb_598 = pyc_extract_101;
-assign pyc_comb_599 = pyc_extract_102;
-assign pyc_comb_600 = pyc_eq_104;
-assign pyc_comb_601 = pyc_mux_107;
-assign pyc_comb_602 = pyc_xor_108;
-assign pyc_comb_603 = pyc_sub_112;
-assign pyc_comb_604 = pyc_or_113;
-assign pyc_comb_605 = pyc_or_533;
-assign pyc_comb_606 = pyc_mux_592;
-assign pyc_comb_607 = pyc_mux_594;
-assign pyc_comb_608 = pyc_zext_595;
-assign pyc_extract_609 = s3_result_mant[0];
-assign pyc_extract_610 = s3_result_mant[1];
-assign pyc_extract_611 = s3_result_mant[2];
-assign pyc_extract_612 = s3_result_mant[3];
-assign pyc_extract_613 = s3_result_mant[4];
-assign pyc_extract_614 = s3_result_mant[5];
-assign pyc_extract_615 = s3_result_mant[6];
-assign pyc_extract_616 = s3_result_mant[7];
-assign pyc_extract_617 = s3_result_mant[8];
-assign pyc_extract_618 = s3_result_mant[9];
-assign pyc_extract_619 = s3_result_mant[10];
-assign pyc_extract_620 = s3_result_mant[11];
-assign pyc_extract_621 = s3_result_mant[12];
-assign pyc_extract_622 = s3_result_mant[13];
-assign pyc_extract_623 = s3_result_mant[14];
-assign pyc_extract_624 = s3_result_mant[15];
-assign pyc_extract_625 = s3_result_mant[16];
-assign pyc_extract_626 = s3_result_mant[17];
-assign pyc_extract_627 = s3_result_mant[18];
-assign pyc_extract_628 = s3_result_mant[19];
-assign pyc_extract_629 = s3_result_mant[20];
-assign pyc_extract_630 = s3_result_mant[21];
-assign pyc_extract_631 = s3_result_mant[22];
-assign pyc_extract_632 = s3_result_mant[23];
-assign pyc_extract_633 = s3_result_mant[24];
-assign pyc_extract_634 = s3_result_mant[25];
-assign pyc_trunc_635 = norm_lzc_cnt[4:0];
-assign pyc_ult_636 = (pyc_comb_51 < pyc_trunc_635);
-assign pyc_ult_637 = (pyc_trunc_635 < pyc_comb_51);
-assign pyc_sub_638 = (pyc_trunc_635 - pyc_comb_51);
-assign pyc_sub_639 = (pyc_comb_51 - pyc_trunc_635);
-assign pyc_shli_640 = (s3_result_mant << 1);
-assign pyc_extract_641 = pyc_sub_638[0];
-assign pyc_mux_642 = (pyc_extract_641 ? pyc_shli_640 : s3_result_mant);
-assign pyc_shli_643 = (pyc_mux_642 << 2);
-assign pyc_extract_644 = pyc_sub_638[1];
-assign pyc_mux_645 = (pyc_extract_644 ? pyc_shli_643 : pyc_mux_642);
-assign pyc_shli_646 = (pyc_mux_645 << 4);
-assign pyc_extract_647 = pyc_sub_638[2];
-assign pyc_mux_648 = (pyc_extract_647 ? pyc_shli_646 : pyc_mux_645);
-assign pyc_shli_649 = (pyc_mux_648 << 8);
-assign pyc_extract_650 = pyc_sub_638[3];
-assign pyc_mux_651 = (pyc_extract_650 ? pyc_shli_649 : pyc_mux_648);
-assign pyc_shli_652 = (pyc_mux_651 << 16);
-assign pyc_extract_653 = pyc_sub_638[4];
-assign pyc_mux_654 = (pyc_extract_653 ? pyc_shli_652 : pyc_mux_651);
-assign pyc_lshri_655 = (s3_result_mant >> 1);
-assign pyc_extract_656 = pyc_sub_639[0];
-assign pyc_mux_657 = (pyc_extract_656 ? pyc_lshri_655 : s3_result_mant);
-assign pyc_lshri_658 = (pyc_mux_657 >> 2);
-assign pyc_extract_659 = pyc_sub_639[1];
-assign pyc_mux_660 = (pyc_extract_659 ? pyc_lshri_658 : pyc_mux_657);
-assign pyc_lshri_661 = (pyc_mux_660 >> 4);
-assign pyc_extract_662 = pyc_sub_639[2];
-assign pyc_mux_663 = (pyc_extract_662 ? pyc_lshri_661 : pyc_mux_660);
-assign pyc_lshri_664 = (pyc_mux_663 >> 8);
-assign pyc_extract_665 = pyc_sub_639[3];
-assign pyc_mux_666 = (pyc_extract_665 ? pyc_lshri_664 : pyc_mux_663);
-assign pyc_lshri_667 = (pyc_mux_666 >> 16);
-assign pyc_extract_668 = pyc_sub_639[4];
-assign pyc_mux_669 = (pyc_extract_668 ? pyc_lshri_667 : pyc_mux_666);
-assign pyc_mux_670 = (pyc_ult_637 ? pyc_mux_669 : s3_result_mant);
-assign pyc_mux_671 = (pyc_ult_636 ? pyc_mux_654 : pyc_mux_670);
-assign pyc_add_672 = (s3_result_exp + pyc_comb_50);
-assign pyc_zext_673 = {{4{1'b0}}, norm_lzc_cnt};
-assign pyc_sub_674 = (pyc_add_672 - pyc_zext_673);
-assign pyc_extract_675 = pyc_mux_671[22:0];
-assign pyc_trunc_676 = pyc_sub_674[7:0];
-assign pyc_eq_677 = (s3_result_mant == pyc_comb_49);
-assign pyc_zext_678 = {{31{1'b0}}, s3_result_sign};
-assign pyc_shli_679 = (pyc_zext_678 << 31);
-assign pyc_zext_680 = {{24{1'b0}}, pyc_trunc_676};
-assign pyc_shli_681 = (pyc_zext_680 << 23);
-assign pyc_or_682 = (pyc_shli_679 | pyc_shli_681);
-assign pyc_zext_683 = {{9{1'b0}}, pyc_extract_675};
-assign pyc_or_684 = (pyc_or_682 | pyc_zext_683);
-assign pyc_mux_685 = (pyc_eq_677 ? pyc_comb_48 : pyc_or_684);
-assign pyc_comb_686 = pyc_extract_609;
-assign pyc_comb_687 = pyc_extract_610;
-assign pyc_comb_688 = pyc_extract_611;
-assign pyc_comb_689 = pyc_extract_612;
-assign pyc_comb_690 = pyc_extract_613;
-assign pyc_comb_691 = pyc_extract_614;
-assign pyc_comb_692 = pyc_extract_615;
-assign pyc_comb_693 = pyc_extract_616;
-assign pyc_comb_694 = pyc_extract_617;
-assign pyc_comb_695 = pyc_extract_618;
-assign pyc_comb_696 = pyc_extract_619;
-assign pyc_comb_697 = pyc_extract_620;
-assign pyc_comb_698 = pyc_extract_621;
-assign pyc_comb_699 = pyc_extract_622;
-assign pyc_comb_700 = pyc_extract_623;
-assign pyc_comb_701 = pyc_extract_624;
-assign pyc_comb_702 = pyc_extract_625;
-assign pyc_comb_703 = pyc_extract_626;
-assign pyc_comb_704 = pyc_extract_627;
-assign pyc_comb_705 = pyc_extract_628;
-assign pyc_comb_706 = pyc_extract_629;
-assign pyc_comb_707 = pyc_extract_630;
-assign pyc_comb_708 = pyc_extract_631;
-assign pyc_comb_709 = pyc_extract_632;
-assign pyc_comb_710 = pyc_extract_633;
-assign pyc_comb_711 = pyc_extract_634;
-assign pyc_comb_712 = pyc_mux_685;
-assign pyc_mux_736 = (pyc_comb_686 ? pyc_comb_77 : pyc_comb_78);
-assign pyc_mux_737 = (pyc_comb_687 ? pyc_comb_76 : pyc_mux_736);
-assign pyc_mux_738 = (pyc_comb_688 ? pyc_comb_75 : pyc_mux_737);
-assign pyc_mux_739 = (pyc_comb_689 ? pyc_comb_74 : pyc_mux_738);
-assign pyc_mux_740 = (pyc_comb_690 ? pyc_comb_73 : pyc_mux_739);
-assign pyc_mux_741 = (pyc_comb_691 ? pyc_comb_72 : pyc_mux_740);
-assign pyc_mux_742 = (pyc_comb_692 ? pyc_comb_71 : pyc_mux_741);
-assign pyc_mux_743 = (pyc_comb_693 ? pyc_comb_70 : pyc_mux_742);
-assign pyc_mux_744 = (pyc_comb_694 ? pyc_comb_69 : pyc_mux_743);
-assign pyc_mux_745 = (pyc_comb_695 ? pyc_comb_68 : pyc_mux_744);
-assign pyc_mux_746 = (pyc_comb_696 ? pyc_comb_67 : pyc_mux_745);
-assign pyc_mux_747 = (pyc_comb_697 ? pyc_comb_66 : pyc_mux_746);
-assign pyc_mux_748 = (pyc_comb_698 ? pyc_comb_65 : pyc_mux_747);
-assign pyc_mux_749 = (pyc_comb_699 ? pyc_comb_64 : pyc_mux_748);
-assign pyc_mux_750 = (pyc_comb_700 ? pyc_comb_63 : pyc_mux_749);
-assign pyc_mux_751 = (pyc_comb_701 ? pyc_comb_62 : pyc_mux_750);
-assign pyc_mux_752 = (pyc_comb_702 ? pyc_comb_61 : pyc_mux_751);
-assign pyc_mux_753 = (pyc_comb_703 ? pyc_comb_60 : pyc_mux_752);
-assign pyc_mux_754 = (pyc_comb_704 ? pyc_comb_59 : pyc_mux_753);
-assign pyc_mux_755 = (pyc_comb_705 ? pyc_comb_58 : pyc_mux_754);
-assign pyc_mux_756 = (pyc_comb_706 ? pyc_comb_57 : pyc_mux_755);
-assign pyc_mux_757 = (pyc_comb_707 ? pyc_comb_56 : pyc_mux_756);
-assign pyc_mux_758 = (pyc_comb_708 ? pyc_comb_55 : pyc_mux_757);
-assign pyc_mux_759 = (pyc_comb_709 ? pyc_comb_54 : pyc_mux_758);
-assign pyc_mux_760 = (pyc_comb_710 ? pyc_comb_53 : pyc_mux_759);
-assign pyc_mux_761 = (pyc_comb_711 ? pyc_comb_52 : pyc_mux_760);
-assign pyc_comb_762 = pyc_mux_761;
-assign pyc_mux_763 = (s3_valid ? pyc_comb_712 : result_2);
-assign result_2 = pyc_reg_764;
-assign result_valid_2 = pyc_reg_765;
-assign s1_a_mant = pyc_reg_715;
-assign s1_acc_exp = pyc_reg_718;
-assign s1_acc_mant = pyc_reg_719;
-assign s1_acc_sign = pyc_reg_717;
-assign s1_acc_zero = pyc_reg_721;
-assign s1_b_mant = pyc_reg_716;
-assign s1_prod_exp = pyc_reg_714;
-assign s1_prod_sign = pyc_reg_713;
-assign s1_prod_zero = pyc_reg_720;
-assign s1_valid = pyc_reg_722;
-assign s2_acc_exp = pyc_reg_727;
-assign s2_acc_mant = pyc_reg_728;
-assign s2_acc_sign = pyc_reg_726;
-assign s2_acc_zero = pyc_reg_730;
-assign s2_prod_exp = pyc_reg_725;
-assign s2_prod_mant = pyc_reg_723;
-assign s2_prod_sign = pyc_reg_724;
-assign s2_prod_zero = pyc_reg_729;
-assign s2_valid = pyc_reg_731;
-assign s3_result_exp = pyc_reg_733;
-assign s3_result_mant = pyc_reg_734;
-assign s3_result_sign = pyc_reg_732;
-assign s3_valid = pyc_reg_735;
+assign pyc_constant_39 = 4'd4;
+assign pyc_constant_40 = 16'd0;
+assign pyc_constant_41 = 1'd0;
+assign pyc_constant_42 = 10'd127;
+assign pyc_constant_43 = 24'd0;
+assign pyc_constant_44 = 1'd1;
+assign pyc_constant_45 = 8'd0;
+assign pyc_comb_46 = pyc_constant_1;
+assign pyc_comb_47 = pyc_constant_2;
+assign pyc_comb_48 = pyc_constant_3;
+assign pyc_comb_49 = pyc_constant_4;
+assign pyc_comb_50 = pyc_constant_5;
+assign pyc_comb_51 = pyc_constant_6;
+assign pyc_comb_52 = pyc_constant_7;
+assign pyc_comb_53 = pyc_constant_8;
+assign pyc_comb_54 = pyc_constant_9;
+assign pyc_comb_55 = pyc_constant_10;
+assign pyc_comb_56 = pyc_constant_11;
+assign pyc_comb_57 = pyc_constant_12;
+assign pyc_comb_58 = pyc_constant_13;
+assign pyc_comb_59 = pyc_constant_14;
+assign pyc_comb_60 = pyc_constant_15;
+assign pyc_comb_61 = pyc_constant_16;
+assign pyc_comb_62 = pyc_constant_17;
+assign pyc_comb_63 = pyc_constant_18;
+assign pyc_comb_64 = pyc_constant_19;
+assign pyc_comb_65 = pyc_constant_20;
+assign pyc_comb_66 = pyc_constant_21;
+assign pyc_comb_67 = pyc_constant_22;
+assign pyc_comb_68 = pyc_constant_23;
+assign pyc_comb_69 = pyc_constant_24;
+assign pyc_comb_70 = pyc_constant_25;
+assign pyc_comb_71 = pyc_constant_26;
+assign pyc_comb_72 = pyc_constant_27;
+assign pyc_comb_73 = pyc_constant_28;
+assign pyc_comb_74 = pyc_constant_29;
+assign pyc_comb_75 = pyc_constant_30;
+assign pyc_comb_76 = pyc_constant_31;
+assign pyc_comb_77 = pyc_constant_32;
+assign pyc_comb_78 = pyc_constant_33;
+assign pyc_comb_79 = pyc_constant_34;
+assign pyc_comb_80 = pyc_constant_35;
+assign pyc_comb_81 = pyc_constant_36;
+assign pyc_comb_82 = pyc_constant_37;
+assign pyc_comb_83 = pyc_constant_38;
+assign pyc_comb_84 = pyc_constant_39;
+assign pyc_comb_85 = pyc_constant_40;
+assign pyc_comb_86 = pyc_constant_41;
+assign pyc_comb_87 = pyc_constant_42;
+assign pyc_comb_88 = pyc_constant_43;
+assign pyc_comb_89 = pyc_constant_44;
+assign pyc_comb_90 = pyc_constant_45;
+assign pyc_extract_91 = a_in[15];
+assign pyc_extract_92 = a_in[14:7];
+assign pyc_extract_93 = a_in[6:0];
+assign pyc_eq_94 = (pyc_extract_92 == pyc_comb_90);
+assign pyc_zext_95 = {{1{1'b0}}, pyc_extract_93};
+assign pyc_or_96 = (pyc_comb_47 | pyc_zext_95);
+assign pyc_mux_97 = (pyc_eq_94 ? pyc_comb_90 : pyc_or_96);
+assign pyc_extract_98 = b_in[15];
+assign pyc_extract_99 = b_in[14:7];
+assign pyc_extract_100 = b_in[6:0];
+assign pyc_eq_101 = (pyc_extract_99 == pyc_comb_90);
+assign pyc_zext_102 = {{1{1'b0}}, pyc_extract_100};
+assign pyc_or_103 = (pyc_comb_47 | pyc_zext_102);
+assign pyc_mux_104 = (pyc_eq_101 ? pyc_comb_90 : pyc_or_103);
+assign pyc_extract_105 = acc_in[31];
+assign pyc_extract_106 = acc_in[30:23];
+assign pyc_extract_107 = acc_in[22:0];
+assign pyc_eq_108 = (pyc_extract_106 == pyc_comb_90);
+assign pyc_zext_109 = {{1{1'b0}}, pyc_extract_107};
+assign pyc_or_110 = (pyc_comb_46 | pyc_zext_109);
+assign pyc_mux_111 = (pyc_eq_108 ? pyc_comb_88 : pyc_or_110);
+assign pyc_xor_112 = (pyc_extract_91 ^ pyc_extract_98);
+assign pyc_zext_113 = {{2{1'b0}}, pyc_extract_92};
+assign pyc_zext_114 = {{2{1'b0}}, pyc_extract_99};
+assign pyc_add_115 = (pyc_zext_113 + pyc_zext_114);
+assign pyc_sub_116 = (pyc_add_115 - pyc_comb_87);
+assign pyc_or_117 = (pyc_eq_94 | pyc_eq_101);
+assign pyc_extract_118 = pyc_mux_97[0];
+assign pyc_extract_119 = pyc_mux_97[1];
+assign pyc_extract_120 = pyc_mux_97[2];
+assign pyc_extract_121 = pyc_mux_97[3];
+assign pyc_extract_122 = pyc_mux_97[4];
+assign pyc_extract_123 = pyc_mux_97[5];
+assign pyc_extract_124 = pyc_mux_97[6];
+assign pyc_extract_125 = pyc_mux_97[7];
+assign pyc_extract_126 = pyc_mux_104[0];
+assign pyc_extract_127 = pyc_mux_104[1];
+assign pyc_extract_128 = pyc_mux_104[2];
+assign pyc_extract_129 = pyc_mux_104[3];
+assign pyc_extract_130 = pyc_mux_104[4];
+assign pyc_extract_131 = pyc_mux_104[5];
+assign pyc_extract_132 = pyc_mux_104[6];
+assign pyc_extract_133 = pyc_mux_104[7];
+assign pyc_and_134 = (pyc_extract_118 & pyc_extract_126);
+assign pyc_and_135 = (pyc_extract_118 & pyc_extract_127);
+assign pyc_and_136 = (pyc_extract_118 & pyc_extract_128);
+assign pyc_and_137 = (pyc_extract_118 & pyc_extract_129);
+assign pyc_and_138 = (pyc_extract_118 & pyc_extract_130);
+assign pyc_and_139 = (pyc_extract_118 & pyc_extract_131);
+assign pyc_and_140 = (pyc_extract_118 & pyc_extract_132);
+assign pyc_and_141 = (pyc_extract_118 & pyc_extract_133);
+assign pyc_and_142 = (pyc_extract_119 & pyc_extract_126);
+assign pyc_and_143 = (pyc_extract_119 & pyc_extract_127);
+assign pyc_and_144 = (pyc_extract_119 & pyc_extract_128);
+assign pyc_and_145 = (pyc_extract_119 & pyc_extract_129);
+assign pyc_and_146 = (pyc_extract_119 & pyc_extract_130);
+assign pyc_and_147 = (pyc_extract_119 & pyc_extract_131);
+assign pyc_and_148 = (pyc_extract_119 & pyc_extract_132);
+assign pyc_and_149 = (pyc_extract_119 & pyc_extract_133);
+assign pyc_and_150 = (pyc_extract_120 & pyc_extract_126);
+assign pyc_and_151 = (pyc_extract_120 & pyc_extract_127);
+assign pyc_and_152 = (pyc_extract_120 & pyc_extract_128);
+assign pyc_and_153 = (pyc_extract_120 & pyc_extract_129);
+assign pyc_and_154 = (pyc_extract_120 & pyc_extract_130);
+assign pyc_and_155 = (pyc_extract_120 & pyc_extract_131);
+assign pyc_and_156 = (pyc_extract_120 & pyc_extract_132);
+assign pyc_and_157 = (pyc_extract_120 & pyc_extract_133);
+assign pyc_and_158 = (pyc_extract_121 & pyc_extract_126);
+assign pyc_and_159 = (pyc_extract_121 & pyc_extract_127);
+assign pyc_and_160 = (pyc_extract_121 & pyc_extract_128);
+assign pyc_and_161 = (pyc_extract_121 & pyc_extract_129);
+assign pyc_and_162 = (pyc_extract_121 & pyc_extract_130);
+assign pyc_and_163 = (pyc_extract_121 & pyc_extract_131);
+assign pyc_and_164 = (pyc_extract_121 & pyc_extract_132);
+assign pyc_and_165 = (pyc_extract_121 & pyc_extract_133);
+assign pyc_and_166 = (pyc_extract_122 & pyc_extract_126);
+assign pyc_and_167 = (pyc_extract_122 & pyc_extract_127);
+assign pyc_and_168 = (pyc_extract_122 & pyc_extract_128);
+assign pyc_and_169 = (pyc_extract_122 & pyc_extract_129);
+assign pyc_and_170 = (pyc_extract_122 & pyc_extract_130);
+assign pyc_and_171 = (pyc_extract_122 & pyc_extract_131);
+assign pyc_and_172 = (pyc_extract_122 & pyc_extract_132);
+assign pyc_and_173 = (pyc_extract_122 & pyc_extract_133);
+assign pyc_and_174 = (pyc_extract_123 & pyc_extract_126);
+assign pyc_and_175 = (pyc_extract_123 & pyc_extract_127);
+assign pyc_and_176 = (pyc_extract_123 & pyc_extract_128);
+assign pyc_and_177 = (pyc_extract_123 & pyc_extract_129);
+assign pyc_and_178 = (pyc_extract_123 & pyc_extract_130);
+assign pyc_and_179 = (pyc_extract_123 & pyc_extract_131);
+assign pyc_and_180 = (pyc_extract_123 & pyc_extract_132);
+assign pyc_and_181 = (pyc_extract_123 & pyc_extract_133);
+assign pyc_and_182 = (pyc_extract_124 & pyc_extract_126);
+assign pyc_and_183 = (pyc_extract_124 & pyc_extract_127);
+assign pyc_and_184 = (pyc_extract_124 & pyc_extract_128);
+assign pyc_and_185 = (pyc_extract_124 & pyc_extract_129);
+assign pyc_and_186 = (pyc_extract_124 & pyc_extract_130);
+assign pyc_and_187 = (pyc_extract_124 & pyc_extract_131);
+assign pyc_and_188 = (pyc_extract_124 & pyc_extract_132);
+assign pyc_and_189 = (pyc_extract_124 & pyc_extract_133);
+assign pyc_and_190 = (pyc_extract_125 & pyc_extract_126);
+assign pyc_and_191 = (pyc_extract_125 & pyc_extract_127);
+assign pyc_and_192 = (pyc_extract_125 & pyc_extract_128);
+assign pyc_and_193 = (pyc_extract_125 & pyc_extract_129);
+assign pyc_and_194 = (pyc_extract_125 & pyc_extract_130);
+assign pyc_and_195 = (pyc_extract_125 & pyc_extract_131);
+assign pyc_and_196 = (pyc_extract_125 & pyc_extract_132);
+assign pyc_and_197 = (pyc_extract_125 & pyc_extract_133);
+assign pyc_xor_198 = (pyc_and_135 ^ pyc_and_142);
+assign pyc_and_199 = (pyc_and_135 & pyc_and_142);
+assign pyc_xor_200 = (pyc_and_136 ^ pyc_and_143);
+assign pyc_xor_201 = (pyc_xor_200 ^ pyc_and_150);
+assign pyc_and_202 = (pyc_and_136 & pyc_and_143);
+assign pyc_and_203 = (pyc_and_150 & pyc_xor_200);
+assign pyc_or_204 = (pyc_and_202 | pyc_and_203);
+assign pyc_xor_205 = (pyc_and_137 ^ pyc_and_144);
+assign pyc_xor_206 = (pyc_xor_205 ^ pyc_and_151);
+assign pyc_and_207 = (pyc_and_137 & pyc_and_144);
+assign pyc_and_208 = (pyc_and_151 & pyc_xor_205);
+assign pyc_or_209 = (pyc_and_207 | pyc_and_208);
+assign pyc_xor_210 = (pyc_and_138 ^ pyc_and_145);
+assign pyc_xor_211 = (pyc_xor_210 ^ pyc_and_152);
+assign pyc_and_212 = (pyc_and_138 & pyc_and_145);
+assign pyc_and_213 = (pyc_and_152 & pyc_xor_210);
+assign pyc_or_214 = (pyc_and_212 | pyc_and_213);
+assign pyc_xor_215 = (pyc_and_139 ^ pyc_and_146);
+assign pyc_xor_216 = (pyc_xor_215 ^ pyc_and_153);
+assign pyc_and_217 = (pyc_and_139 & pyc_and_146);
+assign pyc_and_218 = (pyc_and_153 & pyc_xor_215);
+assign pyc_or_219 = (pyc_and_217 | pyc_and_218);
+assign pyc_xor_220 = (pyc_and_140 ^ pyc_and_147);
+assign pyc_xor_221 = (pyc_xor_220 ^ pyc_and_154);
+assign pyc_and_222 = (pyc_and_140 & pyc_and_147);
+assign pyc_and_223 = (pyc_and_154 & pyc_xor_220);
+assign pyc_or_224 = (pyc_and_222 | pyc_and_223);
+assign pyc_xor_225 = (pyc_and_141 ^ pyc_and_148);
+assign pyc_xor_226 = (pyc_xor_225 ^ pyc_and_155);
+assign pyc_and_227 = (pyc_and_141 & pyc_and_148);
+assign pyc_and_228 = (pyc_and_155 & pyc_xor_225);
+assign pyc_or_229 = (pyc_and_227 | pyc_and_228);
+assign pyc_xor_230 = (pyc_and_149 ^ pyc_and_156);
+assign pyc_and_231 = (pyc_and_156 & pyc_and_149);
+assign pyc_xor_232 = (pyc_and_159 ^ pyc_and_166);
+assign pyc_and_233 = (pyc_and_159 & pyc_and_166);
+assign pyc_xor_234 = (pyc_and_160 ^ pyc_and_167);
+assign pyc_xor_235 = (pyc_xor_234 ^ pyc_and_174);
+assign pyc_and_236 = (pyc_and_160 & pyc_and_167);
+assign pyc_and_237 = (pyc_and_174 & pyc_xor_234);
+assign pyc_or_238 = (pyc_and_236 | pyc_and_237);
+assign pyc_xor_239 = (pyc_and_161 ^ pyc_and_168);
+assign pyc_xor_240 = (pyc_xor_239 ^ pyc_and_175);
+assign pyc_and_241 = (pyc_and_161 & pyc_and_168);
+assign pyc_and_242 = (pyc_and_175 & pyc_xor_239);
+assign pyc_or_243 = (pyc_and_241 | pyc_and_242);
+assign pyc_xor_244 = (pyc_and_162 ^ pyc_and_169);
+assign pyc_xor_245 = (pyc_xor_244 ^ pyc_and_176);
+assign pyc_and_246 = (pyc_and_162 & pyc_and_169);
+assign pyc_and_247 = (pyc_and_176 & pyc_xor_244);
+assign pyc_or_248 = (pyc_and_246 | pyc_and_247);
+assign pyc_xor_249 = (pyc_and_163 ^ pyc_and_170);
+assign pyc_xor_250 = (pyc_xor_249 ^ pyc_and_177);
+assign pyc_and_251 = (pyc_and_163 & pyc_and_170);
+assign pyc_and_252 = (pyc_and_177 & pyc_xor_249);
+assign pyc_or_253 = (pyc_and_251 | pyc_and_252);
+assign pyc_xor_254 = (pyc_and_164 ^ pyc_and_171);
+assign pyc_xor_255 = (pyc_xor_254 ^ pyc_and_178);
+assign pyc_and_256 = (pyc_and_164 & pyc_and_171);
+assign pyc_and_257 = (pyc_and_178 & pyc_xor_254);
+assign pyc_or_258 = (pyc_and_256 | pyc_and_257);
+assign pyc_xor_259 = (pyc_and_165 ^ pyc_and_172);
+assign pyc_xor_260 = (pyc_xor_259 ^ pyc_and_179);
+assign pyc_and_261 = (pyc_and_165 & pyc_and_172);
+assign pyc_and_262 = (pyc_and_179 & pyc_xor_259);
+assign pyc_or_263 = (pyc_and_261 | pyc_and_262);
+assign pyc_xor_264 = (pyc_and_173 ^ pyc_and_180);
+assign pyc_and_265 = (pyc_and_180 & pyc_and_173);
+assign pyc_xor_266 = (pyc_xor_201 ^ pyc_and_199);
+assign pyc_and_267 = (pyc_xor_201 & pyc_and_199);
+assign pyc_xor_268 = (pyc_xor_206 ^ pyc_or_204);
+assign pyc_xor_269 = (pyc_xor_268 ^ pyc_and_158);
+assign pyc_and_270 = (pyc_xor_206 & pyc_or_204);
+assign pyc_and_271 = (pyc_and_158 & pyc_xor_268);
+assign pyc_or_272 = (pyc_and_270 | pyc_and_271);
+assign pyc_xor_273 = (pyc_xor_211 ^ pyc_or_209);
+assign pyc_xor_274 = (pyc_xor_273 ^ pyc_xor_232);
+assign pyc_and_275 = (pyc_xor_211 & pyc_or_209);
+assign pyc_and_276 = (pyc_xor_232 & pyc_xor_273);
+assign pyc_or_277 = (pyc_and_275 | pyc_and_276);
+assign pyc_xor_278 = (pyc_xor_216 ^ pyc_or_214);
+assign pyc_xor_279 = (pyc_xor_278 ^ pyc_xor_235);
+assign pyc_and_280 = (pyc_xor_216 & pyc_or_214);
+assign pyc_and_281 = (pyc_xor_235 & pyc_xor_278);
+assign pyc_or_282 = (pyc_and_280 | pyc_and_281);
+assign pyc_xor_283 = (pyc_xor_221 ^ pyc_or_219);
+assign pyc_xor_284 = (pyc_xor_283 ^ pyc_xor_240);
+assign pyc_and_285 = (pyc_xor_221 & pyc_or_219);
+assign pyc_and_286 = (pyc_xor_240 & pyc_xor_283);
+assign pyc_or_287 = (pyc_and_285 | pyc_and_286);
+assign pyc_xor_288 = (pyc_xor_226 ^ pyc_or_224);
+assign pyc_xor_289 = (pyc_xor_288 ^ pyc_xor_245);
+assign pyc_and_290 = (pyc_xor_226 & pyc_or_224);
+assign pyc_and_291 = (pyc_xor_245 & pyc_xor_288);
+assign pyc_or_292 = (pyc_and_290 | pyc_and_291);
+assign pyc_xor_293 = (pyc_xor_230 ^ pyc_or_229);
+assign pyc_xor_294 = (pyc_xor_293 ^ pyc_xor_250);
+assign pyc_and_295 = (pyc_xor_230 & pyc_or_229);
+assign pyc_and_296 = (pyc_xor_250 & pyc_xor_293);
+assign pyc_or_297 = (pyc_and_295 | pyc_and_296);
+assign pyc_xor_298 = (pyc_and_157 ^ pyc_and_231);
+assign pyc_xor_299 = (pyc_xor_298 ^ pyc_xor_255);
+assign pyc_and_300 = (pyc_and_157 & pyc_and_231);
+assign pyc_and_301 = (pyc_xor_255 & pyc_xor_298);
+assign pyc_or_302 = (pyc_and_300 | pyc_and_301);
+assign pyc_xor_303 = (pyc_or_238 ^ pyc_and_182);
+assign pyc_and_304 = (pyc_or_238 & pyc_and_182);
+assign pyc_xor_305 = (pyc_or_243 ^ pyc_and_183);
+assign pyc_xor_306 = (pyc_xor_305 ^ pyc_and_190);
+assign pyc_and_307 = (pyc_or_243 & pyc_and_183);
+assign pyc_and_308 = (pyc_and_190 & pyc_xor_305);
+assign pyc_or_309 = (pyc_and_307 | pyc_and_308);
+assign pyc_xor_310 = (pyc_or_248 ^ pyc_and_184);
+assign pyc_xor_311 = (pyc_xor_310 ^ pyc_and_191);
+assign pyc_and_312 = (pyc_or_248 & pyc_and_184);
+assign pyc_and_313 = (pyc_and_191 & pyc_xor_310);
+assign pyc_or_314 = (pyc_and_312 | pyc_and_313);
+assign pyc_xor_315 = (pyc_or_253 ^ pyc_and_185);
+assign pyc_xor_316 = (pyc_xor_315 ^ pyc_and_192);
+assign pyc_and_317 = (pyc_or_253 & pyc_and_185);
+assign pyc_and_318 = (pyc_and_192 & pyc_xor_315);
+assign pyc_or_319 = (pyc_and_317 | pyc_and_318);
+assign pyc_xor_320 = (pyc_or_258 ^ pyc_and_186);
+assign pyc_xor_321 = (pyc_xor_320 ^ pyc_and_193);
+assign pyc_and_322 = (pyc_or_258 & pyc_and_186);
+assign pyc_and_323 = (pyc_and_193 & pyc_xor_320);
+assign pyc_or_324 = (pyc_and_322 | pyc_and_323);
+assign pyc_xor_325 = (pyc_or_263 ^ pyc_and_187);
+assign pyc_xor_326 = (pyc_xor_325 ^ pyc_and_194);
+assign pyc_and_327 = (pyc_or_263 & pyc_and_187);
+assign pyc_and_328 = (pyc_and_194 & pyc_xor_325);
+assign pyc_or_329 = (pyc_and_327 | pyc_and_328);
+assign pyc_xor_330 = (pyc_and_265 ^ pyc_and_188);
+assign pyc_xor_331 = (pyc_xor_330 ^ pyc_and_195);
+assign pyc_and_332 = (pyc_and_265 & pyc_and_188);
+assign pyc_and_333 = (pyc_and_195 & pyc_xor_330);
+assign pyc_or_334 = (pyc_and_332 | pyc_and_333);
+assign pyc_xor_335 = (pyc_and_189 ^ pyc_and_196);
+assign pyc_and_336 = (pyc_and_196 & pyc_and_189);
+assign pyc_zext_337 = {{15{1'b0}}, pyc_and_134};
+assign pyc_zext_338 = {{15{1'b0}}, pyc_xor_198};
+assign pyc_shli_339 = (pyc_zext_338 << 1);
+assign pyc_or_340 = (pyc_zext_337 | pyc_shli_339);
+assign pyc_zext_341 = {{15{1'b0}}, pyc_xor_266};
+assign pyc_shli_342 = (pyc_zext_341 << 2);
+assign pyc_or_343 = (pyc_or_340 | pyc_shli_342);
+assign pyc_zext_344 = {{15{1'b0}}, pyc_xor_269};
+assign pyc_shli_345 = (pyc_zext_344 << 3);
+assign pyc_or_346 = (pyc_or_343 | pyc_shli_345);
+assign pyc_zext_347 = {{15{1'b0}}, pyc_xor_274};
+assign pyc_shli_348 = (pyc_zext_347 << 4);
+assign pyc_or_349 = (pyc_or_346 | pyc_shli_348);
+assign pyc_zext_350 = {{15{1'b0}}, pyc_xor_279};
+assign pyc_shli_351 = (pyc_zext_350 << 5);
+assign pyc_or_352 = (pyc_or_349 | pyc_shli_351);
+assign pyc_zext_353 = {{15{1'b0}}, pyc_xor_284};
+assign pyc_shli_354 = (pyc_zext_353 << 6);
+assign pyc_or_355 = (pyc_or_352 | pyc_shli_354);
+assign pyc_zext_356 = {{15{1'b0}}, pyc_xor_289};
+assign pyc_shli_357 = (pyc_zext_356 << 7);
+assign pyc_or_358 = (pyc_or_355 | pyc_shli_357);
+assign pyc_zext_359 = {{15{1'b0}}, pyc_xor_294};
+assign pyc_shli_360 = (pyc_zext_359 << 8);
+assign pyc_or_361 = (pyc_or_358 | pyc_shli_360);
+assign pyc_zext_362 = {{15{1'b0}}, pyc_xor_299};
+assign pyc_shli_363 = (pyc_zext_362 << 9);
+assign pyc_or_364 = (pyc_or_361 | pyc_shli_363);
+assign pyc_zext_365 = {{15{1'b0}}, pyc_xor_260};
+assign pyc_shli_366 = (pyc_zext_365 << 10);
+assign pyc_or_367 = (pyc_or_364 | pyc_shli_366);
+assign pyc_zext_368 = {{15{1'b0}}, pyc_xor_264};
+assign pyc_shli_369 = (pyc_zext_368 << 11);
+assign pyc_or_370 = (pyc_or_367 | pyc_shli_369);
+assign pyc_zext_371 = {{15{1'b0}}, pyc_and_181};
+assign pyc_shli_372 = (pyc_zext_371 << 12);
+assign pyc_or_373 = (pyc_or_370 | pyc_shli_372);
+assign pyc_zext_374 = {{15{1'b0}}, pyc_and_267};
+assign pyc_shli_375 = (pyc_zext_374 << 3);
+assign pyc_zext_376 = {{15{1'b0}}, pyc_or_272};
+assign pyc_shli_377 = (pyc_zext_376 << 4);
+assign pyc_or_378 = (pyc_shli_375 | pyc_shli_377);
+assign pyc_zext_379 = {{15{1'b0}}, pyc_or_277};
+assign pyc_shli_380 = (pyc_zext_379 << 5);
+assign pyc_or_381 = (pyc_or_378 | pyc_shli_380);
+assign pyc_zext_382 = {{15{1'b0}}, pyc_or_282};
+assign pyc_shli_383 = (pyc_zext_382 << 6);
+assign pyc_or_384 = (pyc_or_381 | pyc_shli_383);
+assign pyc_zext_385 = {{15{1'b0}}, pyc_or_287};
+assign pyc_shli_386 = (pyc_zext_385 << 7);
+assign pyc_or_387 = (pyc_or_384 | pyc_shli_386);
+assign pyc_zext_388 = {{15{1'b0}}, pyc_or_292};
+assign pyc_shli_389 = (pyc_zext_388 << 8);
+assign pyc_or_390 = (pyc_or_387 | pyc_shli_389);
+assign pyc_zext_391 = {{15{1'b0}}, pyc_or_297};
+assign pyc_shli_392 = (pyc_zext_391 << 9);
+assign pyc_or_393 = (pyc_or_390 | pyc_shli_392);
+assign pyc_zext_394 = {{15{1'b0}}, pyc_or_302};
+assign pyc_shli_395 = (pyc_zext_394 << 10);
+assign pyc_or_396 = (pyc_or_393 | pyc_shli_395);
+assign pyc_zext_397 = {{15{1'b0}}, pyc_and_233};
+assign pyc_shli_398 = (pyc_zext_397 << 5);
+assign pyc_zext_399 = {{15{1'b0}}, pyc_xor_303};
+assign pyc_shli_400 = (pyc_zext_399 << 6);
+assign pyc_or_401 = (pyc_shli_398 | pyc_shli_400);
+assign pyc_zext_402 = {{15{1'b0}}, pyc_xor_306};
+assign pyc_shli_403 = (pyc_zext_402 << 7);
+assign pyc_or_404 = (pyc_or_401 | pyc_shli_403);
+assign pyc_zext_405 = {{15{1'b0}}, pyc_xor_311};
+assign pyc_shli_406 = (pyc_zext_405 << 8);
+assign pyc_or_407 = (pyc_or_404 | pyc_shli_406);
+assign pyc_zext_408 = {{15{1'b0}}, pyc_xor_316};
+assign pyc_shli_409 = (pyc_zext_408 << 9);
+assign pyc_or_410 = (pyc_or_407 | pyc_shli_409);
+assign pyc_zext_411 = {{15{1'b0}}, pyc_xor_321};
+assign pyc_shli_412 = (pyc_zext_411 << 10);
+assign pyc_or_413 = (pyc_or_410 | pyc_shli_412);
+assign pyc_zext_414 = {{15{1'b0}}, pyc_xor_326};
+assign pyc_shli_415 = (pyc_zext_414 << 11);
+assign pyc_or_416 = (pyc_or_413 | pyc_shli_415);
+assign pyc_zext_417 = {{15{1'b0}}, pyc_xor_331};
+assign pyc_shli_418 = (pyc_zext_417 << 12);
+assign pyc_or_419 = (pyc_or_416 | pyc_shli_418);
+assign pyc_zext_420 = {{15{1'b0}}, pyc_xor_335};
+assign pyc_shli_421 = (pyc_zext_420 << 13);
+assign pyc_or_422 = (pyc_or_419 | pyc_shli_421);
+assign pyc_zext_423 = {{15{1'b0}}, pyc_and_197};
+assign pyc_shli_424 = (pyc_zext_423 << 14);
+assign pyc_or_425 = (pyc_or_422 | pyc_shli_424);
+assign pyc_zext_426 = {{15{1'b0}}, pyc_and_304};
+assign pyc_shli_427 = (pyc_zext_426 << 7);
+assign pyc_zext_428 = {{15{1'b0}}, pyc_or_309};
+assign pyc_shli_429 = (pyc_zext_428 << 8);
+assign pyc_or_430 = (pyc_shli_427 | pyc_shli_429);
+assign pyc_zext_431 = {{15{1'b0}}, pyc_or_314};
+assign pyc_shli_432 = (pyc_zext_431 << 9);
+assign pyc_or_433 = (pyc_or_430 | pyc_shli_432);
+assign pyc_zext_434 = {{15{1'b0}}, pyc_or_319};
+assign pyc_shli_435 = (pyc_zext_434 << 10);
+assign pyc_or_436 = (pyc_or_433 | pyc_shli_435);
+assign pyc_zext_437 = {{15{1'b0}}, pyc_or_324};
+assign pyc_shli_438 = (pyc_zext_437 << 11);
+assign pyc_or_439 = (pyc_or_436 | pyc_shli_438);
+assign pyc_zext_440 = {{15{1'b0}}, pyc_or_329};
+assign pyc_shli_441 = (pyc_zext_440 << 12);
+assign pyc_or_442 = (pyc_or_439 | pyc_shli_441);
+assign pyc_zext_443 = {{15{1'b0}}, pyc_or_334};
+assign pyc_shli_444 = (pyc_zext_443 << 13);
+assign pyc_or_445 = (pyc_or_442 | pyc_shli_444);
+assign pyc_zext_446 = {{15{1'b0}}, pyc_and_336};
+assign pyc_shli_447 = (pyc_zext_446 << 14);
+assign pyc_or_448 = (pyc_or_445 | pyc_shli_447);
+assign pyc_extract_449 = s1_mul_row0[0];
+assign pyc_extract_450 = s1_mul_row0[1];
+assign pyc_extract_451 = s1_mul_row0[2];
+assign pyc_extract_452 = s1_mul_row0[3];
+assign pyc_extract_453 = s1_mul_row0[4];
+assign pyc_extract_454 = s1_mul_row0[5];
+assign pyc_extract_455 = s1_mul_row0[6];
+assign pyc_extract_456 = s1_mul_row0[7];
+assign pyc_extract_457 = s1_mul_row0[8];
+assign pyc_extract_458 = s1_mul_row0[9];
+assign pyc_extract_459 = s1_mul_row0[10];
+assign pyc_extract_460 = s1_mul_row0[11];
+assign pyc_extract_461 = s1_mul_row0[12];
+assign pyc_extract_462 = s1_mul_row0[13];
+assign pyc_extract_463 = s1_mul_row0[14];
+assign pyc_extract_464 = s1_mul_row0[15];
+assign pyc_extract_465 = s1_mul_row1[0];
+assign pyc_extract_466 = s1_mul_row1[1];
+assign pyc_extract_467 = s1_mul_row1[2];
+assign pyc_extract_468 = s1_mul_row1[3];
+assign pyc_extract_469 = s1_mul_row1[4];
+assign pyc_extract_470 = s1_mul_row1[5];
+assign pyc_extract_471 = s1_mul_row1[6];
+assign pyc_extract_472 = s1_mul_row1[7];
+assign pyc_extract_473 = s1_mul_row1[8];
+assign pyc_extract_474 = s1_mul_row1[9];
+assign pyc_extract_475 = s1_mul_row1[10];
+assign pyc_extract_476 = s1_mul_row1[11];
+assign pyc_extract_477 = s1_mul_row1[12];
+assign pyc_extract_478 = s1_mul_row1[13];
+assign pyc_extract_479 = s1_mul_row1[14];
+assign pyc_extract_480 = s1_mul_row1[15];
+assign pyc_extract_481 = s1_mul_row2[0];
+assign pyc_extract_482 = s1_mul_row2[1];
+assign pyc_extract_483 = s1_mul_row2[2];
+assign pyc_extract_484 = s1_mul_row2[3];
+assign pyc_extract_485 = s1_mul_row2[4];
+assign pyc_extract_486 = s1_mul_row2[5];
+assign pyc_extract_487 = s1_mul_row2[6];
+assign pyc_extract_488 = s1_mul_row2[7];
+assign pyc_extract_489 = s1_mul_row2[8];
+assign pyc_extract_490 = s1_mul_row2[9];
+assign pyc_extract_491 = s1_mul_row2[10];
+assign pyc_extract_492 = s1_mul_row2[11];
+assign pyc_extract_493 = s1_mul_row2[12];
+assign pyc_extract_494 = s1_mul_row2[13];
+assign pyc_extract_495 = s1_mul_row2[14];
+assign pyc_extract_496 = s1_mul_row2[15];
+assign pyc_extract_497 = s1_mul_row3[0];
+assign pyc_extract_498 = s1_mul_row3[1];
+assign pyc_extract_499 = s1_mul_row3[2];
+assign pyc_extract_500 = s1_mul_row3[3];
+assign pyc_extract_501 = s1_mul_row3[4];
+assign pyc_extract_502 = s1_mul_row3[5];
+assign pyc_extract_503 = s1_mul_row3[6];
+assign pyc_extract_504 = s1_mul_row3[7];
+assign pyc_extract_505 = s1_mul_row3[8];
+assign pyc_extract_506 = s1_mul_row3[9];
+assign pyc_extract_507 = s1_mul_row3[10];
+assign pyc_extract_508 = s1_mul_row3[11];
+assign pyc_extract_509 = s1_mul_row3[12];
+assign pyc_extract_510 = s1_mul_row3[13];
+assign pyc_extract_511 = s1_mul_row3[14];
+assign pyc_extract_512 = s1_mul_row3[15];
+assign pyc_xor_513 = (pyc_extract_449 ^ pyc_extract_465);
+assign pyc_xor_514 = (pyc_xor_513 ^ pyc_extract_481);
+assign pyc_and_515 = (pyc_extract_449 & pyc_extract_465);
+assign pyc_and_516 = (pyc_extract_481 & pyc_xor_513);
+assign pyc_or_517 = (pyc_and_515 | pyc_and_516);
+assign pyc_xor_518 = (pyc_extract_450 ^ pyc_extract_466);
+assign pyc_xor_519 = (pyc_xor_518 ^ pyc_extract_482);
+assign pyc_and_520 = (pyc_extract_450 & pyc_extract_466);
+assign pyc_and_521 = (pyc_extract_482 & pyc_xor_518);
+assign pyc_or_522 = (pyc_and_520 | pyc_and_521);
+assign pyc_xor_523 = (pyc_extract_451 ^ pyc_extract_467);
+assign pyc_xor_524 = (pyc_xor_523 ^ pyc_extract_483);
+assign pyc_and_525 = (pyc_extract_451 & pyc_extract_467);
+assign pyc_and_526 = (pyc_extract_483 & pyc_xor_523);
+assign pyc_or_527 = (pyc_and_525 | pyc_and_526);
+assign pyc_xor_528 = (pyc_extract_452 ^ pyc_extract_468);
+assign pyc_xor_529 = (pyc_xor_528 ^ pyc_extract_484);
+assign pyc_and_530 = (pyc_extract_452 & pyc_extract_468);
+assign pyc_and_531 = (pyc_extract_484 & pyc_xor_528);
+assign pyc_or_532 = (pyc_and_530 | pyc_and_531);
+assign pyc_xor_533 = (pyc_extract_453 ^ pyc_extract_469);
+assign pyc_xor_534 = (pyc_xor_533 ^ pyc_extract_485);
+assign pyc_and_535 = (pyc_extract_453 & pyc_extract_469);
+assign pyc_and_536 = (pyc_extract_485 & pyc_xor_533);
+assign pyc_or_537 = (pyc_and_535 | pyc_and_536);
+assign pyc_xor_538 = (pyc_extract_454 ^ pyc_extract_470);
+assign pyc_xor_539 = (pyc_xor_538 ^ pyc_extract_486);
+assign pyc_and_540 = (pyc_extract_454 & pyc_extract_470);
+assign pyc_and_541 = (pyc_extract_486 & pyc_xor_538);
+assign pyc_or_542 = (pyc_and_540 | pyc_and_541);
+assign pyc_xor_543 = (pyc_extract_455 ^ pyc_extract_471);
+assign pyc_xor_544 = (pyc_xor_543 ^ pyc_extract_487);
+assign pyc_and_545 = (pyc_extract_455 & pyc_extract_471);
+assign pyc_and_546 = (pyc_extract_487 & pyc_xor_543);
+assign pyc_or_547 = (pyc_and_545 | pyc_and_546);
+assign pyc_xor_548 = (pyc_extract_456 ^ pyc_extract_472);
+assign pyc_xor_549 = (pyc_xor_548 ^ pyc_extract_488);
+assign pyc_and_550 = (pyc_extract_456 & pyc_extract_472);
+assign pyc_and_551 = (pyc_extract_488 & pyc_xor_548);
+assign pyc_or_552 = (pyc_and_550 | pyc_and_551);
+assign pyc_xor_553 = (pyc_extract_457 ^ pyc_extract_473);
+assign pyc_xor_554 = (pyc_xor_553 ^ pyc_extract_489);
+assign pyc_and_555 = (pyc_extract_457 & pyc_extract_473);
+assign pyc_and_556 = (pyc_extract_489 & pyc_xor_553);
+assign pyc_or_557 = (pyc_and_555 | pyc_and_556);
+assign pyc_xor_558 = (pyc_extract_458 ^ pyc_extract_474);
+assign pyc_xor_559 = (pyc_xor_558 ^ pyc_extract_490);
+assign pyc_and_560 = (pyc_extract_458 & pyc_extract_474);
+assign pyc_and_561 = (pyc_extract_490 & pyc_xor_558);
+assign pyc_or_562 = (pyc_and_560 | pyc_and_561);
+assign pyc_xor_563 = (pyc_extract_459 ^ pyc_extract_475);
+assign pyc_xor_564 = (pyc_xor_563 ^ pyc_extract_491);
+assign pyc_and_565 = (pyc_extract_459 & pyc_extract_475);
+assign pyc_and_566 = (pyc_extract_491 & pyc_xor_563);
+assign pyc_or_567 = (pyc_and_565 | pyc_and_566);
+assign pyc_xor_568 = (pyc_extract_460 ^ pyc_extract_476);
+assign pyc_xor_569 = (pyc_xor_568 ^ pyc_extract_492);
+assign pyc_and_570 = (pyc_extract_460 & pyc_extract_476);
+assign pyc_and_571 = (pyc_extract_492 & pyc_xor_568);
+assign pyc_or_572 = (pyc_and_570 | pyc_and_571);
+assign pyc_xor_573 = (pyc_extract_461 ^ pyc_extract_477);
+assign pyc_xor_574 = (pyc_xor_573 ^ pyc_extract_493);
+assign pyc_and_575 = (pyc_extract_461 & pyc_extract_477);
+assign pyc_and_576 = (pyc_extract_493 & pyc_xor_573);
+assign pyc_or_577 = (pyc_and_575 | pyc_and_576);
+assign pyc_xor_578 = (pyc_extract_462 ^ pyc_extract_478);
+assign pyc_xor_579 = (pyc_xor_578 ^ pyc_extract_494);
+assign pyc_and_580 = (pyc_extract_462 & pyc_extract_478);
+assign pyc_and_581 = (pyc_extract_494 & pyc_xor_578);
+assign pyc_or_582 = (pyc_and_580 | pyc_and_581);
+assign pyc_xor_583 = (pyc_extract_463 ^ pyc_extract_479);
+assign pyc_xor_584 = (pyc_xor_583 ^ pyc_extract_495);
+assign pyc_and_585 = (pyc_extract_463 & pyc_extract_479);
+assign pyc_and_586 = (pyc_extract_495 & pyc_xor_583);
+assign pyc_or_587 = (pyc_and_585 | pyc_and_586);
+assign pyc_xor_588 = (pyc_extract_464 ^ pyc_extract_480);
+assign pyc_xor_589 = (pyc_xor_588 ^ pyc_extract_496);
+assign pyc_xor_590 = (pyc_xor_514 ^ pyc_extract_497);
+assign pyc_and_591 = (pyc_extract_497 & pyc_xor_514);
+assign pyc_xor_592 = (pyc_xor_519 ^ pyc_or_517);
+assign pyc_xor_593 = (pyc_xor_592 ^ pyc_extract_498);
+assign pyc_and_594 = (pyc_xor_519 & pyc_or_517);
+assign pyc_and_595 = (pyc_extract_498 & pyc_xor_592);
+assign pyc_or_596 = (pyc_and_594 | pyc_and_595);
+assign pyc_xor_597 = (pyc_xor_524 ^ pyc_or_522);
+assign pyc_xor_598 = (pyc_xor_597 ^ pyc_extract_499);
+assign pyc_and_599 = (pyc_xor_524 & pyc_or_522);
+assign pyc_and_600 = (pyc_extract_499 & pyc_xor_597);
+assign pyc_or_601 = (pyc_and_599 | pyc_and_600);
+assign pyc_xor_602 = (pyc_xor_529 ^ pyc_or_527);
+assign pyc_xor_603 = (pyc_xor_602 ^ pyc_extract_500);
+assign pyc_and_604 = (pyc_xor_529 & pyc_or_527);
+assign pyc_and_605 = (pyc_extract_500 & pyc_xor_602);
+assign pyc_or_606 = (pyc_and_604 | pyc_and_605);
+assign pyc_xor_607 = (pyc_xor_534 ^ pyc_or_532);
+assign pyc_xor_608 = (pyc_xor_607 ^ pyc_extract_501);
+assign pyc_and_609 = (pyc_xor_534 & pyc_or_532);
+assign pyc_and_610 = (pyc_extract_501 & pyc_xor_607);
+assign pyc_or_611 = (pyc_and_609 | pyc_and_610);
+assign pyc_xor_612 = (pyc_xor_539 ^ pyc_or_537);
+assign pyc_xor_613 = (pyc_xor_612 ^ pyc_extract_502);
+assign pyc_and_614 = (pyc_xor_539 & pyc_or_537);
+assign pyc_and_615 = (pyc_extract_502 & pyc_xor_612);
+assign pyc_or_616 = (pyc_and_614 | pyc_and_615);
+assign pyc_xor_617 = (pyc_xor_544 ^ pyc_or_542);
+assign pyc_xor_618 = (pyc_xor_617 ^ pyc_extract_503);
+assign pyc_and_619 = (pyc_xor_544 & pyc_or_542);
+assign pyc_and_620 = (pyc_extract_503 & pyc_xor_617);
+assign pyc_or_621 = (pyc_and_619 | pyc_and_620);
+assign pyc_xor_622 = (pyc_xor_549 ^ pyc_or_547);
+assign pyc_xor_623 = (pyc_xor_622 ^ pyc_extract_504);
+assign pyc_and_624 = (pyc_xor_549 & pyc_or_547);
+assign pyc_and_625 = (pyc_extract_504 & pyc_xor_622);
+assign pyc_or_626 = (pyc_and_624 | pyc_and_625);
+assign pyc_xor_627 = (pyc_xor_554 ^ pyc_or_552);
+assign pyc_xor_628 = (pyc_xor_627 ^ pyc_extract_505);
+assign pyc_and_629 = (pyc_xor_554 & pyc_or_552);
+assign pyc_and_630 = (pyc_extract_505 & pyc_xor_627);
+assign pyc_or_631 = (pyc_and_629 | pyc_and_630);
+assign pyc_xor_632 = (pyc_xor_559 ^ pyc_or_557);
+assign pyc_xor_633 = (pyc_xor_632 ^ pyc_extract_506);
+assign pyc_and_634 = (pyc_xor_559 & pyc_or_557);
+assign pyc_and_635 = (pyc_extract_506 & pyc_xor_632);
+assign pyc_or_636 = (pyc_and_634 | pyc_and_635);
+assign pyc_xor_637 = (pyc_xor_564 ^ pyc_or_562);
+assign pyc_xor_638 = (pyc_xor_637 ^ pyc_extract_507);
+assign pyc_and_639 = (pyc_xor_564 & pyc_or_562);
+assign pyc_and_640 = (pyc_extract_507 & pyc_xor_637);
+assign pyc_or_641 = (pyc_and_639 | pyc_and_640);
+assign pyc_xor_642 = (pyc_xor_569 ^ pyc_or_567);
+assign pyc_xor_643 = (pyc_xor_642 ^ pyc_extract_508);
+assign pyc_and_644 = (pyc_xor_569 & pyc_or_567);
+assign pyc_and_645 = (pyc_extract_508 & pyc_xor_642);
+assign pyc_or_646 = (pyc_and_644 | pyc_and_645);
+assign pyc_xor_647 = (pyc_xor_574 ^ pyc_or_572);
+assign pyc_xor_648 = (pyc_xor_647 ^ pyc_extract_509);
+assign pyc_and_649 = (pyc_xor_574 & pyc_or_572);
+assign pyc_and_650 = (pyc_extract_509 & pyc_xor_647);
+assign pyc_or_651 = (pyc_and_649 | pyc_and_650);
+assign pyc_xor_652 = (pyc_xor_579 ^ pyc_or_577);
+assign pyc_xor_653 = (pyc_xor_652 ^ pyc_extract_510);
+assign pyc_and_654 = (pyc_xor_579 & pyc_or_577);
+assign pyc_and_655 = (pyc_extract_510 & pyc_xor_652);
+assign pyc_or_656 = (pyc_and_654 | pyc_and_655);
+assign pyc_xor_657 = (pyc_xor_584 ^ pyc_or_582);
+assign pyc_xor_658 = (pyc_xor_657 ^ pyc_extract_511);
+assign pyc_and_659 = (pyc_xor_584 & pyc_or_582);
+assign pyc_and_660 = (pyc_extract_511 & pyc_xor_657);
+assign pyc_or_661 = (pyc_and_659 | pyc_and_660);
+assign pyc_xor_662 = (pyc_xor_589 ^ pyc_or_587);
+assign pyc_xor_663 = (pyc_xor_662 ^ pyc_extract_512);
+assign pyc_xor_664 = (pyc_xor_593 ^ pyc_and_591);
+assign pyc_and_665 = (pyc_xor_593 & pyc_and_591);
+assign pyc_xor_666 = (pyc_xor_598 ^ pyc_or_596);
+assign pyc_xor_667 = (pyc_xor_666 ^ pyc_and_665);
+assign pyc_and_668 = (pyc_xor_598 & pyc_or_596);
+assign pyc_and_669 = (pyc_and_665 & pyc_xor_666);
+assign pyc_or_670 = (pyc_and_668 | pyc_and_669);
+assign pyc_xor_671 = (pyc_xor_603 ^ pyc_or_601);
+assign pyc_xor_672 = (pyc_xor_671 ^ pyc_or_670);
+assign pyc_and_673 = (pyc_xor_603 & pyc_or_601);
+assign pyc_and_674 = (pyc_or_670 & pyc_xor_671);
+assign pyc_or_675 = (pyc_and_673 | pyc_and_674);
+assign pyc_xor_676 = (pyc_xor_608 ^ pyc_or_606);
+assign pyc_xor_677 = (pyc_xor_676 ^ pyc_or_675);
+assign pyc_and_678 = (pyc_xor_608 & pyc_or_606);
+assign pyc_and_679 = (pyc_or_675 & pyc_xor_676);
+assign pyc_or_680 = (pyc_and_678 | pyc_and_679);
+assign pyc_xor_681 = (pyc_xor_613 ^ pyc_or_611);
+assign pyc_xor_682 = (pyc_xor_681 ^ pyc_or_680);
+assign pyc_and_683 = (pyc_xor_613 & pyc_or_611);
+assign pyc_and_684 = (pyc_or_680 & pyc_xor_681);
+assign pyc_or_685 = (pyc_and_683 | pyc_and_684);
+assign pyc_xor_686 = (pyc_xor_618 ^ pyc_or_616);
+assign pyc_xor_687 = (pyc_xor_686 ^ pyc_or_685);
+assign pyc_and_688 = (pyc_xor_618 & pyc_or_616);
+assign pyc_and_689 = (pyc_or_685 & pyc_xor_686);
+assign pyc_or_690 = (pyc_and_688 | pyc_and_689);
+assign pyc_xor_691 = (pyc_xor_623 ^ pyc_or_621);
+assign pyc_xor_692 = (pyc_xor_691 ^ pyc_or_690);
+assign pyc_and_693 = (pyc_xor_623 & pyc_or_621);
+assign pyc_and_694 = (pyc_or_690 & pyc_xor_691);
+assign pyc_or_695 = (pyc_and_693 | pyc_and_694);
+assign pyc_xor_696 = (pyc_xor_628 ^ pyc_or_626);
+assign pyc_and_697 = (pyc_xor_628 & pyc_or_626);
+assign pyc_xor_698 = (pyc_xor_633 ^ pyc_or_631);
+assign pyc_xor_699 = (pyc_xor_698 ^ pyc_and_697);
+assign pyc_and_700 = (pyc_xor_633 & pyc_or_631);
+assign pyc_and_701 = (pyc_and_697 & pyc_xor_698);
+assign pyc_or_702 = (pyc_and_700 | pyc_and_701);
+assign pyc_xor_703 = (pyc_xor_638 ^ pyc_or_636);
+assign pyc_xor_704 = (pyc_xor_703 ^ pyc_or_702);
+assign pyc_and_705 = (pyc_xor_638 & pyc_or_636);
+assign pyc_and_706 = (pyc_or_702 & pyc_xor_703);
+assign pyc_or_707 = (pyc_and_705 | pyc_and_706);
+assign pyc_xor_708 = (pyc_xor_643 ^ pyc_or_641);
+assign pyc_xor_709 = (pyc_xor_708 ^ pyc_or_707);
+assign pyc_and_710 = (pyc_xor_643 & pyc_or_641);
+assign pyc_and_711 = (pyc_or_707 & pyc_xor_708);
+assign pyc_or_712 = (pyc_and_710 | pyc_and_711);
+assign pyc_xor_713 = (pyc_xor_648 ^ pyc_or_646);
+assign pyc_xor_714 = (pyc_xor_713 ^ pyc_or_712);
+assign pyc_and_715 = (pyc_xor_648 & pyc_or_646);
+assign pyc_and_716 = (pyc_or_712 & pyc_xor_713);
+assign pyc_or_717 = (pyc_and_715 | pyc_and_716);
+assign pyc_xor_718 = (pyc_xor_653 ^ pyc_or_651);
+assign pyc_xor_719 = (pyc_xor_718 ^ pyc_or_717);
+assign pyc_and_720 = (pyc_xor_653 & pyc_or_651);
+assign pyc_and_721 = (pyc_or_717 & pyc_xor_718);
+assign pyc_or_722 = (pyc_and_720 | pyc_and_721);
+assign pyc_xor_723 = (pyc_xor_658 ^ pyc_or_656);
+assign pyc_xor_724 = (pyc_xor_723 ^ pyc_or_722);
+assign pyc_and_725 = (pyc_xor_658 & pyc_or_656);
+assign pyc_and_726 = (pyc_or_722 & pyc_xor_723);
+assign pyc_or_727 = (pyc_and_725 | pyc_and_726);
+assign pyc_xor_728 = (pyc_xor_663 ^ pyc_or_661);
+assign pyc_xor_729 = (pyc_xor_728 ^ pyc_or_727);
+assign pyc_xor_730 = (pyc_xor_696 ^ pyc_comb_89);
+assign pyc_or_731 = (pyc_and_697 | pyc_xor_696);
+assign pyc_xor_732 = (pyc_xor_698 ^ pyc_or_731);
+assign pyc_and_733 = (pyc_or_731 & pyc_xor_698);
+assign pyc_or_734 = (pyc_and_700 | pyc_and_733);
+assign pyc_xor_735 = (pyc_xor_703 ^ pyc_or_734);
+assign pyc_and_736 = (pyc_or_734 & pyc_xor_703);
+assign pyc_or_737 = (pyc_and_705 | pyc_and_736);
+assign pyc_xor_738 = (pyc_xor_708 ^ pyc_or_737);
+assign pyc_and_739 = (pyc_or_737 & pyc_xor_708);
+assign pyc_or_740 = (pyc_and_710 | pyc_and_739);
+assign pyc_xor_741 = (pyc_xor_713 ^ pyc_or_740);
+assign pyc_and_742 = (pyc_or_740 & pyc_xor_713);
+assign pyc_or_743 = (pyc_and_715 | pyc_and_742);
+assign pyc_xor_744 = (pyc_xor_718 ^ pyc_or_743);
+assign pyc_and_745 = (pyc_or_743 & pyc_xor_718);
+assign pyc_or_746 = (pyc_and_720 | pyc_and_745);
+assign pyc_xor_747 = (pyc_xor_723 ^ pyc_or_746);
+assign pyc_and_748 = (pyc_or_746 & pyc_xor_723);
+assign pyc_or_749 = (pyc_and_725 | pyc_and_748);
+assign pyc_xor_750 = (pyc_xor_728 ^ pyc_or_749);
+assign pyc_mux_751 = (pyc_or_695 ? pyc_xor_730 : pyc_xor_696);
+assign pyc_mux_752 = (pyc_or_695 ? pyc_xor_732 : pyc_xor_699);
+assign pyc_mux_753 = (pyc_or_695 ? pyc_xor_735 : pyc_xor_704);
+assign pyc_mux_754 = (pyc_or_695 ? pyc_xor_738 : pyc_xor_709);
+assign pyc_mux_755 = (pyc_or_695 ? pyc_xor_741 : pyc_xor_714);
+assign pyc_mux_756 = (pyc_or_695 ? pyc_xor_744 : pyc_xor_719);
+assign pyc_mux_757 = (pyc_or_695 ? pyc_xor_747 : pyc_xor_724);
+assign pyc_mux_758 = (pyc_or_695 ? pyc_xor_750 : pyc_xor_729);
+assign pyc_zext_759 = {{15{1'b0}}, pyc_xor_590};
+assign pyc_zext_760 = {{15{1'b0}}, pyc_xor_664};
+assign pyc_shli_761 = (pyc_zext_760 << 1);
+assign pyc_or_762 = (pyc_zext_759 | pyc_shli_761);
+assign pyc_zext_763 = {{15{1'b0}}, pyc_xor_667};
+assign pyc_shli_764 = (pyc_zext_763 << 2);
+assign pyc_or_765 = (pyc_or_762 | pyc_shli_764);
+assign pyc_zext_766 = {{15{1'b0}}, pyc_xor_672};
+assign pyc_shli_767 = (pyc_zext_766 << 3);
+assign pyc_or_768 = (pyc_or_765 | pyc_shli_767);
+assign pyc_zext_769 = {{15{1'b0}}, pyc_xor_677};
+assign pyc_shli_770 = (pyc_zext_769 << 4);
+assign pyc_or_771 = (pyc_or_768 | pyc_shli_770);
+assign pyc_zext_772 = {{15{1'b0}}, pyc_xor_682};
+assign pyc_shli_773 = (pyc_zext_772 << 5);
+assign pyc_or_774 = (pyc_or_771 | pyc_shli_773);
+assign pyc_zext_775 = {{15{1'b0}}, pyc_xor_687};
+assign pyc_shli_776 = (pyc_zext_775 << 6);
+assign pyc_or_777 = (pyc_or_774 | pyc_shli_776);
+assign pyc_zext_778 = {{15{1'b0}}, pyc_xor_692};
+assign pyc_shli_779 = (pyc_zext_778 << 7);
+assign pyc_or_780 = (pyc_or_777 | pyc_shli_779);
+assign pyc_zext_781 = {{15{1'b0}}, pyc_mux_751};
+assign pyc_shli_782 = (pyc_zext_781 << 8);
+assign pyc_or_783 = (pyc_or_780 | pyc_shli_782);
+assign pyc_zext_784 = {{15{1'b0}}, pyc_mux_752};
+assign pyc_shli_785 = (pyc_zext_784 << 9);
+assign pyc_or_786 = (pyc_or_783 | pyc_shli_785);
+assign pyc_zext_787 = {{15{1'b0}}, pyc_mux_753};
+assign pyc_shli_788 = (pyc_zext_787 << 10);
+assign pyc_or_789 = (pyc_or_786 | pyc_shli_788);
+assign pyc_zext_790 = {{15{1'b0}}, pyc_mux_754};
+assign pyc_shli_791 = (pyc_zext_790 << 11);
+assign pyc_or_792 = (pyc_or_789 | pyc_shli_791);
+assign pyc_zext_793 = {{15{1'b0}}, pyc_mux_755};
+assign pyc_shli_794 = (pyc_zext_793 << 12);
+assign pyc_or_795 = (pyc_or_792 | pyc_shli_794);
+assign pyc_zext_796 = {{15{1'b0}}, pyc_mux_756};
+assign pyc_shli_797 = (pyc_zext_796 << 13);
+assign pyc_or_798 = (pyc_or_795 | pyc_shli_797);
+assign pyc_zext_799 = {{15{1'b0}}, pyc_mux_757};
+assign pyc_shli_800 = (pyc_zext_799 << 14);
+assign pyc_or_801 = (pyc_or_798 | pyc_shli_800);
+assign pyc_zext_802 = {{15{1'b0}}, pyc_mux_758};
+assign pyc_shli_803 = (pyc_zext_802 << 15);
+assign pyc_or_804 = (pyc_or_801 | pyc_shli_803);
+assign pyc_extract_805 = s2_prod_mant[15];
+assign pyc_lshri_806 = (s2_prod_mant >> 1);
+assign pyc_mux_807 = (pyc_extract_805 ? pyc_lshri_806 : s2_prod_mant);
+assign pyc_add_808 = (s2_prod_exp + pyc_comb_83);
+assign pyc_mux_809 = (pyc_extract_805 ? pyc_add_808 : s2_prod_exp);
+assign pyc_zext_810 = {{10{1'b0}}, pyc_mux_807};
+assign pyc_shli_811 = (pyc_zext_810 << 9);
+assign pyc_zext_812 = {{2{1'b0}}, s2_acc_mant};
+assign pyc_trunc_813 = pyc_mux_809[7:0];
+assign pyc_ult_814 = (s2_acc_exp < pyc_trunc_813);
+assign pyc_sub_815 = (pyc_trunc_813 - s2_acc_exp);
+assign pyc_sub_816 = (s2_acc_exp - pyc_trunc_813);
+assign pyc_mux_817 = (pyc_ult_814 ? pyc_sub_815 : pyc_sub_816);
+assign pyc_trunc_818 = pyc_mux_817[4:0];
+assign pyc_ult_819 = (pyc_comb_82 < pyc_mux_817);
+assign pyc_mux_820 = (pyc_ult_819 ? pyc_comb_81 : pyc_trunc_818);
+assign pyc_lshri_821 = (pyc_shli_811 >> 1);
+assign pyc_extract_822 = pyc_mux_820[0];
+assign pyc_mux_823 = (pyc_extract_822 ? pyc_lshri_821 : pyc_shli_811);
+assign pyc_lshri_824 = (pyc_mux_823 >> 2);
+assign pyc_extract_825 = pyc_mux_820[1];
+assign pyc_mux_826 = (pyc_extract_825 ? pyc_lshri_824 : pyc_mux_823);
+assign pyc_lshri_827 = (pyc_mux_826 >> 4);
+assign pyc_extract_828 = pyc_mux_820[2];
+assign pyc_mux_829 = (pyc_extract_828 ? pyc_lshri_827 : pyc_mux_826);
+assign pyc_lshri_830 = (pyc_mux_829 >> 8);
+assign pyc_extract_831 = pyc_mux_820[3];
+assign pyc_mux_832 = (pyc_extract_831 ? pyc_lshri_830 : pyc_mux_829);
+assign pyc_lshri_833 = (pyc_mux_832 >> 16);
+assign pyc_extract_834 = pyc_mux_820[4];
+assign pyc_mux_835 = (pyc_extract_834 ? pyc_lshri_833 : pyc_mux_832);
+assign pyc_mux_836 = (pyc_ult_814 ? pyc_shli_811 : pyc_mux_835);
+assign pyc_lshri_837 = (pyc_zext_812 >> 1);
+assign pyc_mux_838 = (pyc_extract_822 ? pyc_lshri_837 : pyc_zext_812);
+assign pyc_lshri_839 = (pyc_mux_838 >> 2);
+assign pyc_mux_840 = (pyc_extract_825 ? pyc_lshri_839 : pyc_mux_838);
+assign pyc_lshri_841 = (pyc_mux_840 >> 4);
+assign pyc_mux_842 = (pyc_extract_828 ? pyc_lshri_841 : pyc_mux_840);
+assign pyc_lshri_843 = (pyc_mux_842 >> 8);
+assign pyc_mux_844 = (pyc_extract_831 ? pyc_lshri_843 : pyc_mux_842);
+assign pyc_lshri_845 = (pyc_mux_844 >> 16);
+assign pyc_mux_846 = (pyc_extract_834 ? pyc_lshri_845 : pyc_mux_844);
+assign pyc_mux_847 = (pyc_ult_814 ? pyc_mux_846 : pyc_zext_812);
+assign pyc_mux_848 = (pyc_ult_814 ? pyc_trunc_813 : s2_acc_exp);
+assign pyc_xor_849 = (s2_prod_sign ^ s2_acc_sign);
+assign pyc_not_850 = (~pyc_xor_849);
+assign pyc_zext_851 = {{1{1'b0}}, pyc_mux_836};
+assign pyc_zext_852 = {{1{1'b0}}, pyc_mux_847};
+assign pyc_add_853 = (pyc_zext_851 + pyc_zext_852);
+assign pyc_trunc_854 = pyc_add_853[25:0];
+assign pyc_ult_855 = (pyc_mux_836 < pyc_mux_847);
+assign pyc_not_856 = (~pyc_ult_855);
+assign pyc_sub_857 = (pyc_mux_836 - pyc_mux_847);
+assign pyc_sub_858 = (pyc_mux_847 - pyc_mux_836);
+assign pyc_mux_859 = (pyc_not_856 ? pyc_sub_857 : pyc_sub_858);
+assign pyc_mux_860 = (pyc_not_850 ? pyc_trunc_854 : pyc_mux_859);
+assign pyc_mux_861 = (pyc_not_856 ? s2_prod_sign : s2_acc_sign);
+assign pyc_mux_862 = (pyc_not_850 ? s2_prod_sign : pyc_mux_861);
+assign pyc_mux_863 = (s2_prod_zero ? pyc_zext_812 : pyc_mux_860);
+assign pyc_mux_864 = (s2_prod_zero ? s2_acc_exp : pyc_mux_848);
+assign pyc_mux_865 = (s2_prod_zero ? s2_acc_sign : pyc_mux_862);
+assign pyc_zext_866 = {{2{1'b0}}, pyc_mux_864};
+assign pyc_comb_867 = pyc_extract_105;
+assign pyc_comb_868 = pyc_extract_106;
+assign pyc_comb_869 = pyc_eq_108;
+assign pyc_comb_870 = pyc_mux_111;
+assign pyc_comb_871 = pyc_xor_112;
+assign pyc_comb_872 = pyc_sub_116;
+assign pyc_comb_873 = pyc_or_117;
+assign pyc_comb_874 = pyc_or_373;
+assign pyc_comb_875 = pyc_or_396;
+assign pyc_comb_876 = pyc_or_425;
+assign pyc_comb_877 = pyc_or_448;
+assign pyc_comb_878 = pyc_or_804;
+assign pyc_comb_879 = pyc_mux_863;
+assign pyc_comb_880 = pyc_mux_865;
+assign pyc_comb_881 = pyc_zext_866;
+assign pyc_extract_882 = s3_result_mant[0];
+assign pyc_extract_883 = s3_result_mant[1];
+assign pyc_extract_884 = s3_result_mant[2];
+assign pyc_extract_885 = s3_result_mant[3];
+assign pyc_extract_886 = s3_result_mant[4];
+assign pyc_extract_887 = s3_result_mant[5];
+assign pyc_extract_888 = s3_result_mant[6];
+assign pyc_extract_889 = s3_result_mant[7];
+assign pyc_extract_890 = s3_result_mant[8];
+assign pyc_extract_891 = s3_result_mant[9];
+assign pyc_extract_892 = s3_result_mant[10];
+assign pyc_extract_893 = s3_result_mant[11];
+assign pyc_extract_894 = s3_result_mant[12];
+assign pyc_extract_895 = s3_result_mant[13];
+assign pyc_extract_896 = s3_result_mant[14];
+assign pyc_extract_897 = s3_result_mant[15];
+assign pyc_extract_898 = s3_result_mant[16];
+assign pyc_extract_899 = s3_result_mant[17];
+assign pyc_extract_900 = s3_result_mant[18];
+assign pyc_extract_901 = s3_result_mant[19];
+assign pyc_extract_902 = s3_result_mant[20];
+assign pyc_extract_903 = s3_result_mant[21];
+assign pyc_extract_904 = s3_result_mant[22];
+assign pyc_extract_905 = s3_result_mant[23];
+assign pyc_extract_906 = s3_result_mant[24];
+assign pyc_extract_907 = s3_result_mant[25];
+assign pyc_trunc_908 = norm_lzc_cnt[4:0];
+assign pyc_ult_909 = (pyc_comb_53 < pyc_trunc_908);
+assign pyc_ult_910 = (pyc_trunc_908 < pyc_comb_53);
+assign pyc_sub_911 = (pyc_trunc_908 - pyc_comb_53);
+assign pyc_sub_912 = (pyc_comb_53 - pyc_trunc_908);
+assign pyc_shli_913 = (s3_result_mant << 1);
+assign pyc_extract_914 = pyc_sub_911[0];
+assign pyc_mux_915 = (pyc_extract_914 ? pyc_shli_913 : s3_result_mant);
+assign pyc_shli_916 = (pyc_mux_915 << 2);
+assign pyc_extract_917 = pyc_sub_911[1];
+assign pyc_mux_918 = (pyc_extract_917 ? pyc_shli_916 : pyc_mux_915);
+assign pyc_shli_919 = (pyc_mux_918 << 4);
+assign pyc_extract_920 = pyc_sub_911[2];
+assign pyc_mux_921 = (pyc_extract_920 ? pyc_shli_919 : pyc_mux_918);
+assign pyc_shli_922 = (pyc_mux_921 << 8);
+assign pyc_extract_923 = pyc_sub_911[3];
+assign pyc_mux_924 = (pyc_extract_923 ? pyc_shli_922 : pyc_mux_921);
+assign pyc_shli_925 = (pyc_mux_924 << 16);
+assign pyc_extract_926 = pyc_sub_911[4];
+assign pyc_mux_927 = (pyc_extract_926 ? pyc_shli_925 : pyc_mux_924);
+assign pyc_lshri_928 = (s3_result_mant >> 1);
+assign pyc_extract_929 = pyc_sub_912[0];
+assign pyc_mux_930 = (pyc_extract_929 ? pyc_lshri_928 : s3_result_mant);
+assign pyc_lshri_931 = (pyc_mux_930 >> 2);
+assign pyc_extract_932 = pyc_sub_912[1];
+assign pyc_mux_933 = (pyc_extract_932 ? pyc_lshri_931 : pyc_mux_930);
+assign pyc_lshri_934 = (pyc_mux_933 >> 4);
+assign pyc_extract_935 = pyc_sub_912[2];
+assign pyc_mux_936 = (pyc_extract_935 ? pyc_lshri_934 : pyc_mux_933);
+assign pyc_lshri_937 = (pyc_mux_936 >> 8);
+assign pyc_extract_938 = pyc_sub_912[3];
+assign pyc_mux_939 = (pyc_extract_938 ? pyc_lshri_937 : pyc_mux_936);
+assign pyc_lshri_940 = (pyc_mux_939 >> 16);
+assign pyc_extract_941 = pyc_sub_912[4];
+assign pyc_mux_942 = (pyc_extract_941 ? pyc_lshri_940 : pyc_mux_939);
+assign pyc_mux_943 = (pyc_ult_910 ? pyc_mux_942 : s3_result_mant);
+assign pyc_mux_944 = (pyc_ult_909 ? pyc_mux_927 : pyc_mux_943);
+assign pyc_add_945 = (s3_result_exp + pyc_comb_52);
+assign pyc_zext_946 = {{4{1'b0}}, norm_lzc_cnt};
+assign pyc_sub_947 = (pyc_add_945 - pyc_zext_946);
+assign pyc_extract_948 = pyc_mux_944[22:0];
+assign pyc_trunc_949 = pyc_sub_947[7:0];
+assign pyc_eq_950 = (s3_result_mant == pyc_comb_51);
+assign pyc_zext_951 = {{31{1'b0}}, s3_result_sign};
+assign pyc_shli_952 = (pyc_zext_951 << 31);
+assign pyc_zext_953 = {{24{1'b0}}, pyc_trunc_949};
+assign pyc_shli_954 = (pyc_zext_953 << 23);
+assign pyc_or_955 = (pyc_shli_952 | pyc_shli_954);
+assign pyc_zext_956 = {{9{1'b0}}, pyc_extract_948};
+assign pyc_or_957 = (pyc_or_955 | pyc_zext_956);
+assign pyc_mux_958 = (pyc_eq_950 ? pyc_comb_50 : pyc_or_957);
+assign pyc_comb_959 = pyc_extract_882;
+assign pyc_comb_960 = pyc_extract_883;
+assign pyc_comb_961 = pyc_extract_884;
+assign pyc_comb_962 = pyc_extract_885;
+assign pyc_comb_963 = pyc_extract_886;
+assign pyc_comb_964 = pyc_extract_887;
+assign pyc_comb_965 = pyc_extract_888;
+assign pyc_comb_966 = pyc_extract_889;
+assign pyc_comb_967 = pyc_extract_890;
+assign pyc_comb_968 = pyc_extract_891;
+assign pyc_comb_969 = pyc_extract_892;
+assign pyc_comb_970 = pyc_extract_893;
+assign pyc_comb_971 = pyc_extract_894;
+assign pyc_comb_972 = pyc_extract_895;
+assign pyc_comb_973 = pyc_extract_896;
+assign pyc_comb_974 = pyc_extract_897;
+assign pyc_comb_975 = pyc_extract_898;
+assign pyc_comb_976 = pyc_extract_899;
+assign pyc_comb_977 = pyc_extract_900;
+assign pyc_comb_978 = pyc_extract_901;
+assign pyc_comb_979 = pyc_extract_902;
+assign pyc_comb_980 = pyc_extract_903;
+assign pyc_comb_981 = pyc_extract_904;
+assign pyc_comb_982 = pyc_extract_905;
+assign pyc_comb_983 = pyc_extract_906;
+assign pyc_comb_984 = pyc_extract_907;
+assign pyc_comb_985 = pyc_mux_958;
+assign pyc_mux_1041 = (s3_valid ? pyc_comb_985 : result_2);
+assign result_2 = pyc_reg_1042;
+assign result_valid_2 = pyc_reg_1043;
+assign s1_acc_exp = pyc_reg_989;
+assign s1_acc_mant = pyc_reg_990;
+assign s1_acc_sign = pyc_reg_988;
+assign s1_acc_zero = pyc_reg_992;
+assign s1_mul_nrows = pyc_reg_1000;
+assign s1_mul_row0 = pyc_reg_994;
+assign s1_mul_row1 = pyc_reg_995;
+assign s1_mul_row2 = pyc_reg_996;
+assign s1_mul_row3 = pyc_reg_997;
+assign s1_mul_row4 = pyc_reg_998;
+assign s1_mul_row5 = pyc_reg_999;
+assign s1_prod_exp = pyc_reg_987;
+assign s1_prod_sign = pyc_reg_986;
+assign s1_prod_zero = pyc_reg_991;
+assign s1_valid = pyc_reg_993;
+assign s2_acc_exp = pyc_reg_1005;
+assign s2_acc_mant = pyc_reg_1006;
+assign s2_acc_sign = pyc_reg_1004;
+assign s2_acc_zero = pyc_reg_1008;
+assign s2_prod_exp = pyc_reg_1003;
+assign s2_prod_mant = pyc_reg_1001;
+assign s2_prod_sign = pyc_reg_1002;
+assign s2_prod_zero = pyc_reg_1007;
+assign s2_valid = pyc_reg_1009;
+assign s3_result_exp = pyc_reg_1011;
+assign s3_result_mant = pyc_reg_1012;
+assign s3_result_sign = pyc_reg_1010;
+assign s3_valid = pyc_reg_1013;
 
 // --- Sequential primitives
-pyc_reg #(.WIDTH(1)) pyc_reg_713_inst (
+pyc_reg #(.WIDTH(4)) pyc_reg_1000_inst (
   .clk(clk),
   .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_602),
-  .init(pyc_comb_82),
-  .q(pyc_reg_713)
-);
-pyc_reg #(.WIDTH(10)) pyc_reg_714_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_603),
-  .init(pyc_comb_47),
-  .q(pyc_reg_714)
-);
-pyc_reg #(.WIDTH(8)) pyc_reg_715_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_596),
-  .init(pyc_comb_86),
-  .q(pyc_reg_715)
-);
-pyc_reg #(.WIDTH(8)) pyc_reg_716_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_597),
-  .init(pyc_comb_86),
-  .q(pyc_reg_716)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_717_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_598),
-  .init(pyc_comb_82),
-  .q(pyc_reg_717)
-);
-pyc_reg #(.WIDTH(8)) pyc_reg_718_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_599),
-  .init(pyc_comb_86),
-  .q(pyc_reg_718)
-);
-pyc_reg #(.WIDTH(24)) pyc_reg_719_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_601),
-  .init(pyc_comb_84),
-  .q(pyc_reg_719)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_720_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_604),
-  .init(pyc_comb_82),
-  .q(pyc_reg_720)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_721_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_600),
-  .init(pyc_comb_82),
-  .q(pyc_reg_721)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_722_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(valid_in),
-  .init(pyc_comb_82),
-  .q(pyc_reg_722)
-);
-pyc_reg #(.WIDTH(16)) pyc_reg_723_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_605),
-  .init(pyc_comb_46),
-  .q(pyc_reg_723)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_724_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_prod_sign),
-  .init(pyc_comb_82),
-  .q(pyc_reg_724)
-);
-pyc_reg #(.WIDTH(10)) pyc_reg_725_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_prod_exp),
-  .init(pyc_comb_47),
-  .q(pyc_reg_725)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_726_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_acc_sign),
-  .init(pyc_comb_82),
-  .q(pyc_reg_726)
-);
-pyc_reg #(.WIDTH(8)) pyc_reg_727_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_acc_exp),
-  .init(pyc_comb_86),
-  .q(pyc_reg_727)
-);
-pyc_reg #(.WIDTH(24)) pyc_reg_728_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_acc_mant),
-  .init(pyc_comb_84),
-  .q(pyc_reg_728)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_729_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_prod_zero),
-  .init(pyc_comb_82),
-  .q(pyc_reg_729)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_730_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_acc_zero),
-  .init(pyc_comb_82),
-  .q(pyc_reg_730)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_731_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s1_valid),
-  .init(pyc_comb_82),
-  .q(pyc_reg_731)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_732_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_607),
-  .init(pyc_comb_82),
-  .q(pyc_reg_732)
-);
-pyc_reg #(.WIDTH(10)) pyc_reg_733_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_608),
-  .init(pyc_comb_47),
-  .q(pyc_reg_733)
-);
-pyc_reg #(.WIDTH(26)) pyc_reg_734_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_comb_606),
-  .init(pyc_comb_49),
-  .q(pyc_reg_734)
-);
-pyc_reg #(.WIDTH(1)) pyc_reg_735_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(s2_valid),
-  .init(pyc_comb_82),
-  .q(pyc_reg_735)
-);
-pyc_reg #(.WIDTH(32)) pyc_reg_764_inst (
-  .clk(clk),
-  .rst(rst),
-  .en(pyc_comb_85),
-  .d(pyc_mux_763),
+  .en(pyc_comb_89),
+  .d(pyc_comb_84),
   .init(pyc_comb_48),
-  .q(pyc_reg_764)
+  .q(pyc_reg_1000)
 );
-pyc_reg #(.WIDTH(1)) pyc_reg_765_inst (
+pyc_reg #(.WIDTH(16)) pyc_reg_1001_inst (
   .clk(clk),
   .rst(rst),
-  .en(pyc_comb_85),
+  .en(pyc_comb_89),
+  .d(pyc_comb_878),
+  .init(pyc_comb_85),
+  .q(pyc_reg_1001)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1002_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_prod_sign),
+  .init(pyc_comb_86),
+  .q(pyc_reg_1002)
+);
+pyc_reg #(.WIDTH(10)) pyc_reg_1003_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_prod_exp),
+  .init(pyc_comb_49),
+  .q(pyc_reg_1003)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1004_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_acc_sign),
+  .init(pyc_comb_86),
+  .q(pyc_reg_1004)
+);
+pyc_reg #(.WIDTH(8)) pyc_reg_1005_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_acc_exp),
+  .init(pyc_comb_90),
+  .q(pyc_reg_1005)
+);
+pyc_reg #(.WIDTH(24)) pyc_reg_1006_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_acc_mant),
+  .init(pyc_comb_88),
+  .q(pyc_reg_1006)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1007_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_prod_zero),
+  .init(pyc_comb_86),
+  .q(pyc_reg_1007)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1008_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_acc_zero),
+  .init(pyc_comb_86),
+  .q(pyc_reg_1008)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1009_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s1_valid),
+  .init(pyc_comb_86),
+  .q(pyc_reg_1009)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1010_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_880),
+  .init(pyc_comb_86),
+  .q(pyc_reg_1010)
+);
+pyc_reg #(.WIDTH(10)) pyc_reg_1011_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_881),
+  .init(pyc_comb_49),
+  .q(pyc_reg_1011)
+);
+pyc_reg #(.WIDTH(26)) pyc_reg_1012_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_879),
+  .init(pyc_comb_51),
+  .q(pyc_reg_1012)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1013_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(s2_valid),
+  .init(pyc_comb_86),
+  .q(pyc_reg_1013)
+);
+pyc_reg #(.WIDTH(32)) pyc_reg_1042_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_mux_1041),
+  .init(pyc_comb_50),
+  .q(pyc_reg_1042)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_1043_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
   .d(s3_valid),
-  .init(pyc_comb_82),
-  .q(pyc_reg_765)
+  .init(pyc_comb_86),
+  .q(pyc_reg_1043)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_986_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_871),
+  .init(pyc_comb_86),
+  .q(pyc_reg_986)
+);
+pyc_reg #(.WIDTH(10)) pyc_reg_987_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_872),
+  .init(pyc_comb_49),
+  .q(pyc_reg_987)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_988_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_867),
+  .init(pyc_comb_86),
+  .q(pyc_reg_988)
+);
+pyc_reg #(.WIDTH(8)) pyc_reg_989_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_868),
+  .init(pyc_comb_90),
+  .q(pyc_reg_989)
+);
+pyc_reg #(.WIDTH(24)) pyc_reg_990_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_870),
+  .init(pyc_comb_88),
+  .q(pyc_reg_990)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_991_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_873),
+  .init(pyc_comb_86),
+  .q(pyc_reg_991)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_992_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_869),
+  .init(pyc_comb_86),
+  .q(pyc_reg_992)
+);
+pyc_reg #(.WIDTH(1)) pyc_reg_993_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(valid_in),
+  .init(pyc_comb_86),
+  .q(pyc_reg_993)
+);
+pyc_reg #(.WIDTH(16)) pyc_reg_994_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_874),
+  .init(pyc_comb_85),
+  .q(pyc_reg_994)
+);
+pyc_reg #(.WIDTH(16)) pyc_reg_995_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_875),
+  .init(pyc_comb_85),
+  .q(pyc_reg_995)
+);
+pyc_reg #(.WIDTH(16)) pyc_reg_996_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_876),
+  .init(pyc_comb_85),
+  .q(pyc_reg_996)
+);
+pyc_reg #(.WIDTH(16)) pyc_reg_997_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_877),
+  .init(pyc_comb_85),
+  .q(pyc_reg_997)
+);
+pyc_reg #(.WIDTH(16)) pyc_reg_998_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_85),
+  .init(pyc_comb_85),
+  .q(pyc_reg_998)
+);
+pyc_reg #(.WIDTH(16)) pyc_reg_999_inst (
+  .clk(clk),
+  .rst(rst),
+  .en(pyc_comb_89),
+  .d(pyc_comb_85),
+  .init(pyc_comb_85),
+  .q(pyc_reg_999)
 );
 
 assign result = result_2;

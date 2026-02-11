@@ -321,12 +321,135 @@ def unsigned_multiplier(domain, a, b, a_width, b_width, name="umul"):
     )
 
     # Recombine bits
-    result = product_bits[0].zext(width=result_width)
-    for i in range(1, result_width):
-        bit_shifted = product_bits[i].zext(width=result_width) << i
-        result = result | bit_shifted
-
+    result = _recombine_bits(product_bits, result_width)
     return result, pp_depth + tree_depth
+
+
+def _recombine_bits(bits, width):
+    """Pack a list of 1-bit signals into a single N-bit signal."""
+    result = bits[0].zext(width=width)
+    for i in range(1, min(len(bits), width)):
+        bit_shifted = bits[i].zext(width=width) << i
+        result = result | bit_shifted
+    return result
+
+
+# ── Split multiplier (for cross-pipeline-stage multiply) ─────
+
+def multiplier_pp_and_partial_reduce(domain, a, b, a_width, b_width,
+                                     csa_rounds=2, name="umul"):
+    """Stage A of a split multiplier: generate partial products and
+    run *csa_rounds* levels of 3:2 compression.
+
+    Returns:
+        packed_rows: list of CycleAwareSignal (each result_width bits)
+                     — intermediate carry-save rows, packed for pipeline regs
+        depth:       combinational depth of this stage
+    """
+    result_width = a_width + b_width
+    c = lambda v, w: domain.const(v, width=w)
+    zero = c(0, 1)
+
+    a_bits = [a[i] for i in range(a_width)]
+    b_bits = [b[i] for i in range(b_width)]
+
+    pp_rows, _ = partial_product_array(a_bits, b_bits)
+    depth = 1  # AND gates
+
+    # Expand to column-aligned bit arrays
+    rows = []
+    for bits, shift in pp_rows:
+        padded = [None] * shift + list(bits) + [None] * (result_width - shift - len(bits))
+        padded = padded[:result_width]
+        rows.append(padded)
+    for r in range(len(rows)):
+        for col in range(result_width):
+            if rows[r][col] is None:
+                rows[r][col] = zero
+
+    # Run csa_rounds of 3:2 compression
+    for _round in range(csa_rounds):
+        if len(rows) <= 2:
+            break
+        new_rows = []
+        i = 0
+        round_depth = 0
+        while i + 2 < len(rows):
+            s_row, c_row_out, d = compress_3to2(rows[i], rows[i+1], rows[i+2])
+            c_shifted = [zero] + c_row_out
+            while len(s_row) < result_width: s_row.append(zero)
+            while len(c_shifted) < result_width: c_shifted.append(zero)
+            new_rows.append(s_row[:result_width])
+            new_rows.append(c_shifted[:result_width])
+            round_depth = max(round_depth, d)
+            i += 3
+        while i < len(rows):
+            new_rows.append(rows[i])
+            i += 1
+        depth += round_depth
+        rows = new_rows
+
+    # Pack each row into a single result_width-bit signal
+    packed = []
+    for row in rows:
+        packed.append(_recombine_bits(row, result_width))
+
+    return packed, depth
+
+
+def multiplier_complete_reduce(domain, packed_rows, result_width, name="umul"):
+    """Stage B of a split multiplier: finish compression and final addition.
+
+    Args:
+        packed_rows: list of CycleAwareSignal (each result_width bits)
+                     from multiplier_pp_and_partial_reduce
+        result_width: product bit width
+
+    Returns:
+        (product, depth)
+    """
+    c = lambda v, w: domain.const(v, width=w)
+    zero = c(0, 1)
+
+    # Unpack rows back to bit arrays
+    rows = []
+    for packed in packed_rows:
+        rows.append([packed[i] for i in range(result_width)])
+
+    depth = 0
+
+    # Continue 3:2 compression until 2 rows
+    while len(rows) > 2:
+        new_rows = []
+        i = 0
+        round_depth = 0
+        while i + 2 < len(rows):
+            s_row, c_row_out, d = compress_3to2(rows[i], rows[i+1], rows[i+2])
+            c_shifted = [zero] + c_row_out
+            while len(s_row) < result_width: s_row.append(zero)
+            while len(c_shifted) < result_width: c_shifted.append(zero)
+            new_rows.append(s_row[:result_width])
+            new_rows.append(c_shifted[:result_width])
+            round_depth = max(round_depth, d)
+            i += 3
+        while i < len(rows):
+            new_rows.append(rows[i])
+            i += 1
+        depth += round_depth
+        rows = new_rows
+
+    # Final carry-select addition
+    if len(rows) == 2:
+        sum_bits, _, final_depth = carry_select_adder(
+            domain, rows[0], rows[1], zero, name=f"{name}_final")
+        depth += final_depth
+        product = _recombine_bits(sum_bits, result_width)
+    elif len(rows) == 1:
+        product = _recombine_bits(rows[0], result_width)
+    else:
+        product = c(0, result_width)
+
+    return product, depth
 
 
 # ═══════════════════════════════════════════════════════════════════

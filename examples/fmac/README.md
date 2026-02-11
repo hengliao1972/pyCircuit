@@ -19,27 +19,28 @@ acc_out (FP32) = acc_in (FP32) + a (BF16) × b (BF16)
 ## 4-Stage Pipeline — Critical Path Summary
 
 ```
-  Stage 1: Unpack + Exp Add        depth =  8  ████
-  Stage 2: 8x8 Multiply (Wallace)  depth = 28  ██████████████
-  Stage 3: Align + Add             depth = 21  ██████████
-  Stage 4: Normalize + Pack        depth = 31  ███████████████
+  Stage 1: Unpack + PP + 2×CSA    depth = 13  ██████
+  Stage 2: Complete Multiply       depth = 22  ███████████
+  Stage 3: Align + Add            depth = 21  ██████████
+  Stage 4: Normalize + Pack       depth = 31  ███████████████
   ──────────────────────────────────────────────
-  Total combinational depth        depth =  88
-  Max stage (critical path)        depth =  31
+  Total combinational depth       depth = 87
+  Max stage (critical path)       depth = 31
 ```
 
 | Stage | Function | Depth | Key Components |
 |-------|----------|------:|----------------|
-| 1 | Unpack BF16 operands, exponent addition | 8 | Bit extract, MUX (implicit 1), 10-bit RCA |
-| 2 | 8×8 mantissa multiply | 28 | AND partial products, 3:2 CSA Wallace tree, **carry-select final adder** |
+| 1 | Unpack BF16, exp add, **PP generation + 2 CSA rounds** | 13 | Bit extract, MUX, 10-bit RCA, AND array, 2× 3:2 CSA |
+| 2 | Complete multiply (remaining CSA + carry-select final add) | 22 | 3:2 CSA rounds, 16-bit carry-select adder |
 | 3 | Align exponents, add/sub mantissas | 21 | Exponent compare, 5-level barrel shift, 26-bit RCA, magnitude compare |
 | 4 | Normalize, pack FP32 | 31 | 26-bit LZC (priority MUX), 5-level barrel shift left/right, exponent adjust |
 
-**Pipeline balance**: The carry-select adder (splitting the 16-bit final
-addition into two 8-bit halves computed in parallel) reduced Stage 2 from
-depth 46 to 28.  Combined with accurate per-round depth tracking in the
-Wallace tree (parallel CSAs share the same depth level), the pipeline is
-now well-balanced with the critical path in Stage 4 (depth 31).
+**Pipeline balance**: The 8×8 multiplier is split across Stages 1 and 2.
+Stage 1 generates partial products (AND gate array) and runs 2 rounds of
+3:2 carry-save compression, reducing 8 rows to ~4.  The intermediate
+carry-save rows are stored in pipeline registers.  Stage 2 completes the
+reduction and uses a carry-select adder for the final addition.  This
+achieves good balance: **13 / 22 / 21 / 31** (critical path in Stage 4).
 
 ## Design Hierarchy
 
