@@ -54,7 +54,7 @@ LINK_BW_GBPS     = 112      # Gbps per link
 HBM_BW_TBPS      = 4.0      # Tbps HBM per NPU
 PKT_TIME_NS      = PKT_SIZE * 8 / LINK_BW_GBPS  # ~36.6 ns
 HBM_INJECT_PROB  = min(1.0, HBM_BW_TBPS * 1000 / LINK_BW_GBPS / N_NPUS)
-INJECT_BATCH     = 32     # high injection to stress switch (amplify VOQ collision)
+INJECT_BATCH     = 8      # ~8 pkt/cycle/NPU ≈ SW capacity (128 ports / 16 NPUs)
 FIFO_DEPTH       = 64
 VOQ_DEPTH        = 32
 SIM_CYCLES       = 3000
@@ -210,24 +210,26 @@ class SW5809s:
         return False
 
     def schedule(self):
-        """Each output port independently serves up to pkts_per_port packets."""
+        """Crossbar scheduling: each egress port independently arbitrates
+        to select exactly 1 packet per cycle from all input-port VOQs.
+
+        128 egress ports × 1 pkt/cycle = 128 pkt/cycle max throughput.
+        Round-robin arbiter per egress port scans across 128 input ports.
+        """
         delivered = []
         for out_port in range(self.n_ports):
             dest_npu = out_port // self.ports_per_npu
-            served = 0
+            # Round-robin: pick 1 packet from any input port's VOQ
             for offset in range(self.n_ports):
-                if served >= self.pkts_per_port:
-                    break
                 in_port = (self.rr[out_port] + offset) % self.n_ports
                 if in_port // self.ports_per_npu == dest_npu:
-                    continue
+                    continue  # skip loopback
                 if self.voqs[in_port][out_port]:
                     pkt = self.voqs[in_port][out_port].popleft()
+                    self.rr[out_port] = (in_port + 1) % self.n_ports
                     self.pkts_switched += 1
                     delivered.append((dest_npu, pkt))
-                    served += 1
-            if served > 0:
-                self.rr[out_port] = (self.rr[out_port] + served) % self.n_ports
+                    break  # exactly 1 per egress port per cycle
         return delivered
 
     def occupancy(self):
