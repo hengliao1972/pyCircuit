@@ -44,7 +44,11 @@ def clear(): sys.stdout.write("\033[2J\033[H"); sys.stdout.flush()
 # ═══════════════════════════════════════════════════════════════════
 N_NPUS           = 16
 FM_LINKS_PER_PAIR = 4       # FM16: 4 links per NPU pair
-SW_LINKS_PER_NPU = 32      # SW16: 32 links from each NPU to the switch
+SW_LINKS_PER_NPU = 32      # SW16: 32 links from each NPU to the switch (8×4)
+SW_XBAR_LINKS    = 512     # SW5809s: 512×512 physical links (112Gbps each)
+SW_LINKS_PER_PORT = 4      # 4 links bundled as 1 logical port
+SW_XBAR_PORTS    = SW_XBAR_LINKS // SW_LINKS_PER_PORT  # 128 logical ports
+SW_PORTS_PER_NPU = SW_LINKS_PER_NPU // SW_LINKS_PER_PORT  # 8 logical ports per NPU
 PKT_SIZE         = 512      # bytes
 LINK_BW_GBPS     = 112      # Gbps per link
 HBM_BW_TBPS      = 4.0      # Tbps HBM per NPU
@@ -114,35 +118,94 @@ class NPUNode:
 # SW5809s Switch (behavioral — VOQ + crossbar + round-robin)
 # ═══════════════════════════════════════════════════════════════════
 class SW5809s:
-    def __init__(self, n_ports):
-        self.n_ports = n_ports
-        self.voqs = [[collections.deque(maxlen=VOQ_DEPTH) for _ in range(n_ports)]
-                     for _ in range(n_ports)]
-        self.rr = [0] * n_ports
+    """SW5809s: 512×512 link crossbar, 128×128 logical port crossbar.
+
+    Physical: 512 input links × 512 output links (each 112 Gbps).
+    Logical:  every 4 links are bundled into 1 port → 128 input × 128 output ports.
+    Each logical port is independently arbitrated and can transfer
+    SW_LINKS_PER_PORT (4) packets per cycle (one per physical link).
+
+    NPU mapping: each NPU uses SW_PORTS_PER_NPU (8) logical ports.
+      NPU i → input/output ports [i*8 .. i*8+7].
+
+    VOQ: per (input_port, dest_port) — 128 × 128 = 16384 queues.
+    Arbiter: each output port independently selects from input VOQs via
+    round-robin (simplified MDRR).
+
+    ECMP: packets for NPU j are distributed across j's 8 output ports
+    via round-robin at the input stage.
+    """
+
+    def __init__(self):
+        self.n_ports = SW_XBAR_PORTS  # 128
+        self.ports_per_npu = SW_PORTS_PER_NPU  # 8
+        self.pkts_per_port = SW_LINKS_PER_PORT  # 4 pkt/cycle per logical port
+
+        # VOQ[in_port][out_port] — only allocate for reachable destinations
+        self.voqs = [[collections.deque(maxlen=VOQ_DEPTH)
+                      for _ in range(self.n_ports)]
+                     for _ in range(self.n_ports)]
+        # Round-robin per output port
+        self.rr = [0] * self.n_ports
+        # ECMP RR per (input_npu, dest_npu) for distributing across dest ports
+        self.ecmp_rr = [[0] * N_NPUS for _ in range(N_NPUS)]
         self.pkts_switched = 0
 
-    def enqueue(self, in_port, pkt):
-        out_port = pkt.dst  # direct dst → output port mapping
-        if out_port < self.n_ports and len(self.voqs[in_port][out_port]) < VOQ_DEPTH:
-            self.voqs[in_port][out_port].append(pkt)
+    def npu_to_ports(self, npu_id):
+        """Return range of logical port indices for a given NPU."""
+        base = npu_id * self.ports_per_npu
+        return range(base, base + self.ports_per_npu)
+
+    def enqueue(self, src_npu, pkt):
+        """Enqueue packet from src_npu. ECMP across dest NPU's output ports."""
+        dst_npu = pkt.dst
+        if dst_npu == src_npu or dst_npu >= N_NPUS:
+            return False
+
+        # Pick input port: round-robin across src NPU's ports
+        src_ports = self.npu_to_ports(src_npu)
+        # Pick output port: ECMP round-robin across dest NPU's ports
+        dst_ports = self.npu_to_ports(dst_npu)
+        ecmp_idx = self.ecmp_rr[src_npu][dst_npu]
+        out_port = dst_ports[ecmp_idx % self.ports_per_npu]
+        self.ecmp_rr[src_npu][dst_npu] = (ecmp_idx + 1) % self.ports_per_npu
+
+        # Pick input port with least queuing
+        best_in = min(src_ports, key=lambda p: len(self.voqs[p][out_port]))
+        if len(self.voqs[best_in][out_port]) < VOQ_DEPTH:
+            self.voqs[best_in][out_port].append(pkt)
             return True
         return False
 
     def schedule(self):
-        """Round-robin crossbar: one pkt per output per cycle."""
-        results = [None] * self.n_ports
-        for j in range(self.n_ports):
+        """Crossbar scheduling: each output port serves up to
+        SW_LINKS_PER_PORT (4) packets per cycle.
+
+        Returns list of (dest_npu, pkt).
+        """
+        delivered = []
+
+        for out_port in range(self.n_ports):
+            dest_npu = out_port // self.ports_per_npu
+            served = 0
             for offset in range(self.n_ports):
-                i = (self.rr[j] + offset) % self.n_ports
-                if self.voqs[i][j]:
-                    results[j] = self.voqs[i][j].popleft()
-                    self.rr[j] = (i + 1) % self.n_ports
-                    self.pkts_switched += 1
+                if served >= self.pkts_per_port:
                     break
-        return results
+                in_port = (self.rr[out_port] + offset) % self.n_ports
+                in_npu = in_port // self.ports_per_npu
+                if in_npu == dest_npu:
+                    continue
+                if self.voqs[in_port][out_port]:
+                    pkt = self.voqs[in_port][out_port].popleft()
+                    self.pkts_switched += 1
+                    delivered.append((dest_npu, pkt))
+                    served += 1
+            if served > 0:
+                self.rr[out_port] = (self.rr[out_port] + served) % self.n_ports
+
+        return delivered
 
     def occupancy(self):
-        """Total packets buffered in all VOQs."""
         return sum(len(self.voqs[i][j])
                    for i in range(self.n_ports) for j in range(self.n_ports))
 
@@ -189,50 +252,49 @@ class FM16System:
 class SW16System:
     def __init__(self):
         self.npus = [NPUNode(i, N_NPUS) for i in range(N_NPUS)]
-        self.switch = SW5809s(N_NPUS)
+        self.switch = SW5809s()
         self.cycle = 0
         self.rng = random.Random(42)
-        # Packets in flight: NPU→switch and switch→NPU
-        self._to_switch: list[tuple[int, int, Packet]] = []  # (arrive, in_port, pkt)
+        self._to_switch: list[tuple[int, int, Packet]] = []  # (arrive, src_npu, pkt)
         self._to_npu:    list[tuple[int, Packet]] = []        # (arrive, pkt)
 
     def step(self):
         for npu in self.npus:
             npu.inject(self.cycle, self.rng)
 
-        # NPU → switch (up to SW_LINKS_PER_NPU / (N_NPUS-1) pkts per port per cycle)
-        links_per_dst = max(1, SW_LINKS_PER_NPU // (N_NPUS - 1))
+        # NPU → switch: each NPU can push up to SW_LINKS_PER_NPU pkts/cycle
         for npu in self.npus:
+            sent = 0
             for port in range(N_NPUS):
-                for _ in range(links_per_dst):
+                while sent < SW_LINKS_PER_NPU:
                     pkt = npu.tx(port)
                     if pkt is None: break
                     if pkt.dst == npu.id: continue
                     self._to_switch.append((self.cycle + SW_LINK_LATENCY, npu.id, pkt))
+                    sent += 1
 
-        # Deliver to switch input ports
-        keep_sw = []
-        for (t, inp, pkt) in self._to_switch:
+        # Deliver to switch
+        keep = []
+        for (t, src, pkt) in self._to_switch:
             if t <= self.cycle:
-                self.switch.enqueue(inp, pkt)
+                self.switch.enqueue(src, pkt)
             else:
-                keep_sw.append((t, inp, pkt))
-        self._to_switch = keep_sw
+                keep.append((t, src, pkt))
+        self._to_switch = keep
 
-        # Switch crossbar scheduling
-        winners = self.switch.schedule()
-        for pkt in winners:
-            if pkt is not None:
-                self._to_npu.append((self.cycle + SW_XBAR_LATENCY + SW_LINK_LATENCY, pkt))
+        # Switch crossbar: 128 ports × 4 pkt/port = up to 512 pkt/cycle
+        delivered = self.switch.schedule()
+        for (dst_npu, pkt) in delivered:
+            self._to_npu.append((self.cycle + SW_XBAR_LATENCY + SW_LINK_LATENCY, pkt))
 
-        # Deliver from switch to destination NPU
-        keep_npu = []
+        # Deliver to destination NPU
+        keep2 = []
         for (t, pkt) in self._to_npu:
             if t <= self.cycle:
                 self.npus[pkt.dst].rx(pkt, self.cycle)
             else:
-                keep_npu.append((t, pkt))
-        self._to_npu = keep_npu
+                keep2.append((t, pkt))
+        self._to_npu = keep2
 
         self.cycle += 1
 
@@ -323,8 +385,8 @@ def draw(fm, sw, cycle):
     # Headers
     print(_side(f"{BOLD}{YELLOW}FM16 (Full Mesh){RESET}",
                 f"{BOLD}{MAGENTA}SW16 (Switch){RESET}"))
-    print(_side(f"{DIM}4 links/pair, direct{RESET}",
-                f"{DIM}{SW_LINKS_PER_NPU} links/NPU→SW, VOQ+xbar{RESET}"))
+    print(_side(f"{DIM}4 links/pair, 1 hop{RESET}",
+                f"{DIM}{SW_XBAR_LINKS}×{SW_XBAR_LINKS} xbar, {SW_LINKS_PER_PORT}link/port, 2 hop{RESET}"))
     print(_bl(f"  {'─' * COL_W} │ {'─' * COL_W}"))
 
     # Bandwidth (per NPU)
@@ -429,17 +491,19 @@ def main():
     print(f"  {'Max Latency':24s} {sf['max_lat']:>15d} {ss['max_lat']:>15d}")
     print(f"  {'Delivered pkts':24s} {sf['del']:>15d} {ss['del']:>15d}")
     print()
-    fm_cap = FM_LINKS_PER_PAIR * (N_NPUS - 1)  # pkt/cycle per NPU
-    sw_cap = N_NPUS  # total switch output pkt/cycle (shared by all NPUs)
-    sw_per_npu = sw_cap / N_NPUS  # per NPU
+    fm_cap = FM_LINKS_PER_PAIR * (N_NPUS - 1)  # pkt/cycle per NPU (mesh)
+    sw_out_ports = SW_PORTS_PER_NPU  # output ports per dest NPU in switch
+    sw_per_npu = sw_out_ports * SW_LINKS_PER_PORT  # pkt/cycle to each NPU
+    sw_total = SW_XBAR_PORTS * SW_LINKS_PER_PORT  # total switch pkt/cycle
     ratio_pct = sw_per_npu / fm_cap * 100
-    print(f"  {YELLOW}Why is SW16 bandwidth much lower?{RESET}")
-    print(f"    FM16 mesh:  each NPU has {N_NPUS-1} × {FM_LINKS_PER_PAIR} = {fm_cap} direct links")
-    print(f"                → {fm_cap} pkt/cycle per NPU = {fm_cap * LINK_BW_GBPS} Gbps")
-    print(f"    SW16 xbar:  {N_NPUS} output ports × 1 pkt/cycle = {sw_cap} pkt/cycle total")
-    print(f"                → {sw_per_npu:.0f} pkt/cycle per NPU = {sw_per_npu * LINK_BW_GBPS:.0f} Gbps")
-    print(f"    SW16 per-NPU capacity is only {ratio_pct:.1f}% of FM16!")
-    print(f"    Bottleneck: switch crossbar can only serve 1 pkt per output per cycle.")
+    print(f"  {YELLOW}Topology analysis:{RESET}")
+    print(f"    FM16 mesh:  {N_NPUS-1} pairs × {FM_LINKS_PER_PAIR} links = {fm_cap} links/NPU")
+    print(f"                → {fm_cap * LINK_BW_GBPS} Gbps per NPU")
+    print(f"    SW5809s:    {SW_XBAR_LINKS}×{SW_XBAR_LINKS} links, {SW_XBAR_PORTS}×{SW_XBAR_PORTS} ports")
+    print(f"                {SW_LINKS_PER_PORT} links/port, {SW_PORTS_PER_NPU} ports/NPU")
+    print(f"                → {sw_per_npu} pkt/cycle to each dest NPU = {sw_per_npu * LINK_BW_GBPS} Gbps")
+    print(f"                Total switch capacity: {sw_total} pkt/cycle = {sw_total * LINK_BW_GBPS} Gbps")
+    print(f"    SW16/FM16 per-NPU capacity ratio: {ratio_pct:.1f}%")
     print()
 
 
