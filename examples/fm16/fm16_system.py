@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FM16 System Simulator — 16 NPU full-mesh + SW5809s switch.
+FM16 vs SW16 System Comparison Simulator.
 
-Behavioral cycle-accurate simulation of:
-  - 16 Ascend950-like NPU nodes (1.6Tbps HBM, 18×4×112Gbps UB)
-  - Full mesh topology: 4 links per NPU pair (16×15/2 = 120 link pairs)
-  - SW5809s: 16×8×112Gbps, VOQ + crossbar + RR/MDRR
-  - All-to-all continuous 512B packet traffic
+Compares two 16-NPU topologies side-by-side:
 
-Each "cycle" = 1 packet slot (time for one 512B packet on one link).
+  FM16: Full Mesh — 4 direct links between every NPU pair
+        (16×15/2 = 120 bidirectional link-pairs, 480 total links)
+        Each pair: 4 × 112 Gbps = 448 Gbps
+
+  SW16: Star via SW5809s — each NPU connects to a central switch
+        with 8×4 = 32 links (simplified to SW_LINKS_PER_NPU).
+        Switch: VOQ + crossbar + round-robin (MDRR).
+        Path: NPU → switch → NPU  (2 hops)
+
+Both run all-to-all continuous 512B packet traffic from 4Tbps HBM.
 
 Usage:
     python examples/fm16/fm16_system.py
@@ -35,27 +40,25 @@ def _pad(s, w): return s + ' ' * max(0, w - _vl(s))
 def clear(): sys.stdout.write("\033[2J\033[H"); sys.stdout.flush()
 
 # ═══════════════════════════════════════════════════════════════════
-# System parameters
+# Parameters
 # ═══════════════════════════════════════════════════════════════════
-N_NPUS        = 16
-MESH_LINKS    = 4       # links per NPU pair in full mesh
-SW_LINKS      = 4       # links per NPU to switch (simplified from 8×4)
-PKT_SIZE      = 512     # bytes
-LINK_BW_GBPS  = 112     # Gbps per link
-HBM_BW_TBPS   = 1.6     # Tbps HBM bandwidth per NPU
+N_NPUS           = 16
+FM_LINKS_PER_PAIR = 4       # FM16: 4 links per NPU pair
+SW_LINKS_PER_NPU = 32      # SW16: 32 links from each NPU to the switch
+PKT_SIZE         = 512      # bytes
+LINK_BW_GBPS     = 112      # Gbps per link
+HBM_BW_TBPS      = 4.0      # Tbps HBM per NPU
+PKT_TIME_NS      = PKT_SIZE * 8 / LINK_BW_GBPS  # ~36.6 ns
+HBM_INJECT_PROB  = min(1.0, HBM_BW_TBPS * 1000 / LINK_BW_GBPS / N_NPUS)
+INJECT_BATCH     = 8
+FIFO_DEPTH       = 64
+VOQ_DEPTH        = 32
+SIM_CYCLES       = 3000
+DISPLAY_INTERVAL = 150
 
-# Derived: packet time on one link (ns)
-PKT_TIME_NS   = PKT_SIZE * 8 / LINK_BW_GBPS  # ~36.6 ns
-# HBM injection rate: packets per link-time
-HBM_PKTS_PER_SLOT = HBM_BW_TBPS * 1000 / (PKT_SIZE * 8 / PKT_TIME_NS)
-# Simplification: HBM can inject ~1 pkt/slot per destination on average
-HBM_INJECT_PROB = min(1.0, HBM_BW_TBPS * 1000 / LINK_BW_GBPS / N_NPUS)
-
-VOQ_DEPTH     = 64      # per VOQ in switch
-FIFO_DEPTH    = 32      # per output FIFO in NPU
-SIM_CYCLES    = 2000    # total simulation cycles
-DISPLAY_INTERVAL = 100  # update display every N cycles
-WARMUP_CYCLES = 200     # ignore first N cycles for stats
+FM_LINK_LATENCY  = 3        # direct mesh: 3 cycle pipeline
+SW_LINK_LATENCY  = 2        # NPU→switch or switch→NPU: 2 cycles each
+SW_XBAR_LATENCY  = 1        # switch internal crossbar: 1 cycle
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -67,295 +70,310 @@ class Packet:
     dst: int
     seq: int
     inject_cycle: int
-
-    def latency(self, current_cycle: int) -> int:
-        return current_cycle - self.inject_cycle
+    def latency(self, now): return now - self.inject_cycle
 
 
 # ═══════════════════════════════════════════════════════════════════
-# NPU Node (behavioral)
+# NPU Node (shared by both topologies)
 # ═══════════════════════════════════════════════════════════════════
 class NPUNode:
-    """Simplified NPU with HBM injection and output port FIFOs."""
-
-    def __init__(self, node_id: int, n_ports: int):
-        self.id = node_id
+    def __init__(self, nid, n_ports):
+        self.id = nid
         self.n_ports = n_ports
-        self.out_fifos: list[collections.deque] = [
-            collections.deque(maxlen=FIFO_DEPTH) for _ in range(n_ports)
-        ]
+        self.out_fifos = [collections.deque(maxlen=FIFO_DEPTH) for _ in range(n_ports)]
         self.seq = 0
         self.pkts_injected = 0
         self.pkts_delivered = 0
         self.latencies: list[int] = []
 
-    def inject(self, cycle: int, rng: random.Random):
-        """Try to inject all-to-all packets from HBM.
-
-        Injects up to INJECT_BATCH packets per cycle to multiple destinations,
-        modeling the high HBM bandwidth trying to saturate the mesh links.
-        """
-        INJECT_BATCH = 8  # try to inject multiple pkts/cycle (HBM is fast)
+    def inject(self, cycle, rng):
         for _ in range(INJECT_BATCH):
             if rng.random() > HBM_INJECT_PROB:
                 continue
-            # Pick a random destination (not self)
             dst = self.id
             while dst == self.id:
                 dst = rng.randint(0, N_NPUS - 1)
-            pkt = Packet(src=self.id, dst=dst, seq=self.seq, inject_cycle=cycle)
+            pkt = Packet(self.id, dst, self.seq, cycle)
             self.seq += 1
-
-            # Route to output port
             port = dst % self.n_ports
             if len(self.out_fifos[port]) < FIFO_DEPTH:
                 self.out_fifos[port].append(pkt)
                 self.pkts_injected += 1
 
-    def tx(self, port: int) -> Packet | None:
-        """Transmit one packet from output port (if available)."""
+    def tx(self, port):
         if self.out_fifos[port]:
             return self.out_fifos[port].popleft()
         return None
 
-    def rx(self, pkt: Packet, cycle: int):
-        """Receive a packet (delivered to this NPU)."""
+    def rx(self, pkt, cycle):
         self.pkts_delivered += 1
-        lat = pkt.latency(cycle)
-        self.latencies.append(lat)
+        self.latencies.append(pkt.latency(cycle))
 
 
 # ═══════════════════════════════════════════════════════════════════
-# SW5809s Switch (behavioral)
+# SW5809s Switch (behavioral — VOQ + crossbar + round-robin)
 # ═══════════════════════════════════════════════════════════════════
 class SW5809s:
-    """Simplified switch: VOQ + crossbar + round-robin arbiter."""
-
-    def __init__(self, n_ports: int):
+    def __init__(self, n_ports):
         self.n_ports = n_ports
-        # VOQ[input][output] = deque
-        self.voqs: list[list[collections.deque]] = [
-            [collections.deque(maxlen=VOQ_DEPTH) for _ in range(n_ports)]
-            for _ in range(n_ports)
-        ]
-        self.rr_ptrs = [0] * n_ports  # round-robin per output
+        self.voqs = [[collections.deque(maxlen=VOQ_DEPTH) for _ in range(n_ports)]
+                     for _ in range(n_ports)]
+        self.rr = [0] * n_ports
         self.pkts_switched = 0
 
-    def enqueue(self, in_port: int, pkt: Packet):
-        """Enqueue packet from input port into VOQ[in_port][output_port]."""
-        out_port = pkt.dst % self.n_ports
-        if len(self.voqs[in_port][out_port]) < VOQ_DEPTH:
+    def enqueue(self, in_port, pkt):
+        out_port = pkt.dst  # direct dst → output port mapping
+        if out_port < self.n_ports and len(self.voqs[in_port][out_port]) < VOQ_DEPTH:
             self.voqs[in_port][out_port].append(pkt)
+            return True
+        return False
 
-    def schedule(self) -> list[Packet | None]:
-        """Crossbar scheduling: one packet per output port per cycle.
-        Uses round-robin arbitration (simplified MDRR).
-        Returns list of N_PORTS packets (None if no winner).
-        """
-        results: list[Packet | None] = [None] * self.n_ports
-
+    def schedule(self):
+        """Round-robin crossbar: one pkt per output per cycle."""
+        results = [None] * self.n_ports
         for j in range(self.n_ports):
-            # Round-robin scan from rr_ptr
             for offset in range(self.n_ports):
-                i = (self.rr_ptrs[j] + offset) % self.n_ports
+                i = (self.rr[j] + offset) % self.n_ports
                 if self.voqs[i][j]:
                     results[j] = self.voqs[i][j].popleft()
-                    self.rr_ptrs[j] = (i + 1) % self.n_ports
+                    self.rr[j] = (i + 1) % self.n_ports
                     self.pkts_switched += 1
                     break
-
         return results
 
+    def occupancy(self):
+        """Total packets buffered in all VOQs."""
+        return sum(len(self.voqs[i][j])
+                   for i in range(self.n_ports) for j in range(self.n_ports))
+
 
 # ═══════════════════════════════════════════════════════════════════
-# FM16 Topology
+# FM16 Topology: full mesh, 4 links per pair
 # ═══════════════════════════════════════════════════════════════════
 class FM16System:
-    """16 NPU full-mesh + switch system."""
-
     def __init__(self):
-        # Each NPU has N_NPUS-1 mesh port groups + 1 switch port group
-        # Simplified: each NPU has N_NPUS ports (mesh + switch combined)
+        self.npus = [NPUNode(i, N_NPUS) for i in range(N_NPUS)]
+        self.cycle = 0
+        self.rng = random.Random(42)
+        self._inflight: list[tuple[int, Packet]] = []
+
+    def step(self):
+        for npu in self.npus:
+            npu.inject(self.cycle, self.rng)
+
+        for npu in self.npus:
+            for port in range(N_NPUS):
+                for _ in range(FM_LINKS_PER_PAIR):
+                    pkt = npu.tx(port)
+                    if pkt is None: break
+                    if pkt.dst == npu.id: continue
+                    qlat = len(npu.out_fifos[port])
+                    self._inflight.append((self.cycle + FM_LINK_LATENCY + qlat, pkt))
+
+        keep = []
+        for (t, pkt) in self._inflight:
+            if t <= self.cycle:
+                self.npus[pkt.dst].rx(pkt, self.cycle)
+            else:
+                keep.append((t, pkt))
+        self._inflight = keep
+        self.cycle += 1
+
+    def stats(self):
+        return _compute_stats(self.npus, self.cycle)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SW16 Topology: star through SW5809s
+# ═══════════════════════════════════════════════════════════════════
+class SW16System:
+    def __init__(self):
         self.npus = [NPUNode(i, N_NPUS) for i in range(N_NPUS)]
         self.switch = SW5809s(N_NPUS)
         self.cycle = 0
         self.rng = random.Random(42)
-        self._in_flight: list[tuple[int, Packet]] = []  # (arrival_cycle, pkt)
-
-        # Statistics
-        self.total_injected = 0
-        self.total_delivered = 0
-        self.total_switched = 0
-        self.bw_history: list[float] = []  # delivered pkts per display interval
+        # Packets in flight: NPU→switch and switch→NPU
+        self._to_switch: list[tuple[int, int, Packet]] = []  # (arrive, in_port, pkt)
+        self._to_npu:    list[tuple[int, Packet]] = []        # (arrive, pkt)
 
     def step(self):
-        """Run one cycle of the system."""
-        # 1. Each NPU injects traffic from HBM
         for npu in self.npus:
             npu.inject(self.cycle, self.rng)
 
-        # 2. Transmit from NPU output FIFOs
-        #    Route: if dst is directly connected (mesh), deliver directly.
-        #           Otherwise, send through switch.
-        #    Simplified: all-to-all via mesh (full mesh exists for all pairs).
-        #    Use mesh links (MESH_LINKS packets per pair per cycle max).
-        # 2. Transmit from NPU output FIFOs via mesh links.
-        #    Each link can carry 1 packet per cycle.
-        #    Each NPU-pair has MESH_LINKS parallel links.
-        #    Model serialization delay + pipeline latency.
-        LINK_LATENCY = 3
-
-        # Track per-destination-NPU bandwidth usage this cycle
+        # NPU → switch (up to SW_LINKS_PER_NPU / (N_NPUS-1) pkts per port per cycle)
+        links_per_dst = max(1, SW_LINKS_PER_NPU // (N_NPUS - 1))
         for npu in self.npus:
             for port in range(N_NPUS):
-                sent = 0
-                while sent < MESH_LINKS:  # up to MESH_LINKS pkts per pair
+                for _ in range(links_per_dst):
                     pkt = npu.tx(port)
-                    if pkt is None:
-                        break
-                    if pkt.dst == npu.id:
-                        continue
-                    # Add queuing delay: FIFO depth at time of send
-                    q_depth = len(npu.out_fifos[port])
-                    total_lat = LINK_LATENCY + q_depth  # queue + pipeline
-                    self._in_flight.append((self.cycle + total_lat, pkt))
-                    sent += 1
+                    if pkt is None: break
+                    if pkt.dst == npu.id: continue
+                    self._to_switch.append((self.cycle + SW_LINK_LATENCY, npu.id, pkt))
 
-        # 3. Deliver packets that have completed their latency
-        still_in_flight = []
-        for (arrive_cycle, pkt) in self._in_flight:
-            if arrive_cycle <= self.cycle:
+        # Deliver to switch input ports
+        keep_sw = []
+        for (t, inp, pkt) in self._to_switch:
+            if t <= self.cycle:
+                self.switch.enqueue(inp, pkt)
+            else:
+                keep_sw.append((t, inp, pkt))
+        self._to_switch = keep_sw
+
+        # Switch crossbar scheduling
+        winners = self.switch.schedule()
+        for pkt in winners:
+            if pkt is not None:
+                self._to_npu.append((self.cycle + SW_XBAR_LATENCY + SW_LINK_LATENCY, pkt))
+
+        # Deliver from switch to destination NPU
+        keep_npu = []
+        for (t, pkt) in self._to_npu:
+            if t <= self.cycle:
                 self.npus[pkt.dst].rx(pkt, self.cycle)
             else:
-                still_in_flight.append((arrive_cycle, pkt))
-        self._in_flight = still_in_flight
+                keep_npu.append((t, pkt))
+        self._to_npu = keep_npu
 
         self.cycle += 1
 
-        # Track stats
-        self.total_injected = sum(n.pkts_injected for n in self.npus)
-        self.total_delivered = sum(n.pkts_delivered for n in self.npus)
-
-    def run(self, cycles: int):
-        for _ in range(cycles):
-            self.step()
-
-    def get_stats(self):
-        """Compute aggregate statistics."""
-        all_lats = []
-        for npu in self.npus:
-            all_lats.extend(npu.latencies)
-
-        if not all_lats:
-            return {"avg_lat": 0, "p50": 0, "p95": 0, "p99": 0,
-                    "bw_gbps": 0, "inject_rate": 0}
-
-        all_lats.sort()
-        n = len(all_lats)
-        avg = sum(all_lats) / n
-        p50 = all_lats[n // 2]
-        p95 = all_lats[int(n * 0.95)]
-        p99 = all_lats[int(n * 0.99)]
-
-        # Bandwidth: delivered packets × PKT_SIZE × 8 / simulation_time
-        sim_time_ns = self.cycle * PKT_TIME_NS
-        bw_gbps = self.total_delivered * PKT_SIZE * 8 / sim_time_ns if sim_time_ns > 0 else 0
-
-        return {
-            "avg_lat": avg, "p50": p50, "p95": p95, "p99": p99,
-            "bw_gbps": bw_gbps,
-            "inject_rate": self.total_injected / max(self.cycle, 1),
-        }
-
-    def get_latency_histogram(self, bins=20):
-        """Build a latency histogram for visualization."""
-        all_lats = []
-        for npu in self.npus:
-            all_lats.extend(npu.latencies)
-        if not all_lats:
-            return [], 0, 0
-
-        min_l, max_l = min(all_lats), max(all_lats)
-        if min_l == max_l:
-            return [len(all_lats)], min_l, max_l
-
-        bin_size = max(1, (max_l - min_l + bins - 1) // bins)
-        hist = [0] * bins
-        for l in all_lats:
-            idx = min((l - min_l) // bin_size, bins - 1)
-            hist[idx] += 1
-        return hist, min_l, max_l
+    def stats(self):
+        s = _compute_stats(self.npus, self.cycle)
+        s["sw_occupancy"] = self.switch.occupancy()
+        s["sw_switched"] = self.switch.pkts_switched
+        return s
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Real-time Terminal Visualization
+# Statistics helper
 # ═══════════════════════════════════════════════════════════════════
-BOX_W = 72
+def _compute_stats(npus, cycle):
+    all_lats = []
+    total_inj = total_del = 0
+    for n in npus:
+        all_lats.extend(n.latencies)
+        total_inj += n.pkts_injected
+        total_del += n.pkts_delivered
+    if not all_lats:
+        return {"avg":0,"p50":0,"p95":0,"p99":0,"max_lat":0,
+                "bw_gbps":0,"inj":total_inj,"del":total_del,"npu_del":[0]*len(npus)}
+    all_lats.sort()
+    n = len(all_lats)
+    t_ns = cycle * PKT_TIME_NS
+    return {
+        "avg": sum(all_lats)/n,
+        "p50": all_lats[n//2],
+        "p95": all_lats[int(n*0.95)],
+        "p99": all_lats[int(n*0.99)],
+        "max_lat": all_lats[-1],
+        "bw_gbps": total_del * PKT_SIZE * 8 / t_ns if t_ns > 0 else 0,
+        "inj": total_inj,
+        "del": total_del,
+        "npu_del": [npu.pkts_delivered for npu in npus],
+    }
+
+def _hist(npus, bins=12):
+    lats = []
+    for n in npus: lats.extend(n.latencies)
+    if not lats: return [], 0, 0
+    lo, hi = min(lats), max(lats)
+    if lo == hi: return [len(lats)], lo, hi
+    bw = max(1, (hi - lo + bins - 1) // bins)
+    h = [0] * bins
+    for l in lats:
+        h[min((l - lo) // bw, bins - 1)] += 1
+    return h, lo, hi
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Side-by-side visualization
+# ═══════════════════════════════════════════════════════════════════
+COL_W = 35   # width of each column
+BOX_W = COL_W * 2 + 5  # total inner width
 
 def _bl(content):
     return f"  {CYAN}║{RESET}{_pad(content, BOX_W)}{CYAN}║{RESET}"
 
-def _bar(val, max_val, width=30, ch="█", color=GREEN):
-    if max_val <= 0: return ""
-    n = min(int(val / max_val * width), width)
-    return f"{color}{ch * n}{RESET}"
+def _bar(v, mx, w=14, ch="█", co=GREEN):
+    if mx <= 0: return ""
+    n = min(int(v / mx * w), w)
+    return f"{co}{ch*n}{RESET}"
 
-def draw_stats(sys: FM16System):
+def _side(left, right):
+    """Render two strings side-by-side in the box."""
+    return _bl(f"  {_pad(left, COL_W)} │ {_pad(right, COL_W)}")
+
+def draw(fm, sw, cycle):
     clear()
     bar = "═" * BOX_W
-    stats = sys.get_stats()
-    hist, min_l, max_l = sys.get_latency_histogram(bins=15)
+    sf = fm.stats()
+    ss = sw.stats()
+    pct = cycle * 100 // SIM_CYCLES
 
     print(f"\n  {CYAN}╔{bar}╗{RESET}")
-    print(_bl(f"  {BOLD}{WHITE}FM16 SYSTEM — 16 NPU Full-Mesh Simulation{RESET}"))
+    print(_bl(f"  {BOLD}{WHITE}FM16 vs SW16 — Side-by-Side Comparison{RESET}"))
+    print(f"  {CYAN}╠{bar}╣{RESET}")
+    print(_bl(f"  {DIM}16 NPU | HBM {HBM_BW_TBPS}Tbps | 512B pkts | All-to-all{RESET}"))
+    prog = _bar(cycle, SIM_CYCLES, 30, "█", CYAN)
+    print(_bl(f"  Cycle {cycle}/{SIM_CYCLES} [{prog}] {pct}%"))
     print(f"  {CYAN}╠{bar}╣{RESET}")
 
-    # Topology info
-    print(_bl(f"  {DIM}16 × Ascend950 NPU | Full mesh (4 links/pair) | 512B pkts{RESET}"))
-    print(_bl(f"  {DIM}HBM: 1.6Tbps/NPU | UB: {MESH_LINKS}×112Gbps/link | All-to-all traffic{RESET}"))
-    print(f"  {CYAN}╠{bar}╣{RESET}")
-
-    # Progress
-    pct = sys.cycle * 100 // SIM_CYCLES
-    prog_bar = _bar(sys.cycle, SIM_CYCLES, 40, "█", CYAN)
-    print(_bl(f"  Cycle: {sys.cycle}/{SIM_CYCLES} [{prog_bar}] {pct}%"))
-    print(_bl(""))
+    # Headers
+    print(_side(f"{BOLD}{YELLOW}FM16 (Full Mesh){RESET}",
+                f"{BOLD}{MAGENTA}SW16 (Switch){RESET}"))
+    print(_side(f"{DIM}4 links/pair, direct{RESET}",
+                f"{DIM}{SW_LINKS_PER_NPU} links/NPU→SW, VOQ+xbar{RESET}"))
+    print(_bl(f"  {'─' * COL_W} │ {'─' * COL_W}"))
 
     # Bandwidth
-    print(_bl(f"  {BOLD}{WHITE}Bandwidth:{RESET}"))
-    print(_bl(f"    Aggregate delivered BW:  {YELLOW}{BOLD}{stats['bw_gbps']:>10.1f} Gbps{RESET}"))
-    print(_bl(f"    Injected packets:        {stats['inject_rate']:>10.1f} pkt/cycle"))
-    print(_bl(f"    Total injected:          {sys.total_injected:>10d}"))
-    print(_bl(f"    Total delivered:          {sys.total_delivered:>10d}"))
-    print(_bl(""))
+    print(_side(f"BW: {BOLD}{sf['bw_gbps']:>8.0f}{RESET} Gbps",
+                f"BW: {BOLD}{ss['bw_gbps']:>8.0f}{RESET} Gbps"))
+    print(_side(f"Injected:  {sf['inj']:>8d}",
+                f"Injected:  {ss['inj']:>8d}"))
+    print(_side(f"Delivered: {sf['del']:>8d}",
+                f"Delivered: {ss['del']:>8d}"))
+    sw_extra = f"  SW queued: {ss.get('sw_occupancy',0):>5d}"
+    print(_side("", sw_extra))
 
-    # Per-NPU bandwidth bar chart
-    print(_bl(f"  {BOLD}{WHITE}Per-NPU Delivered Packets:{RESET}"))
-    max_npu = max((n.pkts_delivered for n in sys.npus), default=1)
-    for i, npu in enumerate(sys.npus):
-        b = _bar(npu.pkts_delivered, max_npu, 30)
-        print(_bl(f"    NPU{i:>2d}: {b} {npu.pkts_delivered:>6d}"))
-    print(_bl(""))
+    print(_bl(f"  {'─' * COL_W} │ {'─' * COL_W}"))
 
-    # Latency stats
-    print(f"  {CYAN}╠{bar}╣{RESET}")
-    print(_bl(f"  {BOLD}{WHITE}Latency (cycles):{RESET}"))
-    print(_bl(f"    Avg:  {YELLOW}{stats['avg_lat']:>6.1f}{RESET}   "
-              f"P50: {stats['p50']:>4d}   "
-              f"P95: {stats['p95']:>4d}   "
-              f"P99: {stats['p99']:>4d}"))
-    print(_bl(""))
+    # Latency
+    print(_side(f"Avg: {YELLOW}{sf['avg']:>5.1f}{RESET}  P50:{sf['p50']:>3d}  P99:{sf['p99']:>3d}",
+                f"Avg: {YELLOW}{ss['avg']:>5.1f}{RESET}  P50:{ss['p50']:>3d}  P99:{ss['p99']:>3d}"))
+    print(_side(f"Max: {sf['max_lat']:>3d} cycles",
+                f"Max: {ss['max_lat']:>3d} cycles"))
 
-    # Latency histogram
-    if hist:
-        print(_bl(f"  {BOLD}{WHITE}Latency Distribution:{RESET}"))
-        max_h = max(hist) if hist else 1
-        bin_w = max(1, (max_l - min_l + len(hist) - 1) // len(hist)) if len(hist) > 1 else 1
-        for i, h in enumerate(hist):
-            lo = min_l + i * bin_w
-            hi = lo + bin_w - 1
-            b = _bar(h, max_h, 30, "▓", MAGENTA)
-            print(_bl(f"    {lo:>3d}-{hi:>3d}: {b} {h:>5d}"))
+    print(_bl(f"  {'─' * COL_W} │ {'─' * COL_W}"))
+
+    # Per-NPU bars
+    print(_side(f"{BOLD}Per-NPU delivered:{RESET}", f"{BOLD}Per-NPU delivered:{RESET}"))
+    max_f = max(sf["npu_del"]) if sf["npu_del"] else 1
+    max_s = max(ss["npu_del"]) if ss["npu_del"] else 1
+    mx = max(max_f, max_s, 1)
+    for i in range(N_NPUS):
+        fd = sf["npu_del"][i] if i < len(sf["npu_del"]) else 0
+        sd = ss["npu_del"][i] if i < len(ss["npu_del"]) else 0
+        fb = _bar(fd, mx, 12, "█", GREEN)
+        sb = _bar(sd, mx, 12, "█", MAGENTA)
+        print(_side(f" {i:>2d}:{fb}{fd:>6d}", f" {i:>2d}:{sb}{sd:>6d}"))
+
+    print(_bl(f"  {'─' * COL_W} │ {'─' * COL_W}"))
+
+    # Latency histograms
+    hf, lof, hif = _hist(fm.npus, bins=8)
+    hs, los, his = _hist(sw.npus, bins=8)
+    print(_side(f"{BOLD}Latency Histogram:{RESET}", f"{BOLD}Latency Histogram:{RESET}"))
+    maxh = max(max(hf, default=1), max(hs, default=1), 1)
+    nbins = max(len(hf), len(hs))
+    for bi in range(nbins):
+        bwf = max(1, (hif - lof + len(hf) - 1) // len(hf)) if hf else 1
+        bws = max(1, (his - los + len(hs) - 1) // len(hs)) if hs else 1
+        fv = hf[bi] if bi < len(hf) else 0
+        sv = hs[bi] if bi < len(hs) else 0
+        flo = lof + bi * bwf if hf else 0
+        slo = los + bi * bws if hs else 0
+        fb = _bar(fv, maxh, 10, "▓", GREEN)
+        sb = _bar(sv, maxh, 10, "▓", MAGENTA)
+        print(_side(f" {flo:>3d}+: {fb}{fv:>6d}", f" {slo:>3d}+: {sb}{sv:>6d}"))
 
     print(_bl(""))
     print(f"  {CYAN}╚{bar}╝{RESET}")
@@ -366,34 +384,38 @@ def draw_stats(sys: FM16System):
 # Main
 # ═══════════════════════════════════════════════════════════════════
 def main():
-    print(f"  {BOLD}FM16 System Simulator — 16 NPU Full-Mesh{RESET}")
-    print(f"  Initializing {N_NPUS} NPU nodes...")
+    print(f"  {BOLD}FM16 vs SW16 — Topology Comparison Simulator{RESET}")
+    print(f"  Initializing 2 × 16 NPU systems...")
 
-    system = FM16System()
+    fm = FM16System()
+    sw = SW16System()
 
-    print(f"  {GREEN}System ready. Running {SIM_CYCLES} cycles...{RESET}")
-    time.sleep(0.5)
+    print(f"  {GREEN}Systems ready. Running {SIM_CYCLES} cycles...{RESET}")
+    time.sleep(0.3)
 
     t0 = time.time()
     for cyc in range(SIM_CYCLES):
-        system.step()
+        fm.step()
+        sw.step()
         if (cyc + 1) % DISPLAY_INTERVAL == 0 or cyc == SIM_CYCLES - 1:
-            draw_stats(system)
-            # Small sleep for visual effect
+            draw(fm, sw, cyc + 1)
             elapsed = time.time() - t0
-            if elapsed < 0.5:
-                time.sleep(0.05)
-
+            if elapsed < 0.3:
+                time.sleep(0.03)
     t1 = time.time()
 
-    # Final summary
-    stats = system.get_stats()
-    print(f"  {GREEN}{BOLD}Simulation complete!{RESET}")
-    print(f"  Wall time: {t1-t0:.2f}s")
-    print(f"  Cycles: {system.cycle}")
-    print(f"  Aggregate BW: {stats['bw_gbps']:.1f} Gbps")
-    print(f"  Avg latency: {stats['avg_lat']:.1f} cycles")
-    print(f"  P99 latency: {stats['p99']} cycles")
+    sf = fm.stats()
+    ss = sw.stats()
+    print(f"  {GREEN}{BOLD}Simulation complete!{RESET}  ({t1-t0:.2f}s)")
+    print(f"  {'─'*60}")
+    print(f"  {'':20s} {'FM16':>15s} {'SW16':>15s}")
+    print(f"  {'Bandwidth (Gbps)':20s} {sf['bw_gbps']:>15.0f} {ss['bw_gbps']:>15.0f}")
+    print(f"  {'Avg Latency':20s} {sf['avg']:>15.1f} {ss['avg']:>15.1f}")
+    print(f"  {'P50 Latency':20s} {sf['p50']:>15d} {ss['p50']:>15d}")
+    print(f"  {'P95 Latency':20s} {sf['p95']:>15d} {ss['p95']:>15d}")
+    print(f"  {'P99 Latency':20s} {sf['p99']:>15d} {ss['p99']:>15d}")
+    print(f"  {'Max Latency':20s} {sf['max_lat']:>15d} {ss['max_lat']:>15d}")
+    print(f"  {'Delivered pkts':20s} {sf['del']:>15d} {ss['del']:>15d}")
     print()
 
 
