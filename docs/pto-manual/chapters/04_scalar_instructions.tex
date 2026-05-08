@@ -1,0 +1,15 @@
+\chapter{Scalar Instructions}
+\label{chap:scalar-instructions}
+This chapter defines the CPU-visible PTO scalar and control instruction pages. The scalar profile catalog used here is the 32-bit scalar instruction subset for this revision. Forms outside this scalar profile are not part of the instruction set described by this chapter.
+
+\section{Current Scalar Surface}
+The scalar surface visible to the tile instruction subset consists of \texttt{X0}--\texttt{X31}, the program counter, SSR state, event state, scalar attributes, immediate fields, and synchronization/control effects. Scalar register operands are always encoded as 5-bit fields; \texttt{X0} is hardwired to zero and writes to \texttt{X0} are ignored. These are architecture-visible concepts and are not ROM-resident vector micro instruction sites.
+
+\begin{sloppypar}
+The scalar instructions in this chapter use the \texttt{L32} encoding records in \path{data/scalar/scalar-instructions-32bit.json}. Each instruction entry names the execution category, family, assembly form, fixed bit pattern, variable operand fields, and operation note. The encoding diagram spans the text block so bit positions can be read directly.
+\end{sloppypar}
+
+\section{Instruction Page Policy}
+Each scalar instruction page states the mnemonic, syntax, encoding form, operands, family, execution class, purpose, and operation sketch. The pages are grouped by execution category so that ALU, BRU, AGU, AMO, FSU, and SYS behavior can be reviewed independently.
+
+\input{scalar-instructions/generated_scalar_instruction_catalog.tex}

@@ -1,0 +1,54 @@
+\section{\texttt{TROWEXPANDMUL}}
+\noindent\textbf{Descriptor profile.} Vec entry 50, tile catalog opcode \texttt{0xF003}. Descriptor bundle: \texttt{B.OP + B.DIM + B.IOT}; WO/WM sites: 5; VEC beat-level sites: 5; ROM bytes: 40.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_50_pto_trowexpandmul_th0.pdf}{figs/encoding/tile_instruction_entries/entry_50_pto_trowexpandmul_th2.pdf}{0xF003}{50}{B.OP + B.DIM + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.DIM + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 50.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TROWEXPANDMUL}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
+\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
+\item[Metadata operands] \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Row-wise broadcast multiply: multiply each row of \texttt{src0} by a per-row scalar vector \texttt{src1}.
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \mathrm{src0}_{i,j} \cdot \mathrm{src1}_{0,i}
+\]
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=50, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vdup} & \texttt{opc=0x13, x=0, fl=alu, seq=1, kind=u} & \texttt{entry=50, cnt=1, res=vec, var=0} \\
+2 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=50, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vmul} & \texttt{opc=0x1E, x=0, fl=alu, seq=3, kind=b} & \texttt{entry=50, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=50, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+def rom_trowexpandmul(src0, src1, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            scalar_vec = pto.vlds(src1[row, :])  # load entire row of src1 for broadcast into destination row
+            broadcasted = pto.vdup(scalar_vec, mask)
+            lhs = pto.vlds(src0[row, col:])
+            result = pto.vmul(lhs, broadcasted, mask)
+            pto.vsts(result, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

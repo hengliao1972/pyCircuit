@@ -1,0 +1,30 @@
+% Scalar instruction entry source: tools/generate_scalar_instruction_catalog.py.
+\subsection{\texttt{ASSERT}}
+\label{sec:scalar-assert}
+\index{ASSERT@\texttt{ASSERT}}
+\begin{sloppypar}\noindent\textbf{Purpose.} Execution-control instruction used for debugging, ordering, or bring-up.\end{sloppypar}\smallskip
+\noindent\textbf{Syntax.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+assert SrcL
+\end{lstlisting}
+\noindent\textbf{Encoding.}\par
+\noindent\includegraphics[width=\textwidth]{figs/encoding/scalar_instruction_entries/enc_assert.pdf}\par\smallskip
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Format] \texttt{L32} \texttt{32-bit} scalar word.
+\item[Pattern] \texttt{000000000000.....001000000101011}.
+\end{description}
+\noindent\textbf{Classification.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Category] System, Cache, SSR, and Execution Control.
+\item[Family] Execution Control.
+\item[Execution class] \texttt{SYS}; uop\_kind=SYS.
+\end{description}
+\noindent\textbf{Operand fields.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[\texttt{SrcL}] Bits \texttt{19:15 (5b)}. 5-bit scalar source register used as the left input operand.
+\end{description}
+\noindent\textbf{Operation.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+if (ECONFIG[3] && Read(SrcL) == 0): Trap(ASSERT_FAIL)
+\end{lstlisting}
+\Needspace{0.08\textheight}

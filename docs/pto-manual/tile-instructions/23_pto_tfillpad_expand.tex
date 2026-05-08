@@ -1,0 +1,143 @@
+\section{\texttt{TFILLPAD\_EXPAND}}
+\noindent\textbf{Descriptor profile.} Vec entry 23, tile catalog opcode \texttt{TBD}. Descriptor bundle: \texttt{B.OP + B.ATTR + B.IOT}; WO/WM sites: 8; VEC beat-level sites: 8; ROM bytes: 64.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_23_pto_tfillpad_expand_th0.pdf}{figs/encoding/tile_instruction_entries/entry_23_pto_tfillpad_expand_th2.pdf}{TBD}{23}{B.OP + B.ATTR + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.ATTR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 23.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TFILLPAD\_EXPAND}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.ATTR} carries pad/fill and valid-region policy. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
+\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
+\item[Metadata operands] \texttt{B.ATTR} carries pad/fill and valid-region policy.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Expand fill/pad variant of TFILLPAD (allows dst to be larger than src; implementation-defined).
+\paragraph{PTO ISA operation.}
+Unless otherwise specified, semantics are defined over the valid region and target-dependent behavior is marked as implementation-defined.
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=23, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=23, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vdup} & \texttt{opc=0x13, x=0, fl=alu, seq=2, kind=u} & \texttt{entry=23, cnt=1, res=vec, var=0} \\
+3 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=23, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=23, cnt=2, res=vec, var=0} \\
+5 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=5, kind=b} & \texttt{entry=23, cnt=2, res=vec, var=0} \\
+6 & \texttt{u\_vec.vdup} & \texttt{opc=0x13, x=0, fl=alu, seq=6, kind=u} & \texttt{entry=23, cnt=1, res=vec, var=0} \\
+7 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=7, kind=b} & \texttt{entry=23, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+# Supported (src dtype, dst dtype) pairs:
+# (f32, f32), (bf16, bf16), (i16, i16), (si16, si16),
+# (ui16, ui16), (i32, i32), (si32, si32), (ui32, ui32),
+# (i8, i8), (si8, si8), (ui8, ui8)
+
+def rom_tfillpad_expand(src, dst):
+    dtype = src.element_type
+    src_valid_rows, src_valid_cols = src.valid_shape
+    dst_valid_rows, dst_valid_cols = dst.valid_shape
+    dst_rows, dst_cols = dst.shape
+
+    lanes = pto.get_lanes(dtype)
+    aligned_col = (src_valid_cols // lanes) * lanes
+    has_tail = (src_valid_cols % lanes) != 0
+    has_valid_expansion = (src_valid_rows < dst_valid_rows) or (src_valid_cols < dst_valid_cols)
+
+    if pto.constexpr(dtype == pto.f32):
+        if pto.constexpr(dst.pad_value == pto.PadValue.ZERO and has_valid_expansion):
+            fill_scalar = pto.f32(_NEG1_F32)
+        elif pto.constexpr(dst.pad_value == pto.PadValue.ZERO):
+            fill_scalar = pto.f32(0.0)
+        elif pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.f32(0.0)
+    elif pto.constexpr(dtype == pto.bf16):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.bf16(0)
+    elif pto.constexpr(dtype == pto.ui16):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.ui16(0)
+    elif pto.constexpr(dtype == pto.si16):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.si16(0)
+    elif pto.constexpr(dtype == pto.i16):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.i16(0)
+    elif pto.constexpr(dtype == pto.ui32):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.ui32(0)
+    elif pto.constexpr(dtype == pto.si32):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.si32(0)
+    elif pto.constexpr(dtype == pto.i32):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.i32(0)
+    elif pto.constexpr(dtype == pto.ui8):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.ui8(0)
+    elif pto.constexpr(dtype == pto.si8):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.si8(0)
+    elif pto.constexpr(dtype == pto.i8):
+        if pto.constexpr(dst.pad_value != pto.PadValue.NULL):
+            fill_scalar = dst.pad_value.eval(dtype)
+        else:
+            fill_scalar = pto.i8(0)
+
+    for row in range(0, src_valid_rows, 1):
+        remained = src_valid_cols
+        for col in range(0, aligned_col, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            data = pto.vlds(src[row, col:])
+            pto.vsts(data, dst[row, col:], mask)
+
+    if pto.constexpr(aligned_col < dst_valid_cols):
+        for row in range(0, dst_valid_rows, 1):
+            for col in range(aligned_col, dst_valid_cols, lanes):
+                mask, remained = pto.make_mask(dtype, remained)
+                vec = pto.vdup(fill_scalar, mask)
+                pto.vsts(vec, dst[row, col:], mask)
+
+    if pto.constexpr(has_tail):
+        for row in range(0, src_valid_rows, 1):
+            tail_rem = src_valid_cols - aligned_col
+            mask_copy, _ = pto.make_mask(dtype, tail_rem)
+            data = pto.vlds(src[row, aligned_col:])
+            pto.vsts(data, dst[row, aligned_col:], mask_copy)
+
+    if pto.constexpr(src_valid_rows < dst_rows):
+        for row in range(src_valid_rows, dst_rows, 1):
+            for col in range(0, dst_valid_cols, lanes):
+                mask, remained = pto.make_mask(dtype, remained)
+                vec = pto.vdup(fill_scalar, mask)
+                pto.vsts(vec, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

@@ -1,0 +1,42 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "X"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "KIND"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 10,
+      "name": "TileOpcode",
+      "attr": "TOP"
+    },
+    {
+      "bits": 2,
+      "name": "MODE"
+    },
+    {
+      "bits": 5,
+      "name": "DataType",
+      "attr": "DT"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

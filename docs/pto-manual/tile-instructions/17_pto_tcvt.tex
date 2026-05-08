@@ -1,0 +1,147 @@
+\section{\texttt{TCVT}}
+\noindent\textbf{Descriptor profile.} Vec entry 17, tile catalog opcode \texttt{0x101C}. Descriptor bundle: \texttt{B.OP + B.ATTR + B.IOT}; WO/WM sites: 15; VEC beat-level sites: 15; ROM bytes: 120.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_17_pto_tcvt_th0.pdf}{figs/encoding/tile_instruction_entries/entry_17_pto_tcvt_th2.pdf}{0x101C}{17}{B.OP + B.ATTR + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.ATTR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 17.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TCVT}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.ATTR} carries source/destination format refinement for conversion. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
+\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
+\item[Metadata operands] \texttt{B.ATTR} carries source/destination format refinement for conversion.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise type conversion with a specified rounding mode.
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \mathrm{cast}_{\mathrm{rmode}}\!\left(\mathrm{src}_{i,j}\right)
+\]
+
+where \texttt{rmode} is a rounding policy (see \texttt{pto::RoundMode}).
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=1, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+2 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=4, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+5 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=5, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+6 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=6, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+7 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=7, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+8 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=8, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+9 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=9, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+10 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=10, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+11 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=11, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+12 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=12, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+13 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=13, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+14 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=14, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+def rom_tcvt_f32_to_f16(src, dst):
+    round_mode = pto.get_op_attr("round_mode", "RINT")
+    rnd = pto.VcvtRoundMode.R
+    if pto.constexpr(round_mode == "ROUND"):
+        rnd = pto.VcvtRoundMode.A
+    elif pto.constexpr(round_mode == "FLOOR"):
+        rnd = pto.VcvtRoundMode.F
+    elif pto.constexpr(round_mode == "CEIL"):
+        rnd = pto.VcvtRoundMode.C
+    elif pto.constexpr(round_mode == "TRUNC"):
+        rnd = pto.VcvtRoundMode.Z
+    elif pto.constexpr(round_mode == "ODD"):
+        rnd = pto.VcvtRoundMode.O
+    full_mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+    for row in range(0, valid_rows, 1):
+        for col in range(0, valid_cols, pto.get_lanes(pto.f32)):
+            store_mask, remained = pto.make_mask(pto.f32, remained)
+            vec = pto.vlds(src[row, col:])
+            converted = pto.vcvt(...)
+            pto.vsts(converted, dst[row, col:], store_mask, dist=pto.VStoreDist.PK_B32)
+    return
+
+def rom_tcvt_f32_to_i32(src, dst):
+    round_mode = pto.get_op_attr("round_mode", "RINT")
+    rnd = pto.VcvtRoundMode.R
+    if pto.constexpr(round_mode == "ROUND"):
+        rnd = pto.VcvtRoundMode.A
+    elif pto.constexpr(round_mode == "FLOOR"):
+        rnd = pto.VcvtRoundMode.F
+    elif pto.constexpr(round_mode == "CEIL"):
+        rnd = pto.VcvtRoundMode.C
+    elif pto.constexpr(round_mode == "TRUNC"):
+        rnd = pto.VcvtRoundMode.Z
+    elif pto.constexpr(round_mode == "ODD"):
+        rnd = pto.VcvtRoundMode.O
+    for row in range(0, valid_rows, 1):
+        for col in range(0, valid_cols, pto.get_lanes(dst_dtype)):
+            mask, remained = pto.make_mask(dst_dtype, remained)
+            vec = pto.vlds(src[row, col:])
+            converted = pto.vcvt(...)
+            pto.vsts(converted, dst[row, col:], mask)
+    return
+
+def rom_tcvt_f16_to_f32(src, dst):
+    full_mask = pto.make_mask(pto.f16, pto.PAT.ALL)
+    for row in range(0, valid_rows, 1):
+        for col in range(0, valid_cols, pto.get_lanes(pto.f32)):
+            store_mask, remained = pto.make_mask(pto.f32, remained)
+            vec = pto.vlds(src[row, col:], dist=pto.VLoadDist.UNPK_B16)
+            converted = pto.vcvt(...)
+            pto.vsts(converted, dst[row, col:], store_mask)
+    return
+
+def rom_tcvt_i32_to_f32(src, dst):
+    round_mode = pto.get_op_attr("round_mode", "RINT")
+    rnd = pto.VcvtRoundMode.R
+    if pto.constexpr(round_mode == "ROUND"):
+        rnd = pto.VcvtRoundMode.A
+    elif pto.constexpr(round_mode == "FLOOR"):
+        rnd = pto.VcvtRoundMode.F
+    elif pto.constexpr(round_mode == "CEIL"):
+        rnd = pto.VcvtRoundMode.C
+    elif pto.constexpr(round_mode == "TRUNC"):
+        rnd = pto.VcvtRoundMode.Z
+    elif pto.constexpr(round_mode == "ODD"):
+        rnd = pto.VcvtRoundMode.O
+    for row in range(0, valid_rows, 1):
+        for col in range(0, valid_cols, pto.get_lanes(dst_dtype)):
+            mask, remained = pto.make_mask(dst_dtype, remained)
+            vec = pto.vlds(src[row, col:])
+            converted = pto.vcvt(...)
+            pto.vsts(converted, dst[row, col:], mask)
+    return
+
+def rom_tcvt_i64_to_f32(src, dst):
+    round_mode = pto.get_op_attr("round_mode", "RINT")
+    rnd = pto.VcvtRoundMode.R
+    if pto.constexpr(round_mode == "ROUND"):
+        rnd = pto.VcvtRoundMode.A
+    elif pto.constexpr(round_mode == "FLOOR"):
+        rnd = pto.VcvtRoundMode.F
+    elif pto.constexpr(round_mode == "CEIL"):
+        rnd = pto.VcvtRoundMode.C
+    elif pto.constexpr(round_mode == "TRUNC"):
+        rnd = pto.VcvtRoundMode.Z
+    elif pto.constexpr(round_mode == "ODD"):
+        rnd = pto.VcvtRoundMode.O
+    full_mask = pto.make_mask(pto.i64, pto.PAT.ALL)
+    for row in range(0, valid_rows, 1):
+        for col in range(0, valid_cols, pto.get_lanes(pto.f32)):
+            store_mask, remained = pto.make_mask(pto.f32, remained)
+            vec = pto.vlds(src[row, col:])
+            converted = pto.vcvt(...)
+            pto.vsts(converted, dst[row, col:], store_mask, dist=pto.VStoreDist.PK_B64)
+    return
+\end{lstlisting}
+\Needspace{0.50\textheight}

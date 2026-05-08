@@ -1,0 +1,36 @@
+% Scalar instruction entry source: tools/generate_scalar_instruction_catalog.py.
+\subsection{\texttt{SLLW}}
+\label{sec:scalar-sllw}
+\index{SLLW@\texttt{SLLW}}
+\begin{sloppypar}\noindent\textbf{Purpose.} Word (32-bit) logical left shift.\end{sloppypar}\smallskip
+\noindent\textbf{Syntax.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+sllw SrcL, SrcR, ->RegDst
+\end{lstlisting}
+\noindent\textbf{Encoding.}\par
+\noindent\includegraphics[width=\textwidth]{figs/encoding/scalar_instruction_entries/enc_sllw.pdf}\par\smallskip
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Format] \texttt{L32} \texttt{32-bit} scalar word.
+\item[Pattern] \texttt{0000000..........111.....0100101}.
+\end{description}
+\noindent\textbf{Classification.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Category] Integer ALU and Bit-Manipulation.
+\item[Family] Arithmetic Operation 32bit.
+\item[Execution class] \texttt{ALU}; uop\_kind=ALU.
+\end{description}
+\noindent\textbf{Operand fields.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[\texttt{RegDst}] Bits \texttt{11:7 (5b)}. 5-bit scalar destination register written by this instruction; X0 is hardwired to zero, so writes to X0 are ignored.
+\item[\texttt{SrcL}] Bits \texttt{19:15 (5b)}. 5-bit scalar source register used as the left input operand.
+\item[\texttt{SrcR}] Bits \texttt{24:20 (5b)}. 5-bit scalar source register used as the right input operand before any encoded modifier or shift is applied.
+\end{description}
+\noindent\textbf{Operation.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+a = Read(SrcL)[31:0]
+sh = Read(SrcR) & 31
+result32 = a << sh
+result = SignExtend32(result32)
+Write(RegDst, result)
+\end{lstlisting}
+\Needspace{0.08\textheight}

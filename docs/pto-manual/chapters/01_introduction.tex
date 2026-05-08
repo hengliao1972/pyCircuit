@@ -1,0 +1,64 @@
+\chapter{Introduction}
+\label{chap:introduction}
+\section{Scope}
+This chapter defines the PTO instruction set surface covered by this manual and the abstraction boundary between CPU-visible tile instructions and ROM-resident micro instructions.
+This manual specifies the Vec tile instruction catalog and the corresponding Davinci vector-buffer micro instruction bodies. A tile instruction mnemonic such as \texttt{pto.tadd} is an instruction-set-level tile instruction with its own tile catalog opcode and PTO-ISA header bundle. Its implementation body is a loop over lower-level Vec micro instructions such as \texttt{u\_vec.vlds}, \texttt{u\_vec.vadd}, and \texttt{u\_vec.vsts}.
+The implementation listings contain the source DSL body used to derive the ROM-facing microcode: local predicates, loops, address calculations, and \texttt{pto.*} calls. The encoded micro instruction mnemonics use the \texttt{u\_vec.*} prefix below. Python decorators, kernel registration wrappers, module construction, tensor-view setup, navigation text, and traceability text are omitted.
+\subsection{Coverage}
+\begin{tabular}{@{}L{0.42\linewidth}R{0.30\linewidth}@{}}
+\toprule
+Item & Value \\
+\midrule
+Vec tile instruction implementation entries & 68 \\
+Chapter scope & Vec tile instructions only \\
+Static Vec WO/WM micro instruction sites & 387 \\
+Static VEC beat-level call sites & 367 \\
+Static WO/WM ROM storage at 64 bits/site & 3096 bytes (3.0234375 KiB) \\
+\bottomrule
+\end{tabular}
+\par\smallskip
+The static storage figure counts each encoded Vec micro instruction site once, excluding DSL registration, compile-time query helpers, and type or constant constructors. Runtime execution count is shape-dependent because each body contains loops over valid rows, valid columns, or vector lanes.
+
+\section{Execution Model}
+This chapter defines the execution model used by the tile instruction and micro instruction encodings in this manual. The PTO instruction set is described at tile granularity: a program is an ordered sequence of operations over tiles, scalar attributes, global-memory views, and synchronization state.
+
+\subsection{Execution Agents}
+\begin{longtable}{@{}L{0.20\linewidth}L{0.68\linewidth}@{}}
+\toprule
+Agent & Responsibility \\
+\midrule
+Host machine & Prepares work, allocates global resources, compiles or caches tile programs, submits work to devices, and coordinates completion. Host behavior is outside the tile instruction encoding, but it defines where work submission and global buffer ownership begin. \\
+Device machine & Schedules tile programs across cores, manages work distribution, coordinates global-memory movement, and preserves architecture-visible dependency and synchronization rules. \\
+Core machine & Executes the tile instruction stream, scalar control, synchronization primitives, and vector or matrix tile pipelines. This manual describes the Vec tile instruction subset for one such core. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Tile Program Granularity}
+A tile program is a sequence of tile instructions and scalar-control operations. The fundamental data object is a tile: a two-dimensional array of elements stored in on-chip tile storage and described by metadata. Independent tile programs MAY execute concurrently or out of order. Dependent operations MUST preserve the required happens-before relation established by data, event, or memory dependencies.
+
+\subsection{Ordering Domains}
+\begin{longtable}{@{}L{0.24\linewidth}L{0.64\linewidth}@{}}
+\toprule
+Ordering domain & Rule \\
+\midrule
+Program order & Within one dependent chain, later consumers MUST observe the committed effects of earlier producers. \\
+Event and synchronization & Event waits and synchronization points establish explicit ordering between producer and consumer instruction groups. Toolchain optimizations MUST preserve these ordering points. \\
+Memory visibility & Global-memory effects become visible according to the dependency-ordered consistency model. Backend-private caches, prefetching, or buffering MAY vary, but they MUST preserve explicit producer-consumer visibility. \\
+Independent work & Instructions or tile programs without dependencies MAY execute in any order or concurrently. \\
+\bottomrule
+\end{longtable}
+
+\section{Programming Model}
+This chapter states the contract for PTO tile code, then relates that contract to bundled tile descriptors and ROM-resident microcode bodies.
+The tile instruction surface owns tile-shaped operands, valid shapes, layouts, element formats, and tile-buffer residency. The microcode surface owns vector-register execution inside the loop body. The boundary is explicit: tile instruction operands are read or written by lower-level operations in the body; tile instructions do not appear inside the implementation loops.
+\begin{itemize}
+\item \textbf{Tile instruction}: an instruction-set-level \texttt{pto.t*} operation with a tile catalog opcode and architectural tile operands.
+\item \textbf{Vector micro instruction}: a lower-level \texttt{u\_vec.*} operation emitted by the tile instruction body. A target may read it from ROM or generate it dynamically from the decoded bundle and tile metadata.
+\item \textbf{Static site}: one encoded executable \texttt{u\_vec.*} operation in a body. Loops can execute the site multiple times at runtime.
+\end{itemize}
+
+\subsection{Valid-Region Programming Rule}
+Portable code MUST treat the valid region as the semantic domain of a tile. Elementwise operations require compatible valid rows and valid columns across operands unless the instruction family defines a different rule. Reductions, broadcasts, padding, and transforms MUST state how they map source valid domains to destination valid domains. Reading or depending on values outside the valid region is not portable.
+
+\subsection{Dispatch Styles}
+PTO programs can be dispatched as SPMD, MPMD, or hybrid work. In SPMD, many cores execute the same tile program over different data bundles. In MPMD, different cores or tasks may execute different tile programs or different control paths. The scheduler MAY choose either form, but the visible behavior MUST respect explicit dependencies and valid-domain semantics.

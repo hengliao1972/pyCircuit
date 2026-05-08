@@ -1,0 +1,45 @@
+\chapter{Glossary}
+\label{chap:glossary}
+\label{sec:glossary}
+This glossary defines the canonical terms used in this manual. Terms are normative unless marked as implementation-defined.
+
+\begin{longtable}{@{}L{0.22\linewidth}L{0.68\linewidth}@{}}
+\toprule
+Term & Definition \\
+\midrule
+\texttt{pto.t*} & CPU-visible tile instruction. A tile instruction with a catalog opcode in the instruction stream. Executed by the Davinci front end as a PTO bundled descriptor instruction. Its implementation is a ROM-resident microcode body. Also called a \textit{tile instruction}. Examples: \texttt{pto.tadd}, \texttt{pto.trowsum}. \\
+\texttt{u\_vec.*} & ROM-resident vector micro instruction. Not directly visible to the CPU instruction stream. Full-tile Vec bodies issue through Vector RS and drive VEC-4K-v2 beat words. Examples: \texttt{u\_vec.vadd}, \texttt{u\_vec.vlds}, \texttt{u\_vec.vsts}. \\
+\texttt{V*} & Davinci VTG vector micro-instruction profile. These are implementation micro-ops for 256 B or 512 B VTG execution and are scheduled by GVIQ. They are not PTO \texttt{B.*} descriptor encodings. \\
+\textbf{Tile} & A two-dimensional array of elements stored in on-chip tile storage. The fundamental data object of the PTO ISA. Described by tile metadata (shape, valid shape, layout, element format, location intent). \\
+\textbf{Tile instruction} & See \texttt{pto.t*}. \\
+\textbf{Scalar register} & One of \texttt{X0}--\texttt{X31}. Scalar register fields are 5-bit values; \texttt{X0} is hardwired to zero. \\
+\textbf{Tile operand selector} & Encoded tile operand field in a \texttt{B.IOT} descriptor. The opcode profile defines whether the selector names a destination, source, mask, or descriptor-local operand binding. \\
+\textbf{Tile metadata table} & Implementation table holding per-tile metadata such as shape, valid rows, valid columns, layout, format, and readiness. In Davinci-v2 this role is carried by the Tile Metadata RAT; PTO rows map to \texttt{shape.y}, columns to \texttt{shape.x}, and element format to \texttt{format}. \\
+\textbf{Ready Table} & Implementation bit vector tracking whether selected tile payload state has a valid result. Used by the issue queue to determine when a tile instruction is ready to issue. \\
+\textbf{ROM body} & The sequence of 64-bit micro instruction sites that implement a tile instruction. Stored in ROM, not in the instruction stream. Fetched by ROM lookup after tile instruction decode. Also called \textit{microcode ROM body} or \textit{ROM microcode}. \\
+\textbf{WO/WM pair} & One 64-bit static micro instruction site. Bits \texttt{63:32} hold \texttt{WO}, the operation half; bits \texttt{31:0} hold \texttt{WM}, the metadata half. This 8-byte word is the fundamental unit of ROM storage in this manual. \\
+\textbf{Beat word} & The expanded vector execution word produced by the microassembler from a 64-bit WO/WM micro instruction and decoded metadata. One static site may expand to multiple beat words, for example for striping or masking. \\
+\textbf{Static site} & One 64-bit WO/WM micro instruction in a ROM body. Each static site appears once in the ROM encoding; loops cause the site to execute multiple times at runtime. The WO/WM sites column in the opcode map counts static sites. \\
+\textbf{Vector RS} & Vector Reservation Station. Davinci-v2 issue queue for full-tile VEC-4K-v2 arithmetic, logical, comparison, reduction, select, conversion, and special-function tile bodies. \\
+\textbf{GVIQ} & Grouped Vector Issue Queue. Davinci-v2 issue queue for VTG micro-instructions. It uses \texttt{block\_id} and \texttt{pc\_index} to read the micro-instruction buffer and arbitrates with Vector RS for the VEC datapath. \\
+\textbf{MTE RS} & Memory Tile Engine reservation station. Davinci-v2 issue queue for tile load, store, gather, scatter, get, put, move, and transpose profiles. \\
+\textbf{BROB} & Block Reorder Buffer. Davinci-v2 block-granularity retirement structure used for precise exception reporting, BID-ordered flushing, and side-effect commit. \\
+\textbf{BID} & Block ID assigned by Davinci-v2 at block start. It orders BROB entries and lets the backend invalidate younger IQ, GVIQ, SSB, STQ, and rename state on exceptions or flushes. \\
+\textbf{Retirement state} & Backend state linking decoded PTO work to block completion and side-effect commit. In Davinci-v2 this is BROB/BID state plus branch tags, SSB/STQ state, and completion signals from Vector RS, MTE RS, Cube RS, or GVIQ. \\
+\textbf{Tile buffer} & On-chip storage for tile data. In Davinci-v2 this is TRegFile-4K physical tile storage addressed by implementation tags such as \texttt{PT0}--\texttt{PT255}; those tags are not PTO architectural operand names. \\
+\textbf{TRegFile-4K} & Davinci-v2 physical tile register file. Vector, cube, MTE, and VTG execution read and write this storage through physical tile tags after Tile RAT rename. \\
+\textbf{VEC datapath} & Davinci vector execution datapath. Consumes SOP or micro-instruction-buffer beat words, reads SA/SB/SC staging data sourced from TRegFile-4K, performs the operation, and writes results through TRegFile-4K writeback paths. \\
+\textbf{Staging register} & Davinci VEC-4K-v2 staging state such as \texttt{SA}, \texttt{SB}, \texttt{SC}, and \texttt{SOP}. Staging registers hold fetched tile payloads, predicates, or beat words during execution; they are not PTO architectural registers. \\
+\textbf{Mask / predicate} & A per-lane control bit determining whether a lane produces a result. Lanes with mask=0 are inactive and do not participate in arithmetic. Micro instructions operate under a mask emitted by the tile metadata path. \\
+\textbf{Valid region} & The subset of a tile's physical shape that is semantically active. Defined by valid rows and valid columns. Operations are defined only over the valid region. Values outside the valid region are implementation-defined. \\
+\textbf{Layout} & The memory order interpretation of tile elements. Row-major: consecutive columns share the same row. Column-major: consecutive rows share the same column. Selected by the \texttt{B.OP} default or a \texttt{B.ATTR} refinement. \\
+\textbf{Shape selector} & Encoded dimension binding carried by \texttt{B.DIM} or by a profile-defined metadata descriptor. Selects the physical tile dimensions and valid region bounds from metadata state. \\
+\textbf{VARIANT field} & \texttt{B.OP.variant}. Selector for instruction variants such as rounding mode, format override, scalar form, or layout selection. Defined values are instruction-dependent. \\
+\textbf{Microassembler} & The hardware unit that combines a 64-bit WO/WM micro instruction with decoded metadata to produce vector beat words. Also performs variant selection and port recipe application. \\
+\textbf{D1 / D2 / D3} & Decode and rename stages in the Davinci front end. D1 performs domain and opcode decode; D2 performs scalar and tile rename; D3 prepares dispatch, readiness, metadata, and issue-queue routing. \\
+\textbf{Microcode directory} & ROM array indexed by \texttt{B.OP.rom\_entry\_id}. Maps each entry ID to a body base, body length, variant table pointer, and port recipe pointer. \\
+\textbf{B.OP} & Required first descriptor of every bundled tile instruction. Carries the profile-local opcode selector, element type, descriptor count, variant, and ROM-entry selector. The catalog opcode is identified by this selector plus descriptor and extension context. \\
+\textbf{Descriptor bundle} & A CPU-visible tile instruction made of \texttt{B.OP} plus the following \texttt{B.*} descriptors declared by \texttt{B.OP.desc\_count}. The bundle decodes as one PTO architectural instruction; a Davinci profile may retire it as part of a BROB block. \\
+\bottomrule
+\end{longtable}
+\index{glossary}

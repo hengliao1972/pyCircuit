@@ -1,0 +1,88 @@
+\chapter{Architectural State}
+\label{chap:architectural-state}
+
+\section{Overview}
+PTO architectural state is the state named by CPU-visible opcode fields, scalar register fields, tile operand selector fields, metadata selector fields, the program counter, and SSR control/status state. Backend physical tags, scheduler queue entries, ready bits, loop counters inside ROM execution, and other implementation names are not architectural unless an instruction definition makes their effect visible at a synchronization or retirement boundary.
+
+The manual uses encoding fields as the stable contract. Scalar operands are encoded as 5-bit register IDs that name \texttt{X0}--\texttt{X31}. Tile operands are encoded as selector fields whose interpretation is defined by the instruction family and metadata fields; this chapter does not introduce a separate named tile-register namespace.
+
+\section{Scalar Register State}
+\label{sec:scalar_register_state}
+Scalar instructions, scalar IO descriptors, and scalar-broadcast tile forms use a common 5-bit scalar register encoding. The same encoding is used for destination and source fields such as \texttt{RegDst}, \texttt{RegSrc0}, \texttt{RegSrc1}, and \texttt{RegSrc2}.
+
+\begin{longtable}{@{}L{0.22\linewidth}L{0.18\linewidth}L{0.50\linewidth}@{}}
+\toprule
+Encoded value & Register & Architectural contract \\
+\midrule
+\texttt{0b00000} & \texttt{X0} & Constant zero. Reads return zero. Writes are ignored and do not create a dependency. \\
+\texttt{0b00001} & \texttt{X1} & General scalar register. \\
+\texttt{0b00010} & \texttt{X2} & General scalar register. \\
+\texttt{0b00011} & \texttt{X3} & General scalar register. \\
+\texttt{0b00100}--\texttt{0b11110} & \texttt{X4}--\texttt{X30} & General scalar registers. \\
+\texttt{0b11111} & \texttt{X31} & General scalar register. \\
+\bottomrule
+\end{longtable}
+
+Scalar registers are 64-bit architectural values. They carry integer values, pointers, indices, strides, loop bounds, status values, and scalar operands imported by tile instructions. Branch and compare instructions read scalar register values directly; PTO does not define a separate integer condition-code register for these scalar forms.
+
+\section{Program Counter and Instruction Boundary State}
+\begin{longtable}{@{}L{0.24\linewidth}L{0.66\linewidth}@{}}
+\toprule
+State & Meaning \\
+\midrule
+\texttt{PC} & Address of the next CPU-visible instruction parcel. A variable-length PTO instruction advances by its encoded length after decode. \\
+Instruction length & Encoded by the low-bit form and domain fields described in Chapter~\ref{chap:encodings}. Implementations MUST preserve the decoded instruction boundary through issue, exception reporting, and retirement. \\
+Opcode state & The architectural operation is selected by opcode fields, not by implementation dispatch names. Reserved opcode values MUST trap or be rejected by the target profile before execution. \\
+\bottomrule
+\end{longtable}
+
+\section{Tile Operand and Metadata State}
+Tile instructions name their dataflow operands through encoded operand selectors and metadata selectors. A selector value is a field in the instruction stream, not a promise that the implementation stores the operand in any particular physical location. The instruction profile defines whether a selector denotes a destination tile operand, source tile operand, mask selector, metadata view, or descriptor-local operand binding.
+
+For the Davinci-v2 profile, these PTO metadata concepts map onto the Tile RAT and Tile Metadata RAT described by the implementation document. PTO rows map to Davinci \texttt{shape.y}, PTO columns map to \texttt{shape.x}, and PTO element format maps to the Davinci \texttt{format} field. Valid-region bounds are profile metadata derived from \texttt{B.DIM}, \texttt{B.ATTR}, or related descriptors; they are not the same as the physical \texttt{PT0}--\texttt{PT255} tags used inside TRegFile-4K.
+
+\begin{longtable}{@{}L{0.23\linewidth}L{0.65\linewidth}@{}}
+\toprule
+State component & Meaning \\
+\midrule
+Operand selectors & 5-bit fields in \texttt{B.IOT} or related tile descriptors. Their meaning is opcode-family-specific and is resolved with the decoded metadata. \\
+Element data & Values in the selected tile payload. Tile and vector instructions operate only on active elements in the valid region unless the instruction explicitly defines fill or padding behavior. \\
+Shape & Logical tile dimensions, written as rows by columns. On Davinci-v2, rows correspond to \texttt{shape.y} and columns correspond to \texttt{shape.x}. Shape constrains legal instruction forms and storage footprint. \\
+Valid rows and columns & Runtime valid-domain bounds. Semantics are defined for indices \texttt{0 <= r < Rv} and \texttt{0 <= c < Cv}; values outside the valid domain are unspecified unless an instruction defines them. \\
+Element format & Data type such as \texttt{f32}, \texttt{f16}, \texttt{bf16}, signed integer, or unsigned integer. Encoding fields select or constrain this metadata. \\
+Location intent & Profile-defined placement and movement intent for the selected operand. It participates in legality and scheduling but is expressed through opcode and metadata fields. \\
+Layout & Row-major, column-major, or profile-defined interpretation of stored elements. Layout participates in legality and memory or transform mapping. \\
+\bottomrule
+\end{longtable}
+
+\section{Memory, Event, and Control State}
+\begin{longtable}{@{}L{0.23\linewidth}L{0.65\linewidth}@{}}
+\toprule
+State class & Meaning \\
+\midrule
+Global-memory views & Addressable memory objects with element type, shape, stride, base address, and visibility rules. Tile movement instructions transfer valid domains between global memory and tile payload storage. \\
+Event state & Dependency tokens used to order asynchronous tile, memory, and compute work. Events progress from created to in-flight to completed, and waits establish visibility boundaries. Event state is exposed through SSR entries or event-producing instructions, not through WO/WM ROM body bytes. \\
+Task identity & Scheduler-provided dispatch identity used by SPMD, MPMD, or hybrid execution. It is a dispatch input and is not part of the WO/WM ROM body. \\
+Implementation rename state & Physical names and ready bits used by the backend are microarchitectural. They MUST NOT appear in PTO instruction encodings and MUST NOT change the architectural meaning of selector fields. \\
+\bottomrule
+\end{longtable}
+
+\section{Type and Legality Dimensions}
+Every instruction family MUST define its accepted operand classes. At minimum, legality is a function of opcode, scalar register fields, tile operand selector fields, element format, shape, valid region, location intent, layout, SSR control state, and instruction attributes. Unsupported combinations MUST be rejected by the relevant validator or backend profile with deterministic diagnostics.
+
+\section{SSR and Control State}
+SSR means System Status Registers. SSR names below are architectural concepts; this manual does not assign CPU CSR numbers or memory-mapped addresses for them. SSR state is CPU-visible control/status state and is not counted as WO/WM microcode ROM body storage.
+
+\begin{longtable}{@{}L{0.22\linewidth}L{0.22\linewidth}L{0.46\linewidth}@{}}
+\toprule
+SSR or control state & Updated by & Effect \\
+\midrule
+\texttt{SSR.STATUS} & system/control instructions & Current execution status bits: halted, trap-pending, event-waiting, and implementation-defined status flags. PTO tile instructions do not modify this register unless their instruction definition says so. \\
+\texttt{SSR.MODE} & system/control instructions & Execution mode bits and backend-profile feature enables that affect tile instruction legality, trapping, and synchronization behavior. \\
+\texttt{SSR.EVT} & event-producing instructions and waits & Tracks in-flight and completed event state for explicit dependency ordering. Event waits establish visibility boundaries for dependent tile, memory, and compute work. \\
+\texttt{SSR.TMETA} & decoded tile descriptors and metadata updates & Carries the current tile metadata interpretation used by tile instruction legality and microcode expansion: shape, valid shape, layout, element format, and mask selection. Physical backend tags are not part of this SSR-visible state. \\
+\texttt{SSR.TCFG} & configuration instructions & Placement and backend-profile configuration state. Configuration instructions bind tile or global-memory objects to implementation-defined storage resources when the selected backend profile exposes such bindings. \\
+\texttt{SSR.FPCTRL} & \shortstack[l]{\texttt{pto.tsethf32mode},\\\texttt{pto.tsettf32mode}} & Floating-point transform and rounding-control state for backend-specific HF32 and TF32 behavior. These side effects MUST be ordered before dependent compute. \\
+\texttt{SSR.XFORM} & transform configuration instructions & Matrix and image-transform configuration state consumed by later layout-transform operations, including FMATRIX and IMG2COL repeat or padding setup. \\
+\bottomrule
+\end{longtable}

@@ -1,0 +1,62 @@
+\section{\texttt{TRSQRT}}
+\noindent\textbf{Descriptor profile.} Vec entry 56, tile catalog opcode \texttt{0x1055}. Descriptor bundle: \texttt{B.OP + B.IOT}; WO/WM sites: 5; VEC beat-level sites: 5; ROM bytes: 40.
+
+\textit{Semantics.} Computes the element-wise reciprocal square root of \texttt{src} as \texttt{1.0 / sqrt(src[r, c])} and writes the result to \texttt{dst}. The ROM body achieves this by computing \texttt{sqrt(src)} then dividing 1.0 by the result. Note: for f16, the ROM body uses f16 for the broadcast 1.0; for f32, the ROM body uses f32. Mixing element formats across operands MUST be performed by an explicit \texttt{tcvt} step.
+
+\textit{Domain errors.} When \texttt{src[r, c] < 0}, the result is NaN. When \texttt{src[r, c]} is +Inf, the result is zero. When \texttt{src[r, c]} is +0, the result is +Inf. When \texttt{src[r, c]} is NaN, the result is NaN. When \texttt{src[r, c]} is negative, the result is NaN.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_56_pto_trsqrt_th0.pdf}{figs/encoding/tile_instruction_entries/entry_56_pto_trsqrt_th2.pdf}{0x1055}{56}{B.OP + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.IOT}. \texttt{B.OP.desc\_count} = 1; \texttt{B.OP.rom\_entry\_id} = 56.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TRSQRT}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
+\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
+\item[Metadata operands] No additional dimension or attribute descriptor is required beyond the tile operand bindings.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise reciprocal square root.
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \frac{1}{\sqrt{\mathrm{src}_{i,j}}}
+\]
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=56, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=1, kind=c} & \texttt{entry=56, cnt=0, res=vec, var=0} \\
+2 & \texttt{u\_vec.vsqrt} & \texttt{opc=0x29, x=0, fl=alu, seq=2, kind=u} & \texttt{entry=56, cnt=1, res=vec, var=0} \\
+3 & \texttt{u\_vec.vdiv} & \texttt{opc=0x12, x=0, fl=alu, seq=3, kind=b} & \texttt{entry=56, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=56, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+def rom_trsqrt(src, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            vinput = pto.vlds(src[row, col:])
+            if pto.constexpr(dtype == pto.f16):
+                one_scalar = pto.f16(1.0)
+            else:
+                one_scalar = pto.f32(1.0)
+            one = pto.vbr(one_scalar)
+            sqrt_result = pto.vsqrt(vinput, mask)
+            result = pto.vdiv(one, sqrt_result, mask)
+            pto.vsts(result, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

@@ -1,0 +1,89 @@
+\section{\texttt{TROWSUM}}
+\noindent\textbf{Descriptor profile.} Vec entry 55, tile catalog opcode \texttt{0x1054}. Descriptor bundle: \texttt{B.OP + B.DIM + B.IOT}; WO/WM sites: 7; VEC beat-level sites: 7; ROM bytes: 56.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_55_pto_trowsum_th0.pdf}{figs/encoding/tile_instruction_entries/entry_55_pto_trowsum_th2.pdf}{0x1054}{55}{B.OP + B.DIM + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.DIM + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 55.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TROWSUM}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector. ROM scratch tiles are not counted in \texttt{B.OP.desc\_count}.
+\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
+\item[Metadata operands] \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.
+\item[ROM scratch operands] \texttt{tmp} are allocated by lowering or the implementation profile for the microcode body. They are not encoded in the CPU-visible PTO-ISA header.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Reduce each row by summing across columns.
+\paragraph{PTO ISA operation.}
+Let \texttt{R = src.GetValidRow()} and \texttt{C = src.GetValidCol()}. For \texttt{0 \textless{}= i \textless{} R}:
+
+\[
+\mathrm{dst}_{i,0} = \sum_{j=0}^{C-1} \mathrm{src}_{i,j}
+\]
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=0, kind=c} & \texttt{entry=55, cnt=0, res=vec, var=0} \\
+1 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=55, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vcadd} & \texttt{opc=0x0C, x=0, fl=alu, seq=2, kind=b} & \texttt{entry=55, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vadd} & \texttt{opc=0x07, x=0, fl=alu, seq=3, kind=b} & \texttt{entry=55, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=4, kind=u} & \texttt{entry=55, cnt=1, res=vec, var=0} \\
+5 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=5, kind=b} & \texttt{entry=55, cnt=2, res=vec, var=0} \\
+6 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=6, kind=b} & \texttt{entry=55, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+def rom_trowsum(src, tmp, dst):
+    src_dtype = src.element_type
+    dst_dtype = dst.element_type
+
+    if pto.constexpr(src_dtype == pto.i16):
+        acc_dtype = pto.i32
+    else:
+        acc_dtype = src_dtype
+
+    lanes = pto.get_lanes(src_dtype)
+    valid_rows, valid_cols = src.valid_shape
+
+    zero_val = acc_dtype(0)
+
+    elem_bytes = pto.bytewidth(dst_dtype)
+    if pto.constexpr(elem_bytes == 4):
+        store_dist = pto.VStoreDist.ONE_POINT_B32
+    elif pto.constexpr(elem_bytes == 2):
+        store_dist = pto.VStoreDist.ONE_POINT_B16
+    else:
+        store_dist = pto.VStoreDist.ONE_POINT_B8
+
+    dst_mask_1, _ = pto.make_mask(dst_dtype, 1)
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+
+        acc_mask_1, _ = pto.make_mask(acc_dtype, 1)
+
+        v_acc = pto.vbr(zero_val)
+
+        for col in range(0, valid_cols, lanes):
+            mask, remained = pto.make_mask(src_dtype, remained)
+            v_src = pto.vlds(src[row, col:])
+
+            v_reduced = pto.vcadd(v_src, mask)
+
+            v_acc = pto.vadd(v_acc, v_reduced, acc_mask_1)
+
+        if pto.constexpr(acc_dtype != dst_dtype):
+            acc_mask_for_cvt, _ = pto.make_mask(acc_dtype, 1)
+            v_acc_casted = pto.vcvt(v_acc, dst_dtype, acc_mask_for_cvt, sat=pto.VcvtSatMode.SAT, part=pto.VcvtPartMode.EVEN)
+            pto.vsts(v_acc_casted, dst[row, 0:], dst_mask_1, dist=store_dist)
+        else:
+            pto.vsts(v_acc, dst[row, 0:], dst_mask_1, dist=store_dist)
+    return
+\end{lstlisting}
+\Needspace{0.50\textheight}

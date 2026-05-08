@@ -1,0 +1,52 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "1"
+    },
+    {
+      "bits": 3,
+      "name": "100"
+    },
+    {
+      "bits": 3,
+      "name": "000"
+    },
+    {
+      "bits": 5,
+      "name": "RegDst",
+      "attr": "11:7"
+    },
+    {
+      "bits": 3,
+      "name": "111"
+    },
+    {
+      "bits": 5,
+      "name": "SrcL",
+      "attr": "19:15"
+    },
+    {
+      "bits": 5,
+      "name": "SrcR",
+      "attr": "24:20"
+    },
+    {
+      "bits": 2,
+      "name": "SrcRType",
+      "attr": "26:25"
+    },
+    {
+      "bits": 5,
+      "name": "shamt",
+      "attr": "31:27"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "hflip": true,
+    "lanes": 1,
+    "fontsize": 12,
+    "hspace": 820
+  }
+}

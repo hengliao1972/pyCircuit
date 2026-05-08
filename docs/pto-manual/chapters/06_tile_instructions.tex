@@ -1,0 +1,177 @@
+\chapter{Tile Instructions}
+\label{chap:tile-instructions}
+\section{Tile Instruction Families}
+PTO tile instructions are the CPU-visible \texttt{pto.t*} operations named by programs. Scalar registers provide control values, indices, scalar imports, and synchronization operands for the tile surface. Each tile instruction has two representations. The bundled descriptor is the PTO-ISA header in the instruction stream: \texttt{B.OP} plus the descriptor words that bind architectural tile operands, scalar imports, dimensions, and attributes. The micro instruction body is the lower-level \texttt{u\_vec.*} sequence selected by the header; an implementation may store that sequence in ROM or generate equivalent vector micro instructions dynamically in hardware, but the visible tile instruction contract is the same.
+
+This chapter groups the CPU-visible tile instructions by architectural behavior. Each family has a common operand shape, common descriptor profile, and a common ROM-entry selection pattern. The per-instruction sections that follow give the exact opcode, PTO-ISA header bundle, and micro instruction body.
+\begin{longtable}{@{}L{0.25\linewidth}L{0.30\linewidth}L{0.35\linewidth}@{}}
+\toprule
+Family & Tile instructions & Architectural contract \\
+\midrule
+Tile-tile elementwise & \texttt{tadd}, \texttt{tsub}, \texttt{tmul}, \texttt{tdiv}, logical ops & Read two source tiles element-by-element and write one destination tile with the destination shape and format. \\
+Tile-scalar elementwise & \texttt{tadds}, \texttt{tsubs}, \texttt{tmuls}, shifts, scalar logical ops & Read one source tile and one scalar attribute or immediate; apply the scalar value across the active tile region. \\
+Unary and special math & \texttt{tabs}, \texttt{tneg}, \texttt{trecip}, \texttt{trelu}, \texttt{trsqrt}, \texttt{tsqrt}, \texttt{tlog}, \texttt{texp} & Read one source tile, apply a unary transform, and write one destination tile. \\
+Axis reduce & \texttt{trow*}, \texttt{tcol*} reductions & Reduce rows or columns according to \texttt{B.DIM}/\texttt{B.ATTR} metadata and write the reduced tile shape. \\
+Axis expand and broadcast & \texttt{trowexpand*}, \texttt{tcolexpand*}, \texttt{texpands} & Broadcast a row or column source across the destination active region before applying the operation. \\
+Partial and valid-region & \texttt{tpart*}, \texttt{tfillpad*} & Use valid-shape metadata and masks to limit reads or fill inactive regions. \\
+Select and predication & \texttt{tsel}, \texttt{tsels} & Use a mask or predicate tile to select between sources or scalar alternatives. \\
+Conversion & \texttt{tcvt} & Convert element format according to \texttt{B.OP.DataType} and \texttt{B.ATTR} format refinements, while preserving tile shape constraints. \\
+\bottomrule
+\end{longtable}
+
+\section{Instruction Pages}
+This chapter gives the source DSL body, encoded micro instruction site table, and execution summary for each tile instruction entry. The listings retain \texttt{pto.*} source calls; the site tables use encoded \texttt{u\_vec.*} microcode mnemonics.
+
+Each tile instruction section follows the same structure:
+
+\begin{itemize}
+\item \textbf{Descriptor profile}: Vec entry number, tile catalog opcode, descriptor bundle profile, WO/WM site count, VEC beat-site count, and ROM storage size.
+\item \textbf{Encoding overview}: Two encoding diagrams. The first shows the CPU-visible descriptor parcel as 32-bit stream words. The second shows the \texttt{B.OP} bit allocation used to select the catalog opcode, descriptor count, variant, and ROM entry.
+\item \textbf{Bundled descriptor (PTO-ISA header)}: The descriptor words that bind tile operands, scalar GPR imports, dimension metadata, and attribute metadata for this instruction. The listed bundle order is the header assembly order shown in the encoding diagram.
+\item \textbf{PTO ISA semantics}: The instruction-level contract over the valid tile region.
+\item \textbf{Microcode site table}: One row per static 64-bit vector micro instruction site, listing the sequence number, \texttt{u\_vec.*} mnemonic, high-half \texttt{WO} field encodings, and low-half \texttt{WM} field encodings. The \texttt{kind} column shows the operand kind (u = unary, b = binary, t = ternary, c = control). The \texttt{fl} column shows the FLAGS class (alu, mem, setup). Sites are ordered by SEQ value.
+\item \textbf{ROM body DSL}: The Python-like source body from which the WO/WM sites are derived. This shows the full microcode algorithm including loop structure, mask handling, load/store operations, and arithmetic. The listing is illustrative of the algorithm; the authoritative encoding is the site table above. Hardware may cache this body in ROM or synthesize equivalent vector micro instructions from the decoded header and tile metadata.
+\end{itemize}
+
+\textbf{Normative note on validity domains.} Each tile instruction is defined only over the valid rows and valid columns of its operands, as reported by the tile metadata. Elements outside the valid region MUST NOT be read by the microcode body unless the instruction's description explicitly defines fill, padding, or extension behavior. Results written outside the destination tile's valid region are implementation-defined.
+
+\textbf{Normative note on NaN, Inf, and overflow.} Floating-point tile instructions follow IEEE 754 unless otherwise stated. The sign of NaN is preserved through arithmetic operations. Division by zero produces Inf with the dividend's sign. Reciprocal and reciprocal-square-root of zero produce Inf. Overflow behavior is determined by the rounding mode encoded in the instruction's VARIANT field. When the VARIANT field encodes a specific rounding mode, that mode MUST be applied to all floating-point results for which rounding is defined.
+
+\Needspace{0.34\textheight}
+
+\clearpage
+\input{tile-instructions/00_pto_tabs.tex}
+\clearpage
+\input{tile-instructions/01_pto_tadd.tex}
+\clearpage
+\input{tile-instructions/02_pto_tadds.tex}
+\clearpage
+\input{tile-instructions/03_pto_tand.tex}
+\clearpage
+\input{tile-instructions/04_pto_tands.tex}
+\clearpage
+\input{tile-instructions/05_pto_tcolexpand.tex}
+\clearpage
+\input{tile-instructions/06_pto_tcolexpandadd.tex}
+\clearpage
+\input{tile-instructions/07_pto_tcolexpanddiv.tex}
+\clearpage
+\input{tile-instructions/08_pto_tcolexpandexpdif.tex}
+\clearpage
+\input{tile-instructions/09_pto_tcolexpandmax.tex}
+\clearpage
+\input{tile-instructions/10_pto_tcolexpandmin.tex}
+\clearpage
+\input{tile-instructions/11_pto_tcolexpandmul.tex}
+\clearpage
+\input{tile-instructions/12_pto_tcolexpandsub.tex}
+\clearpage
+\input{tile-instructions/13_pto_tcolmax.tex}
+\clearpage
+\input{tile-instructions/14_pto_tcolmin.tex}
+\clearpage
+\input{tile-instructions/15_pto_tcolprod.tex}
+\clearpage
+\input{tile-instructions/16_pto_tcolsum.tex}
+\clearpage
+\input{tile-instructions/17_pto_tcvt.tex}
+\clearpage
+\input{tile-instructions/18_pto_tdiv.tex}
+\clearpage
+\input{tile-instructions/19_pto_tdivs.tex}
+\clearpage
+\input{tile-instructions/20_pto_texp.tex}
+\clearpage
+\input{tile-instructions/21_pto_texpands.tex}
+\clearpage
+\input{tile-instructions/22_pto_tfillpad.tex}
+\clearpage
+\input{tile-instructions/23_pto_tfillpad_expand.tex}
+\clearpage
+\input{tile-instructions/24_pto_tlog.tex}
+\clearpage
+\input{tile-instructions/25_pto_tlrelu.tex}
+\clearpage
+\input{tile-instructions/26_pto_tmax.tex}
+\clearpage
+\input{tile-instructions/27_pto_tmaxs.tex}
+\clearpage
+\input{tile-instructions/28_pto_tmin.tex}
+\clearpage
+\input{tile-instructions/29_pto_tmins.tex}
+\clearpage
+\input{tile-instructions/30_pto_tmul.tex}
+\clearpage
+\input{tile-instructions/31_pto_tmuls.tex}
+\clearpage
+\input{tile-instructions/32_pto_tneg.tex}
+\clearpage
+\input{tile-instructions/33_pto_tnot.tex}
+\clearpage
+\input{tile-instructions/34_pto_tor.tex}
+\clearpage
+\input{tile-instructions/35_pto_tors.tex}
+\clearpage
+\input{tile-instructions/36_pto_tpartadd.tex}
+\clearpage
+\input{tile-instructions/37_pto_tpartmax.tex}
+\clearpage
+\input{tile-instructions/38_pto_tpartmin.tex}
+\clearpage
+\input{tile-instructions/39_pto_tpartmul.tex}
+\clearpage
+\input{tile-instructions/40_pto_trecip.tex}
+\clearpage
+\input{tile-instructions/41_pto_trelu.tex}
+\clearpage
+\input{tile-instructions/42_pto_trowargmax.tex}
+\clearpage
+\input{tile-instructions/43_pto_trowargmin.tex}
+\clearpage
+\input{tile-instructions/44_pto_trowexpand.tex}
+\clearpage
+\input{tile-instructions/45_pto_trowexpandadd.tex}
+\clearpage
+\input{tile-instructions/46_pto_trowexpanddiv.tex}
+\clearpage
+\input{tile-instructions/47_pto_trowexpandexpdif.tex}
+\clearpage
+\input{tile-instructions/48_pto_trowexpandmax.tex}
+\clearpage
+\input{tile-instructions/49_pto_trowexpandmin.tex}
+\clearpage
+\input{tile-instructions/50_pto_trowexpandmul.tex}
+\clearpage
+\input{tile-instructions/51_pto_trowexpandsub.tex}
+\clearpage
+\input{tile-instructions/52_pto_trowmax.tex}
+\clearpage
+\input{tile-instructions/53_pto_trowmin.tex}
+\clearpage
+\input{tile-instructions/54_pto_trowprod.tex}
+\clearpage
+\input{tile-instructions/55_pto_trowsum.tex}
+\clearpage
+\input{tile-instructions/56_pto_trsqrt.tex}
+\clearpage
+\input{tile-instructions/57_pto_tsel.tex}
+\clearpage
+\input{tile-instructions/58_pto_tsels.tex}
+\clearpage
+\input{tile-instructions/59_pto_tshl.tex}
+\clearpage
+\input{tile-instructions/60_pto_tshls.tex}
+\clearpage
+\input{tile-instructions/61_pto_tshr.tex}
+\clearpage
+\input{tile-instructions/62_pto_tshrs.tex}
+\clearpage
+\input{tile-instructions/63_pto_tsqrt.tex}
+\clearpage
+\input{tile-instructions/64_pto_tsub.tex}
+\clearpage
+\input{tile-instructions/65_pto_tsubs.tex}
+\clearpage
+\input{tile-instructions/66_pto_txor.tex}
+\clearpage
+\input{tile-instructions/67_pto_txors.tex}

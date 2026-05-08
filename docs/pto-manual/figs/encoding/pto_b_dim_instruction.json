@@ -1,0 +1,39 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "X"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "uimm17",
+      "attr": "IMM_HI"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "RegSrc",
+      "attr": "RS"
+    },
+    {
+      "bits": 12,
+      "name": "uimm17",
+      "attr": "IMM_LO"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

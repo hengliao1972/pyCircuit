@@ -1,0 +1,25 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "X"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 25,
+      "name": "simm25",
+      "attr": "SIMM"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

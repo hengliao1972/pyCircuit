@@ -1,0 +1,18 @@
+{
+  "reg": [
+    {
+      "bits": 32,
+      "name": "W0: B.OP",
+      "attr": "32-bit word"
+    },
+    {
+      "bits": 32,
+      "name": "W1: B.IOT",
+      "attr": "32-bit word"
+    }
+  ],
+  "config": {
+    "bits": 64,
+    "lanes": 2
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "X"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "SizeCode/RegSrc",
+      "attr": "SZ/RS"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "SrcTile0",
+      "attr": "ST0"
+    },
+    {
+      "bits": 5,
+      "name": "SrcTile1",
+      "attr": "ST1"
+    },
+    {
+      "bits": 3,
+      "name": "DstTile",
+      "attr": "TDT"
+    },
+    {
+      "bits": 1,
+      "name": "S0V"
+    },
+    {
+      "bits": 1,
+      "name": "S1V"
+    },
+    {
+      "bits": 1,
+      "name": "S0R"
+    },
+    {
+      "bits": 1,
+      "name": "S1R"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

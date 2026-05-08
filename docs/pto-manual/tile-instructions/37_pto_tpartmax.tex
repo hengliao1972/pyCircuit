@@ -1,0 +1,86 @@
+\section{\texttt{TPARTMAX}}
+\noindent\textbf{Descriptor profile.} Vec entry 37, tile catalog opcode \texttt{0x1042}. Descriptor bundle: \texttt{B.OP + B.ATTR + B.IOT}; WO/WM sites: 10; VEC beat-level sites: 8; ROM bytes: 80.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_37_pto_tpartmax_th0.pdf}{figs/encoding/tile_instruction_entries/entry_37_pto_tpartmax_th2.pdf}{0x1042}{37}{B.OP + B.ATTR + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.ATTR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 37.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TPARTMAX}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.ATTR} carries partial-valid-region policy. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
+\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
+\item[Metadata operands] \texttt{B.ATTR} carries partial-valid-region policy.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Partial elementwise max with implementation-defined handling of mismatched valid regions.
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the destination valid region:
+
+\[
+\mathrm{dst}_{i,j} =
+\begin{cases}
+\max(\mathrm{src0}_{i,j}, \mathrm{src1}_{i,j}) & \text{if both inputs are defined at } (i,j) \\
+\mathrm{src0}_{i,j} & \text{if only src0 is defined at } (i,j) \\
+\mathrm{src1}_{i,j} & \text{if only src1 is defined at } (i,j)
+\end{cases}
+\]
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=0, kind=c} & \texttt{entry=37, cnt=0, res=vec, var=0} \\
+1 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=37, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.mem\_bar} & \texttt{opc=0x00, x=0, fl=setup, seq=2, kind=u} & \texttt{entry=37, cnt=1, res=vec, var=0} \\
+3 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=37, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=37, cnt=2, res=vec, var=0} \\
+5 & \texttt{u\_vec.mem\_bar} & \texttt{opc=0x00, x=0, fl=setup, seq=5, kind=u} & \texttt{entry=37, cnt=1, res=vec, var=0} \\
+6 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=6, kind=b} & \texttt{entry=37, cnt=2, res=vec, var=0} \\
+7 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=7, kind=b} & \texttt{entry=37, cnt=2, res=vec, var=0} \\
+8 & \texttt{u\_vec.vmax} & \texttt{opc=0x1A, x=0, fl=alu, seq=8, kind=b} & \texttt{entry=37, cnt=2, res=vec, var=0} \\
+9 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=9, kind=b} & \texttt{entry=37, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+def rom_tpartmax(src0, src1, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+    src0_valid_rows, src0_valid_cols = src0.valid_shape
+    src1_valid_rows, src1_valid_cols = src1.valid_shape
+    lanes = pto.get_lanes(dtype)
+
+    pad_scalar = pto.PadValue.MIN.eval(dtype)
+    pad_vec = pto.vbr(pad_scalar)
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            pto.vsts(pad_vec, dst[row, col:], mask)
+
+    pto.mem_bar(pto.BarrierType.VST_VLD)
+
+    for row in range(0, src0_valid_rows, 1):
+        remained = src0_valid_cols
+        for col in range(0, src0_valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec0 = pto.vlds(src0[row, col:])
+            pto.vsts(vec0, dst[row, col:], mask)
+
+    pto.mem_bar(pto.BarrierType.VST_VLD)
+
+    for row in range(0, src1_valid_rows, 1):
+        remained = src1_valid_cols
+        for col in range(0, src1_valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec_dst = pto.vlds(dst[row, col:])
+            vec1 = pto.vlds(src1[row, col:])
+            result = pto.vmax(vec_dst, vec1, mask)
+            pto.vsts(result, dst[row, col:], mask)
+
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

@@ -1,0 +1,104 @@
+\section{\texttt{TPARTADD}}
+\noindent\textbf{Descriptor profile.} Vec entry 36, tile catalog opcode \texttt{0x1041}. Descriptor bundle: \texttt{B.OP + B.ATTR + B.IOT}; WO/WM sites: 6; VEC beat-level sites: 6; ROM bytes: 48.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_36_pto_tpartadd_th0.pdf}{figs/encoding/tile_instruction_entries/entry_36_pto_tpartadd_th2.pdf}{0x1041}{36}{B.OP + B.ATTR + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.ATTR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 36.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TPARTADD}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.ATTR} carries partial-valid-region policy. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
+\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
+\item[Metadata operands] \texttt{B.ATTR} carries partial-valid-region policy.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Partial elementwise add with implementation-defined handling of mismatched valid regions.
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the destination valid region:
+
+\[
+\mathrm{dst}_{i,j} =
+\begin{cases}
+\mathrm{src0}_{i,j} + \mathrm{src1}_{i,j} & \text{if both inputs are defined at } (i,j) \\
+\mathrm{src0}_{i,j} & \text{if only src0 is defined at } (i,j) \\
+\mathrm{src1}_{i,j} & \text{if only src1 is defined at } (i,j)
+\end{cases}
+\]
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=36, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=36, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vadd} & \texttt{opc=0x07, x=0, fl=alu, seq=2, kind=b} & \texttt{entry=36, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=36, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=36, cnt=2, res=vec, var=0} \\
+5 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=5, kind=b} & \texttt{entry=36, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+def tpart_op_instr(dst, src0, src1, valid_rows, valid_cols):
+    dtype = dst.element_type
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            lhs = pto.vlds(src0[row, col:])
+            rhs = pto.vlds(src1[row, col:])
+            summed = pto.vadd(lhs, rhs, mask)
+            pto.vsts(summed, dst[row, col:], mask)
+    return None
+
+def tpart_copy_instr(dst, src, valid_rows, valid_cols, start_row):
+    dtype = dst.element_type
+    for row in range(start_row, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            val = pto.vlds(src[row, col:])
+            pto.vsts(val, dst[row, col:], mask)
+    return None
+
+def tpart_op(dst, src0, src1,
+             dst_valid_rows, dst_valid_cols,
+             src1_valid_rows, src1_valid_cols):
+
+    src1_eq_dst = (src1_valid_rows == dst_valid_rows and src1_valid_cols == dst_valid_cols)
+    src1_row_lt_dst = (src1_valid_rows < dst_valid_rows and src1_valid_cols == dst_valid_cols)
+    src1_col_lt_dst = (src1_valid_rows <= dst_valid_rows and src1_valid_cols < dst_valid_cols)
+
+    if src1_eq_dst:
+        tpart_op_instr(dst, src0, src1, dst_valid_rows, dst_valid_cols)
+    elif src1_col_lt_dst:
+        tpart_copy_instr(dst, src0, dst_valid_rows, dst_valid_cols, 0)
+        if src1_valid_cols > 0:
+            tpart_op_instr(dst, src0, src1, src1_valid_rows, src1_valid_cols)
+    elif src1_row_lt_dst:
+        if src1_valid_cols > 0:
+            tpart_op_instr(dst, src0, src1, src1_valid_rows, src1_valid_cols)
+        tpart_copy_instr(dst, src0, dst_valid_rows, dst_valid_cols, src1_valid_rows)
+
+    return
+
+def rom_tpartadd(src0, src1, dst):
+    dst_valid_rows, dst_valid_cols = dst.valid_shape
+    src0_valid_rows, src0_valid_cols = src0.valid_shape
+    src1_valid_rows, src1_valid_cols = src1.valid_shape
+
+    src0_eq_dst = (src0_valid_rows == dst_valid_rows and src0_valid_cols == dst_valid_cols)
+    src1_eq_dst = (src1_valid_rows == dst_valid_rows and src1_valid_cols == dst_valid_cols)
+
+    if src0_eq_dst or src1_eq_dst:
+        if src0_eq_dst:
+            tpart_op(dst, src0, src1, dst_valid_rows, dst_valid_cols, src1_valid_rows, src1_valid_cols)
+        elif src1_eq_dst:
+            tpart_op(dst, src1, src0, dst_valid_rows, dst_valid_cols, src0_valid_rows, src0_valid_cols)
+
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

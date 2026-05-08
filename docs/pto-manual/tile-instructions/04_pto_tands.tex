@@ -1,0 +1,52 @@
+\section{\texttt{TANDS}}
+\noindent\textbf{Descriptor profile.} Vec entry 4, tile catalog opcode \texttt{0x100C}. Descriptor bundle: \texttt{B.OP + B.IOR + B.IOT}; WO/WM sites: 4; VEC beat-level sites: 4; ROM bytes: 32.\par\smallskip
+\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_04_pto_tands_th0.pdf}{figs/encoding/tile_instruction_entries/entry_04_pto_tands_th2.pdf}{0x100C}{4}{B.OP + B.IOR + B.IOT}
+\paragraph{Bundled descriptor (PTO-ISA header).}
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Bundle] \texttt{B.OP + B.IOR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 4.
+\item[Assembly] 0: \texttt{B.OP} selects \texttt{TANDS}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.IOR} imports scalar operand(s) \texttt{scalar} through 5-bit scalar register IDs. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
+\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
+\item[Scalar GPR operands] 1 scalar input(s): \texttt{scalar}. Imported through \texttt{B.IOR} using 5-bit scalar register IDs.
+\item[Metadata operands] No additional dimension or attribute descriptor is required beyond the tile operand bindings.
+\end{description}
+\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise bitwise AND of a tile and a scalar.
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \mathrm{src}_{i,j} \;\&\; \mathrm{scalar}
+\]
+}\par\smallskip
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=4, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=1, kind=c} & \texttt{entry=4, cnt=0, res=vec, var=0} \\
+2 & \texttt{u\_vec.vand} & \texttt{opc=0x09, x=0, fl=alu, seq=2, kind=b} & \texttt{entry=4, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=4, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{ROM body DSL.}
+\begin{lstlisting}[style=ptocode]
+def rom_tands(src, scalar, dst):
+    dtype = src.element_type
+    valid_rows, valid_cols = src.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec = pto.vlds(src[row, col:])
+            scalar_vec = pto.vbr(scalar)
+            result = pto.vand(vec, scalar_vec, mask)
+            pto.vsts(result, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

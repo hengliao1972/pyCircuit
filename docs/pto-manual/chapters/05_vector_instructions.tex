@@ -1,0 +1,23 @@
+\chapter{Vector Instructions}
+\label{chap:vector-instructions}
+This chapter defines the lower-level vector micro-instruction surface used by tile instruction bodies. CPU-visible PTO tile instructions are documented in Chapter~\ref{chap:tile-instructions}; scalar/control instructions are documented in Chapter~\ref{chap:scalar-instructions}. A vector micro instruction is not fetched as a standalone CPU instruction. It is the 64-bit \texttt{WO/WM} site selected by a decoded tile bundle and then either read from ROM or produced by an equivalent hardware microgenerator.
+
+\section{Vector Micro-Instruction Encoding}
+Every \texttt{u\_vec.*} site uses the 64-bit micro instruction encoding in Section~\ref{sec:micro_instruction_encoding}: \texttt{WM[31:0]} carries entry, operand-count, result-class, source-class, variant, and reserved metadata; \texttt{WO[63:32]} carries the opcode, extension bit, flags, sequence number, operand kind, and operand slot selectors. The \texttt{WO.OPCODE} field selects the mnemonic in the opcode map, while the tile bundle supplies the architectural operand bindings consumed by the microassembler.
+
+The same encoding is used whether a target stores the sites in a ROM body or generates them dynamically from \texttt{B.OP}, \texttt{B.IOT}, \texttt{B.IOR}, \texttt{B.DIM}, \texttt{B.ATTR}, and tile metadata. Dynamic generation is an implementation strategy; it MUST produce the same ordered \texttt{u\_vec.*} behavior for the decoded tile instruction profile.
+
+\section{Vector Micro-Instruction Families}
+This chapter groups the ROM-resident micro instructions by execution role. The WO opcode map above gives the exact 7-bit value; this table describes the behavior class consumed by the Davinci microassembler.
+\begin{longtable}{@{}L{0.25\linewidth}L{0.30\linewidth}L{0.35\linewidth}@{}}
+\toprule
+Family & Micro instructions & ROM-body role \\
+\midrule
+Vector memory & \texttt{u\_vec.vlds}, \texttt{u\_vec.vsts}, \texttt{u\_vec.plds} & Move active vector lanes between tile buffers, predicate storage, and vector staging registers. \\
+Vector arithmetic & \texttt{u\_vec.vadd}, \texttt{u\_vec.vsub}, \texttt{u\_vec.vmul}, \texttt{u\_vec.vdiv}, scalar variants & Execute lane-wise arithmetic under the active mask emitted by the tile metadata path. \\
+Vector comparisons and select & \texttt{u\_vec.vcmp}, \texttt{u\_vec.vsel}, \texttt{u\_vec.vbr} & Build predicates, branch within a ROM body, and select lane results. \\
+Vector format and packing & \texttt{u\_vec.vcvt}, \texttt{u\_vec.vbitcast}, \texttt{u\_vec.vintlv}, \texttt{u\_vec.vdintlv}, \texttt{u\_vec.p*} & Convert or rearrange vector and predicate data without changing the CPU-visible tile catalog opcode. \\
+Special functions & \texttt{u\_vec.vexp}, \texttt{u\_vec.vln}, \texttt{u\_vec.vsqrt}, \texttt{u\_vec.vlrelu} & Invoke special-function datapaths through fixed micro instruction encodings. \\
+Ordering & \texttt{u\_vec.mem\_bar} & Mark ordering points for memory or tile-buffer side effects inside a body. \\
+\bottomrule
+\end{longtable}

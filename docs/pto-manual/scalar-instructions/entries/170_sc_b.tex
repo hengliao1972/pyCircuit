@@ -1,0 +1,37 @@
+% Scalar instruction entry source: tools/generate_scalar_instruction_catalog.py.
+\subsection{\texttt{SC.B}}
+\label{sec:scalar-sc_b}
+\index{SC.B@\texttt{SC.B}}
+\begin{sloppypar}\noindent\textbf{Purpose.} Store-conditional: attempts an atomic store that succeeds only if the reservation is still valid; returns a status code.\end{sloppypar}\smallskip
+\noindent\textbf{Syntax.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+sc.b<.{aq, rl, f, aqrl, aqf, rlf, aqrlf}> SrcL, [SrcR], ->RegDst
+\end{lstlisting}
+\noindent\textbf{Encoding.}\par
+\noindent\includegraphics[width=\textwidth]{figs/encoding/scalar_instruction_entries/enc_sc_b.pdf}\par\smallskip
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Format] \texttt{L32} \texttt{32-bit} scalar word.
+\item[Pattern] \texttt{0000.............001.....0001011}.
+\end{description}
+\noindent\textbf{Classification.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Category] Atomic Memory Operations.
+\item[Family] Atomic Operation.
+\item[Execution class] \texttt{AMO}; uop\_kind=AMO.
+\end{description}
+\noindent\textbf{Operand fields.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[\texttt{RegDst}] Bits \texttt{11:7 (5b)}. 5-bit scalar destination register that receives the store-conditional status code; X0 discards the status write.
+\item[\texttt{SrcL}] Bits \texttt{19:15 (5b)}. 5-bit scalar source register containing the value to store if the reservation check succeeds.
+\item[\texttt{SrcR}] Bits \texttt{24:20 (5b)}. 5-bit scalar source register containing the memory address checked against the active reservation.
+\item[\texttt{aq}] Bits \texttt{26:26 (1b)}. Acquire ordering bit for atomic memory operations. When set, later memory operations cannot be observed before this operation in the selected ordering domain.
+\item[\texttt{far}] Bits \texttt{27:27 (1b)}. Atomic ordering-domain qualifier used with aq/rl suffixes; the assembly suffix containing f selects this encoded bit.
+\item[\texttt{rl}] Bits \texttt{25:25 (1b)}. Release ordering bit for atomic memory operations. When set, earlier memory operations cannot be observed after this operation in the selected ordering domain.
+\end{description}
+\noindent\textbf{Operation.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+addr = Read(SrcR)
+status = StoreConditional8(addr, Read(SrcL))
+Write(RegDst, status)
+\end{lstlisting}
+\Needspace{0.08\textheight}

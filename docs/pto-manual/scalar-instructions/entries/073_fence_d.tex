@@ -1,0 +1,31 @@
+% Scalar instruction entry source: tools/generate_scalar_instruction_catalog.py.
+\subsection{\texttt{FENCE.D}}
+\label{sec:scalar-fence_d}
+\index{FENCE.D@\texttt{FENCE.D}}
+\begin{sloppypar}\noindent\textbf{Purpose.} Orders data-memory operations according to the encoded predecessor and successor masks.\end{sloppypar}\smallskip
+\noindent\textbf{Syntax.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+fence.d pred_imm, succ_imm
+\end{lstlisting}
+\noindent\textbf{Encoding.}\par
+\noindent\includegraphics[width=\textwidth]{figs/encoding/scalar_instruction_entries/enc_fence_d.pdf}\par\smallskip
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Format] \texttt{L32} \texttt{32-bit} scalar word.
+\item[Pattern] \texttt{0000........00000010000000101011}.
+\end{description}
+\noindent\textbf{Classification.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Category] System, Cache, SSR, and Execution Control.
+\item[Family] Execution Control.
+\item[Execution class] \texttt{SYS}; uop\_kind=SYS.
+\end{description}
+\noindent\textbf{Operand fields.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[\texttt{PRED\_IMM}] Bits \texttt{27:24 (4b)}. 4-bit fence predecessor set. Each bit names a memory or I/O access class participating in the ordering constraint.
+\item[\texttt{SUCC\_IMM}] Bits \texttt{23:20 (4b)}. 4-bit fence successor set. Each bit names a memory or I/O access class participating in the ordering constraint.
+\end{description}
+\noindent\textbf{Operation.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+FenceD()  // data-cache fence
+\end{lstlisting}
+\Needspace{0.08\textheight}
