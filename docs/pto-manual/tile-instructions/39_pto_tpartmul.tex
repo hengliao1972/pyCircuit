@@ -1,18 +1,11 @@
-\section{\texttt{TPARTMUL}}
-\noindent\textbf{Descriptor profile.} Vec entry 39, tile catalog opcode \texttt{0x1044}. Descriptor bundle: \texttt{B.OP + B.ATTR + B.IOT}; WO/WM sites: 6; VEC beat-level sites: 6; ROM bytes: 48.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_39_pto_tpartmul_th0.pdf}{figs/encoding/tile_instruction_entries/entry_39_pto_tpartmul_th2.pdf}{0x1044}{39}{B.OP + B.ATTR + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.ATTR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 39.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TPARTMUL}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.ATTR} carries partial-valid-region policy. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] \texttt{B.ATTR} carries partial-valid-region policy.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TPARTMUL}}
+\noindent\textbf{Bundle encoding.} UOP entry 39, opcode \texttt{0x1044}. Bundle: \texttt{B.OP + B.ARG + B.ATTR + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1044}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.ATTR} carries partial-valid-region policy.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Partial elementwise multiply with implementation-defined handling of mismatched valid regions.
+\paragraph{Example.}
+Same pattern as \texttt{TPARTADD} $+$ but with multiplication instead of addition.
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the destination valid region:
 
@@ -25,6 +18,8 @@ For each element \texttt{(i, j)} in the destination valid region:
 \end{cases}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+Integer multiplication wraps. Saturated integer types saturate.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -40,7 +35,7 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
 def tpart_op_instr(dst, src0, src1, valid_rows, valid_cols):
     dtype = dst.element_type
@@ -85,7 +80,7 @@ def tpart_op(dst, src0, src1,
 
     return
 
-def rom_tpartmul(src0, src1, dst):
+def uop_tpartmul(src0, src1, dst):
     dst_valid_rows, dst_valid_cols = dst.valid_shape
     src0_valid_rows, src0_valid_cols = src0.valid_shape
     src1_valid_rows, src1_valid_cols = src1.valid_shape

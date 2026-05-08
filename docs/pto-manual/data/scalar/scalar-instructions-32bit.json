@@ -53613,7 +53613,7 @@
       }
     }
   ],
-  "isa": "LinxISA",
+  "isa": "PTO",
   "manual_description_coverage": {
     "adjusted_count": 13,
     "adjusted_mnemonics": [

@@ -1,5 +1,5 @@
-\section{\texttt{TDIV}}
-\noindent\textbf{Descriptor profile.} Vec entry 18, tile catalog opcode \texttt{0x101D}. Descriptor bundle: \texttt{B.OP + B.IOT}; WO/WM sites: 4; VEC beat-level sites: 4; ROM bytes: 32.
+\subsection{\texttt{TDIV}}
+\noindent\textbf{Bundle encoding.} UOP entry 18, opcode \texttt{0x101D}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x101D}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
 
 \textit{Semantics.} Performs element-wise division of \texttt{src0} by \texttt{src1} across the destination tile's valid region. The quotient is written to \texttt{dst[r, c]} for each valid position.
 
@@ -10,19 +10,12 @@
 \textit{Overflow and underflow.} Follow IEEE 754 with the rounding mode specified by the instruction's VARIANT field.
 
 \textit{VARIANT.} VARIANT field encodes the floating-point rounding mode. Defined values: 0 = RINT (round to nearest even, default), 1 = RZ (round toward zero), 2 = RP (round toward +Inf), 3 = RM (round toward -Inf). For integer divide variants, VARIANT may encode saturation mode.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_18_pto_tdiv_th0.pdf}{figs/encoding/tile_instruction_entries/entry_18_pto_tdiv_th2.pdf}{0x101D}{18}{B.OP + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.IOT}. \texttt{B.OP.desc\_count} = 1; \texttt{B.OP.rom\_entry\_id} = 18.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TDIV}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] No additional dimension or attribute descriptor is required beyond the tile operand bindings.
-\end{description}
-\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Elementwise division of two tiles.
+\paragraph{Example.}
+tile\_a / tile\_b: element at (i,j) = tile\_a[i,j] / tile\_b[i,j]. Division by zero produces Inf with the dividend's sign.
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the valid region:
 
@@ -30,6 +23,8 @@ For each element \texttt{(i, j)} in the valid region:
 \mathrm{dst}_{i,j} = \frac{\mathrm{src0}_{i,j}}{\mathrm{src1}_{i,j}}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+IEEE 754 applies: 0.0/0.0 = NaN, x/0.0 for non-zero x = +/-Inf. FP rounding mode from VARIANT field. Integer division truncates toward zero.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -43,9 +38,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_tdiv(src0, src1, dst):
+def uop_tdiv(src0, src1, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

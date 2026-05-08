@@ -1,18 +1,11 @@
-\section{\texttt{TPARTMAX}}
-\noindent\textbf{Descriptor profile.} Vec entry 37, tile catalog opcode \texttt{0x1042}. Descriptor bundle: \texttt{B.OP + B.ATTR + B.IOT}; WO/WM sites: 10; VEC beat-level sites: 8; ROM bytes: 80.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_37_pto_tpartmax_th0.pdf}{figs/encoding/tile_instruction_entries/entry_37_pto_tpartmax_th2.pdf}{0x1042}{37}{B.OP + B.ATTR + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.ATTR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 37.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TPARTMAX}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.ATTR} carries partial-valid-region policy. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] \texttt{B.ATTR} carries partial-valid-region policy.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TPARTMAX}}
+\noindent\textbf{Bundle encoding.} UOP entry 37, opcode \texttt{0x1042}. Bundle: \texttt{B.OP + B.ARG + B.ATTR + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1042}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.ATTR} carries partial-valid-region policy.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Partial elementwise max with implementation-defined handling of mismatched valid regions.
+\paragraph{Example.}
+dst[i,j] = max(src0[i,j], src1[i,j]) when both valid; dst[i,j] = src0[i,j] when only src0 valid; dst[i,j] = src1[i,j] when only src1 valid.
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the destination valid region:
 
@@ -25,6 +18,8 @@ For each element \texttt{(i, j)} in the destination valid region:
 \end{cases}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+NaN propagates when both inputs are valid. When only one input is valid, its value is copied without NaN semantics evaluation.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -44,9 +39,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_tpartmax(src0, src1, dst):
+def uop_tpartmax(src0, src1, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
     src0_valid_rows, src0_valid_cols = src0.valid_shape

@@ -20,28 +20,9 @@
 \newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
 \lstdefinestyle{ptocode}{basicstyle=\ttfamily\tiny,breaklines=true,breakatwhitespace=false,columns=fullflexible,keepspaces=true,showstringspaces=false,frame=none,xleftmargin=0.75em,xrightmargin=0.25em,aboveskip=4pt,belowskip=8pt}
 \lstdefinestyle{ptoscalarcode}{basicstyle=\ttfamily\small,breaklines=true,breakatwhitespace=false,columns=fullflexible,keepspaces=true,showstringspaces=false,frame=none,xleftmargin=0.75em,xrightmargin=0.25em,aboveskip=3pt,belowskip=5pt}
+\newcommand{\code}[1]{\texttt{#1}}
 \setlength{\LTpre}{3pt}
 \setlength{\LTpost}{6pt}
-\newcommand{\TileInstructionEncoding}[5]{%
-\Needspace{0.42\textheight}
-{\small
-\noindent\textbf{Encoding overview.} A PTO tile instruction is a variable-length descriptor parcel. Word 0 is always \texttt{B.OP}; \texttt{B.OP.desc\_count} declares how many following \texttt{B.*} descriptor words belong to the same CPU-visible instruction. The first encoding diagram shows the descriptor parcel order for this instruction. The second encoding diagram shows the \texttt{B.OP} bit allocation that selects the catalog opcode, ROM entry, descriptor count, variant, and profile-local selector.\par\smallskip
-\noindent\includegraphics[width=\linewidth]{#1}\par\smallskip
-\noindent\includegraphics[width=\linewidth]{#2}\par\smallskip
-\begin{tabular}{@{}L{0.21\linewidth}L{0.19\linewidth}L{0.52\linewidth}@{}}
-\toprule
-Encoding field & Value & Meaning \\
-\midrule
-\texttt{Tile catalog opcode} & \texttt{#3} & PTO tile instruction catalog value. \\
-\texttt{Descriptor bundle} & \texttt{#5} & Ordered CPU-visible descriptor bundle for this instruction profile. \\
-\texttt{B.OP.OpcodeSel} & profile-defined & Profile-local selector carried in \texttt{B.OP}; combined with descriptor and extension context to identify this catalog entry. \\
-\texttt{B.OP.desc\_count} & profile-defined & Number of following \texttt{B.*} descriptor instructions required by this instruction family. \\
-\texttt{B.OP.rom\_entry\_id} & \texttt{#4} & Microcode ROM body selected after descriptor decode. \\
-\bottomrule
-\end{tabular}
-}\par\smallskip
-\noindent\textbf{Microcode encoding.} Each site in the table below is one fixed 64-bit vector micro instruction. The low 32 bits are \texttt{WM}; the high 32 bits are \texttt{WO}. The \texttt{WO} and \texttt{WM} columns list the two encoded halves of the same micro instruction. The source listing after the table explains the ROM algorithm; hardware may store those sites in ROM or dynamically generate equivalent sites after decoding the PTO-ISA header.\par\smallskip
-}
 \usepackage{enumitem}
 \usepackage{pdflscape}
 \setlist{nosep}

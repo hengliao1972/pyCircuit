@@ -1,18 +1,11 @@
-\section{\texttt{TADDS}}
-\noindent\textbf{Descriptor profile.} Vec entry 2, tile catalog opcode \texttt{0x1009}. Descriptor bundle: \texttt{B.OP + B.IOR + B.IOT}; WO/WM sites: 3; VEC beat-level sites: 3; ROM bytes: 24.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_02_pto_tadds_th0.pdf}{figs/encoding/tile_instruction_entries/entry_02_pto_tadds_th2.pdf}{0x1009}{2}{B.OP + B.IOR + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.IOR + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 2.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TADDS}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.IOR} imports scalar operand(s) \texttt{scalar} through 5-bit scalar register IDs. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] 1 scalar input(s): \texttt{scalar}. Imported through \texttt{B.IOR} using 5-bit scalar register IDs.
-\item[Metadata operands] No additional dimension or attribute descriptor is required beyond the tile operand bindings.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TADDS}}
+\noindent\textbf{Bundle encoding.} UOP entry 2, opcode \texttt{0x1009}. Bundle: \texttt{B.OP + B.ARG + B.IOR + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1009}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.IOR} imports scalar operand(s): \texttt{scalar}.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Elementwise add a scalar to a tile.
+\paragraph{Example.}
+Tile with elements [1, 2, 3, 4] plus scalar 10 gives [11, 12, 13, 14].
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the valid region:
 
@@ -20,6 +13,8 @@ For each element \texttt{(i, j)} in the valid region:
 \mathrm{dst}_{i,j} = \mathrm{src}_{i,j} + \mathrm{scalar}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+The scalar is imported via \texttt{B.IOR}. The broadcast is implicit in the microcode body via \texttt{u\_vec.vbr} $+$ \texttt{u\_vec.vadds}.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -32,9 +27,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_tadds(src, scalar, dst):
+def uop_tadds(src, scalar, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

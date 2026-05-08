@@ -1,22 +1,15 @@
-\section{\texttt{TRSQRT}}
-\noindent\textbf{Descriptor profile.} Vec entry 56, tile catalog opcode \texttt{0x1055}. Descriptor bundle: \texttt{B.OP + B.IOT}; WO/WM sites: 5; VEC beat-level sites: 5; ROM bytes: 40.
+\subsection{\texttt{TRSQRT}}
+\noindent\textbf{Bundle encoding.} UOP entry 56, opcode \texttt{0x1055}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1055}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
 
-\textit{Semantics.} Computes the element-wise reciprocal square root of \texttt{src} as \texttt{1.0 / sqrt(src[r, c])} and writes the result to \texttt{dst}. The ROM body achieves this by computing \texttt{sqrt(src)} then dividing 1.0 by the result. Note: for f16, the ROM body uses f16 for the broadcast 1.0; for f32, the ROM body uses f32. Mixing element formats across operands MUST be performed by an explicit \texttt{tcvt} step.
+\textit{Semantics.} Computes the element-wise reciprocal square root of \texttt{src} as \texttt{1.0 / sqrt(src[r, c])} and writes the result to \texttt{dst}. The microcode body achieves this by computing \texttt{sqrt(src)} then dividing 1.0 by the result. Note: for f16, the microcode body uses f16 for the broadcast 1.0; for f32, the microcode body uses f32. Mixing element formats across operands MUST be performed by an explicit \texttt{TCVT} step.
 
 \textit{Domain errors.} When \texttt{src[r, c] < 0}, the result is NaN. When \texttt{src[r, c]} is +Inf, the result is zero. When \texttt{src[r, c]} is +0, the result is +Inf. When \texttt{src[r, c]} is NaN, the result is NaN. When \texttt{src[r, c]} is negative, the result is NaN.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_56_pto_trsqrt_th0.pdf}{figs/encoding/tile_instruction_entries/entry_56_pto_trsqrt_th2.pdf}{0x1055}{56}{B.OP + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.IOT}. \texttt{B.OP.desc\_count} = 1; \texttt{B.OP.rom\_entry\_id} = 56.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TRSQRT}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] No additional dimension or attribute descriptor is required beyond the tile operand bindings.
-\end{description}
-\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Elementwise reciprocal square root.
+\paragraph{Example.}
+Tile elements [1, 4, 9] give [1.0, 0.5, 0.333...].
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the valid region:
 
@@ -24,6 +17,8 @@ For each element \texttt{(i, j)} in the valid region:
 \mathrm{dst}_{i,j} = \frac{1}{\sqrt{\mathrm{src}_{i,j}}}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+1/0 = Inf. 1/sqrt(0) = Inf. 1/sqrt(Inf) = 0. Negative input produces NaN. Accuracy is implementation-defined; hardware implementations typically use a Newton-Raphson refinement.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -38,9 +33,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_trsqrt(src, dst):
+def uop_trsqrt(src, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

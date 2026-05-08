@@ -1,26 +1,22 @@
-\section{\texttt{TROWARGMIN}}
-\noindent\textbf{Descriptor profile.} Vec entry 43, tile catalog opcode \texttt{0xF001}. Descriptor bundle: \texttt{B.OP + B.DIM + B.IOT}; WO/WM sites: 13; VEC beat-level sites: 12; ROM bytes: 104.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_43_pto_trowargmin_th0.pdf}{figs/encoding/tile_instruction_entries/entry_43_pto_trowargmin_th2.pdf}{0xF001}{43}{B.OP + B.DIM + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.DIM + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 43.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TROWARGMIN}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector. ROM scratch tiles are not counted in \texttt{B.OP.desc\_count}.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.
-\item[ROM scratch operands] \texttt{tmp} are allocated by lowering or the implementation profile for the microcode body. They are not encoded in the CPU-visible PTO-ISA header.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TROWARGMIN}}
+\noindent\textbf{Bundle encoding.} UOP entry 43, opcode \texttt{0xF001}. Bundle: \texttt{B.OP + B.ARG + B.DIM + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0xF001}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. Scratch operand(s) \texttt{tmp} are implementation-local and are not encoded in the CPU-visible bundle.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Get the column index of the minimum element for each row.
+\paragraph{Example.}
+Source row [3, 1, 7, 2]: output row[0] = 1 (0-indexed column of min value 1).
+\par\smallskip
 \paragraph{PTO ISA operation.}
 Let \texttt{R = src.GetValidRow()} and \texttt{C = src.GetValidCol()}. For \texttt{0 \textless{}= i \textless{} R}:
 
 \[
-\mathrm{dst}_{i,0} = \min_{0 \le j < C} j_{i}
+\mathrm{dst}_{i,0} = \operatorname*{arg\,min}_{0 \le j < C}\; \mathrm{src}_{i,j}
 \]
+
+\noindent where the result is the column index $j$ that minimises $\mathrm{src}_{i,j}$.
 }\par\smallskip
+\paragraph{Notes.}
+Same tie-breaking as \texttt{TROWARGMAX}. Output type should be an integer type.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -43,9 +39,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_trowargmin(src, tmp, dst):
+def uop_trowargmin(src, tmp, dst):
     src_dtype = src.element_type
     idx_dtype = dst.element_type
     lanes = pto.get_lanes(src_dtype)

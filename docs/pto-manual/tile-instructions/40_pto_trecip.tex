@@ -1,22 +1,15 @@
-\section{\texttt{TRECIP}}
-\noindent\textbf{Descriptor profile.} Vec entry 40, tile catalog opcode \texttt{0x1048}. Descriptor bundle: \texttt{B.OP + B.IOT}; WO/WM sites: 4; VEC beat-level sites: 4; ROM bytes: 32.
+\subsection{\texttt{TRECIP}}
+\noindent\textbf{Bundle encoding.} UOP entry 40, opcode \texttt{0x1048}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1048}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
 
-\textit{Semantics.} Computes the element-wise reciprocal of \texttt{src} as \texttt{1.0 / src[r, c]} and writes the result to \texttt{dst}. The ROM body achieves this by loading \texttt{src}, broadcasting the constant 1.0 via \texttt{vbr}, and performing \texttt{vdiv(1.0, src)}.
+\textit{Semantics.} Computes the element-wise reciprocal of \texttt{src} as \texttt{1.0 / src[r, c]} and writes the result to \texttt{dst}. The microcode body achieves this by loading \texttt{src}, broadcasting the constant 1.0 via \texttt{vbr}, and performing \texttt{vdiv(1.0, src)}.
 
 \textit{Domain errors.} When \texttt{src[r, c]} is zero, the result is Inf. When \texttt{src[r, c]} is Inf, the result is zero. When \texttt{src[r, c]} is NaN, the result is NaN. When \texttt{src[r, c]} is negative zero, the result is -Inf.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_40_pto_trecip_th0.pdf}{figs/encoding/tile_instruction_entries/entry_40_pto_trecip_th2.pdf}{0x1048}{40}{B.OP + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.IOT}. \texttt{B.OP.desc\_count} = 1; \texttt{B.OP.rom\_entry\_id} = 40.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TRECIP}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 1 tile input(s): \texttt{src}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] No additional dimension or attribute descriptor is required beyond the tile operand bindings.
-\end{description}
-\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Elementwise reciprocal of a tile.
+\paragraph{Example.}
+Tile elements [1, 2, 4] give [1.0, 0.5, 0.25].
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the valid region:
 
@@ -24,6 +17,8 @@ For each element \texttt{(i, j)} in the valid region:
 \mathrm{dst}_{i,j} = \frac{1}{\mathrm{src}_{i,j}}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+1/0 = Inf. 1/Inf = 0. 1/NaN = NaN. Accuracy is implementation-defined; the VARIANT field selects the approximation algorithm.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -37,9 +32,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_trecip(src, dst):
+def uop_trecip(src, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

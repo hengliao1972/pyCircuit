@@ -1,18 +1,11 @@
-\section{\texttt{TROWEXPANDDIV}}
-\noindent\textbf{Descriptor profile.} Vec entry 46, tile catalog opcode \texttt{0xF002}. Descriptor bundle: \texttt{B.OP + B.DIM + B.IOT}; WO/WM sites: 10; VEC beat-level sites: 10; ROM bytes: 80.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_46_pto_trowexpanddiv_th0.pdf}{figs/encoding/tile_instruction_entries/entry_46_pto_trowexpanddiv_th2.pdf}{0xF002}{46}{B.OP + B.DIM + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.DIM + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 46.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TROWEXPANDDIV}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TROWEXPANDDIV}}
+\noindent\textbf{Bundle encoding.} UOP entry 46, opcode \texttt{0xF002}. Bundle: \texttt{B.OP + B.ARG + B.DIM + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0xF002}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Row-wise broadcast divide: divide each row of \texttt{src0} by a per-row scalar vector \texttt{src1}.
+\paragraph{Example.}
+dst[i,:] = tile[i,:] / src[i,0] for each row i. Division by zero produces Inf.
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the valid region:
 
@@ -20,6 +13,8 @@ For each element \texttt{(i, j)} in the valid region:
 \mathrm{dst}_{i,j} = \frac{\mathrm{src0}_{i,j}}{\mathrm{src1}_{0,i}}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+FP rounding from VARIANT field.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -39,9 +34,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_trowexpanddiv_f32(src0, src1, dst):
+def uop_trowexpanddiv_f32(src0, src1, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 
@@ -56,7 +51,7 @@ def rom_trowexpanddiv_f32(src0, src1, dst):
             pto.vsts(result, dst[row, col:], mask)
     return
 
-def rom_trowexpanddiv_f16(src0, src1, dst):
+def uop_trowexpanddiv_f16(src0, src1, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

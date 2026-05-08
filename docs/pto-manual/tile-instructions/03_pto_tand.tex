@@ -1,18 +1,11 @@
-\section{\texttt{TAND}}
-\noindent\textbf{Descriptor profile.} Vec entry 3, tile catalog opcode \texttt{0x100B}. Descriptor bundle: \texttt{B.OP + B.IOT}; WO/WM sites: 4; VEC beat-level sites: 4; ROM bytes: 32.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_03_pto_tand_th0.pdf}{figs/encoding/tile_instruction_entries/entry_03_pto_tand_th2.pdf}{0x100B}{3}{B.OP + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.IOT}. \texttt{B.OP.desc\_count} = 1; \texttt{B.OP.rom\_entry\_id} = 3.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TAND}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] No additional dimension or attribute descriptor is required beyond the tile operand bindings.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TAND}}
+\noindent\textbf{Bundle encoding.} UOP entry 3, opcode \texttt{0x100B}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x100B}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Elementwise bitwise AND of two tiles.
+\paragraph{Example.}
+tile\_a AND tile\_b: element at (i,j) = tile\_a[i,j] \& tile\_b[i,j].
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the valid region:
 
@@ -20,6 +13,8 @@ For each element \texttt{(i, j)} in the valid region:
 \mathrm{dst}_{i,j} = \mathrm{src0}_{i,j} \;\&\; \mathrm{src1}_{i,j}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+For FP types, this is bitwise AND on the IEEE 754 bit pattern, not a numeric AND. The result is not numerically meaningful unless both inputs are integers.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -33,9 +28,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_tand(src0, src1, dst):
+def uop_tand(src0, src1, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

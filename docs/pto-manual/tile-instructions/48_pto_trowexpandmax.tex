@@ -1,18 +1,11 @@
-\section{\texttt{TROWEXPANDMAX}}
-\noindent\textbf{Descriptor profile.} Vec entry 48, tile catalog opcode \texttt{0x1050}. Descriptor bundle: \texttt{B.OP + B.DIM + B.IOT}; WO/WM sites: 5; VEC beat-level sites: 5; ROM bytes: 40.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_48_pto_trowexpandmax_th0.pdf}{figs/encoding/tile_instruction_entries/entry_48_pto_trowexpandmax_th2.pdf}{0x1050}{48}{B.OP + B.DIM + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.DIM + B.IOT}. \texttt{B.OP.desc\_count} = 2; \texttt{B.OP.rom\_entry\_id} = 48.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TROWEXPANDMAX}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. 2: \texttt{B.IOT} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs none, and outputs \texttt{dst}.
-\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 tile output(s): \texttt{dst}. Bound by 1 architectural \texttt{B.IOT} descriptor; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TROWEXPANDMAX}}
+\noindent\textbf{Bundle encoding.} UOP entry 48, opcode \texttt{0x1050}. Bundle: \texttt{B.OP + B.ARG + B.DIM + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1050}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Row-wise broadcast max: take \texttt{max(src0, src1)} where \texttt{src1} provides one scalar per row.
+\paragraph{Example.}
+dst[i,:] = max(tile[i,:], src[i,0]) for each row i.
+\par\smallskip
 \paragraph{PTO ISA operation.}
 Let \texttt{R = dst.GetValidRow()} and \texttt{C = dst.GetValidCol()}. Let \texttt{s\_i} be the per-row scalar taken from \texttt{src1} (one value per row).
 
@@ -22,6 +15,8 @@ For \texttt{0 \textless{}= i \textless{} R} and \texttt{0 \textless{}= j \textle
 \mathrm{dst}_{i,j} = \max(\mathrm{src0}_{i,j}, s_i)
 \]
 }\par\smallskip
+\paragraph{Notes.}
+NaN propagates for FP types.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -36,9 +31,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_trowexpandmax(src0, src1, dst):
+def uop_trowexpandmax(src0, src1, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

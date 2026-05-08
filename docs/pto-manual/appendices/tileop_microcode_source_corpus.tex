@@ -1,12 +1,21 @@
 \chapter{TileOp Microcode Source Corpus}
-This appendix provides the TileOp microcode source corpus used by the encoding tables. It records field definitions, opcode body sketches, and corpus-level reference material for implementers.
+\section{Legacy Notice}
+\label{sec:legacy_corpus}
+This appendix documents the TileOp microcode source corpus as it was defined in an earlier revision of this manual. The binary encoding described in this appendix (the 32-bit WO / 32-bit WM split with the field widths documented below) is a v0 encoding that predates the current revision.
 
-% =============================================================================
+\textbf{This appendix is informational only.} The authoritative encoding for this revision is Chapter~\ref{chap:encodings}, which defines the current 64-bit WO/WM micro-instruction format (WO at bits \texttt{63:32}, WM at bits \texttt{31:0}) with the field widths given in Section~\ref{sec:micro_instruction_encoding}. The v0 encoding in this appendix MUST NOT be used as the reference for new implementations; it is retained for historical context and for tooling that was built against the older format.
+
+Implementers who need to understand the current PTO micro-instruction encoding should begin with Section~\ref{sec:micro_instruction_encoding} and the per-instruction microcode site tables in the tile instruction reference pages.
+
+This appendix provides the TileOp microcode source corpus used by the encoding tables. It records field definitions, opcode body sketches, and corpus-level reference material for implementers.
+\par\smallskip
 % SECTION 1: BINARY ENCODING
 % =============================================================================
-\section{Two-Word 64-bit Microinstruction Format}
+\section{Two-Word 64-bit Microinstruction Format (v0 Legacy)}
 
 Each TileOp microinstruction is encoded as a pair of 32-bit RISC words. WO (Word Operation) encodes the PTO TileOp and its operands. WM (Word Metadata) encodes microcode sequencing and control.
+
+\textbf{Note: this section describes the v0 encoding.} In the current revision, the micro-instruction format is a single 64-bit word with WO at bits \texttt{63:32} and WM at bits \texttt{31:0} (see Section~\ref{sec:micro_instruction_encoding}). The field widths and semantic assignments below differ from the current format.
 
 \subsection{Word Operation (WO) --- 32 bits}
 
@@ -89,75 +98,74 @@ Idx & TileOp & PTO-BC Opcode & Ext & Entry & Micro \\
 \midrule
 \endhead
  0 & \texttt{softmax}     & mixed      & -   & 0  &   7 \\
- 1 & \texttt{tabs}        & 0x1006     & 0   & 1  &  12 \\
- 2 & \texttt{tadd}       & 0x1007     & 0   & 2  &   8 \\
- 3 & \texttt{tadds}       & 0x1009     & 0   & 3  &  18 \\
- 4 & \texttt{tand}       & 0x100B     & 0   & 4  &   8 \\
- 5 & \texttt{tands}      & 0x100C     & 0   & 5  &  12 \\
- 6 & \texttt{tcolexpand}         & 0x1010     & 0   & 6  &  18 \\
- 7 & \texttt{tcolexpandadd}       & 0x1011     & 0   & 7  &  24 \\
- 8 & \texttt{tcolexpanddiv}       & 0x1012     & 0   & 8  &  36 \\
- 9 & \texttt{tcolexpandexpdif}    & 0x1013     & 0   & 9  &  16 \\
-10 & \texttt{tcolexpandmax}       & 0x1014     & 0   & 10 &  24 \\
-11 & \texttt{tcolexpandmin}       & 0x1015     & 0   & 11 &  24 \\
-12 & \texttt{tcolexpandmul}       & 0x1016     & 0   & 12 &  24 \\
-13 & \texttt{tcolexpandsub}       & 0x1017     & 0   & 13 &  24 \\
-14 & \texttt{tcolmax}     & 0x1018     & 0   & 14 &  72 \\
-15 & \texttt{tcolmin}     & 0x1019     & 0   & 15 &  72 \\
-16 & \texttt{tcolprod}    & 0x101A     & 0   & 16 &  45 \\
-17 & \texttt{tcolsum}     & 0x101B     & 0   & 17 &  48 \\
-18 & \texttt{tcvt}        & 0x101C     & 0   & 18 &  15 \\
-19 & \texttt{tdiv}        & 0x101D     & 0   & 19 &   8 \\
-20 & \texttt{tdivs}       & 0x101E     & 0   & 20 &  24 \\
-21 & \texttt{texp}        & 0x101F     & 0   & 21 &  12 \\
-22 & \texttt{texpands}     & 0x1020     & 0   & 22 &  22 \\
-23 & \texttt{tfillpad}    & 0x1023     & 0   & 23 &  30 \\
-24 & \texttt{tfillpad\_expand} & 0x1024 & 0   & 24 &   6 \\
-25 & \texttt{tload}       & 0x102F     & 0   & 25 &  12 \\
-26 & \texttt{tlog}        & 0x1030     & 0   & 26 &  12 \\
-27 & \texttt{tlrelu}      & 0x1031     & 0   & 27 &  12 \\
-28 & \texttt{tmax}        & 0x1034     & 0   & 28 &   8 \\
-29 & \texttt{tmaxs}       & 0x1035     & 0   & 29 &  18 \\
-30 & \texttt{tmin}        & 0x1036     & 0   & 30 &  32 \\
-31 & \texttt{tmins}       & 0x1037     & 0   & 31 &  18 \\
-32 & \texttt{tmul}        & 0x103B     & 0   & 32 &   8 \\
-33 & \texttt{tmuls}       & 0x103C     & 0   & 33 &  18 \\
-34 & \texttt{tneg}        & 0x103D     & 0   & 34 &  18 \\
-35 & \texttt{tnot}        & 0x103E     & 0   & 35 &  18 \\
-36 & \texttt{tor}         & 0x103F     & 0   & 36 &   8 \\
-37 & \texttt{tors}        & 0x1040     & 0   & 37 &  12 \\
-38 & \texttt{tpartadd}    & 0x1041     & 0   & 38 &  36 \\
-39 & \texttt{tpartmax}    & 0x1042     & 0   & 39 &  48 \\
-40 & \texttt{tpartmin}    & 0x1043     & 0   & 40 &  48 \\
-41 & \texttt{tpartmul}    & 0x1044     & 0   & 41 &  36 \\
-42 & \texttt{trecip}      & 0x1048     & 0   & 42 &  18 \\
-43 & \texttt{trelu}       & 0x1049     & 0   & 43 &   9 \\
-44 & \texttt{trowargmax}  & 0xF000     & 1   & 44 &  72 \\
-45 & \texttt{trowargmin}  & 0xF001     & 1   & 45 &  72 \\
-46 & \texttt{trowexpand}   & 0x104D     & 0   & 46 &  18 \\
-47 & \texttt{trowexpandadd} & 0x104E     & 0   & 47 &  28 \\
-48 & \texttt{trowexpanddiv} & 0xF002     & 1   & 48 &  56 \\
-49 & \texttt{trowexpandexpdif} & 0x104F & 0   & 49 &  20 \\
-50 & \texttt{trowexpandmax} & 0x1050     & 0   & 50 &  28 \\
-51 & \texttt{trowexpandmin} & 0x1051     & 0   & 51 &  28 \\
-52 & \texttt{trowexpandmul} & 0xF003     & 1   & 52 &  28 \\
-53 & \texttt{trowexpandsub} & 0xF004     & 1   & 53 &  28 \\
-54 & \texttt{trowmax}     & 0x1052     & 0   & 54 &  84 \\
-55 & \texttt{trowmin}     & 0x1053     & 0   & 55 &  84 \\
-56 & \texttt{trowprod}    & 0xF005     & 1   & 56 &  54 \\
-57 & \texttt{trowsum}     & 0x1054     & 0   & 57 &  60 \\
-58 & \texttt{trsqrt}      & 0x1055     & 0   & 58 &  12 \\
-59 & \texttt{tsel}        & 0x1057     & 0   & 59 &  50 \\
-60 & \texttt{tsels}       & 0x1058     & 0   & 60 &  88 \\
-61 & \texttt{tshl}        & 0x105F     & 0   & 61 &   8 \\
-62 & \texttt{tshls}       & 0x1060     & 0   & 62 &  12 \\
-63 & \texttt{tshr}        & 0x1061     & 0   & 63 &   8 \\
-64 & \texttt{tshrs}       & 0x1062     & 0   & 64 &  12 \\
-65 & \texttt{tsqrt}       & 0x1064     & 0   & 65 &  12 \\
-66 & \texttt{tsub}        & 0x1067     & 0   & 66 &   8 \\
-67 & \texttt{tsubs}       & 0x1069     & 0   & 67 &  18 \\
-68 & \texttt{txor}        & 0x106E     & 0   & 68 &   8 \\
-69 & \texttt{txors}       & 0x106F     & 0   & 69 &  12 \\
+ 1 & \texttt{TABS}        & 0x1006     & 0   & 1  &  12 \\
+ 2 & \texttt{TADD}       & 0x1007     & 0   & 2  &   8 \\
+ 3 & \texttt{TADDS}       & 0x1009     & 0   & 3  &  18 \\
+ 4 & \texttt{TAND}       & 0x100B     & 0   & 4  &   8 \\
+ 5 & \texttt{TANDS}      & 0x100C     & 0   & 5  &  12 \\
+ 6 & \texttt{TCOLEXPAND}         & 0x1010     & 0   & 6  &  18 \\
+ 7 & \texttt{TCOLEXPANDADD}       & 0x1011     & 0   & 7  &  24 \\
+ 8 & \texttt{TCOLEXPANDDIV}       & 0x1012     & 0   & 8  &  36 \\
+ 9 & \texttt{TCOLEXPANDEXPDIF}    & 0x1013     & 0   & 9  &  16 \\
+10 & \texttt{TCOLEXPANDMAX}       & 0x1014     & 0   & 10 &  24 \\
+11 & \texttt{TCOLEXPANDMIN}       & 0x1015     & 0   & 11 &  24 \\
+12 & \texttt{TCOLEXPANDMUL}       & 0x1016     & 0   & 12 &  24 \\
+13 & \texttt{TCOLEXPANDSUB}       & 0x1017     & 0   & 13 &  24 \\
+14 & \texttt{TCOLMAX}     & 0x1018     & 0   & 14 &  72 \\
+15 & \texttt{TCOLMIN}     & 0x1019     & 0   & 15 &  72 \\
+16 & \texttt{TCOLPROD}    & 0x101A     & 0   & 16 &  45 \\
+17 & \texttt{TCOLSUM}     & 0x101B     & 0   & 17 &  48 \\
+18 & \texttt{TCVT}        & 0x101C     & 0   & 18 &  15 \\
+19 & \texttt{TDIV}        & 0x101D     & 0   & 19 &   8 \\
+20 & \texttt{TDIVS}       & 0x101E     & 0   & 20 &  24 \\
+21 & \texttt{TEXP}        & 0x101F     & 0   & 21 &  12 \\
+22 & \texttt{TEXPANDS}     & 0x1020     & 0   & 22 &  22 \\
+23 & \texttt{TFILLPAD}    & 0x1023     & 0   & 23 &  30 \\
+25 & \texttt{TLOAD}       & 0x102F     & 0   & 25 &  12 \\
+26 & \texttt{TLOG}        & 0x1030     & 0   & 26 &  12 \\
+27 & \texttt{TLRELU}      & 0x1031     & 0   & 27 &  12 \\
+28 & \texttt{TMAX}        & 0x1034     & 0   & 28 &   8 \\
+29 & \texttt{TMAXS}       & 0x1035     & 0   & 29 &  18 \\
+30 & \texttt{TMIN}        & 0x1036     & 0   & 30 &  32 \\
+31 & \texttt{TMINS}       & 0x1037     & 0   & 31 &  18 \\
+32 & \texttt{TMUL}        & 0x103B     & 0   & 32 &   8 \\
+33 & \texttt{TMULS}       & 0x103C     & 0   & 33 &  18 \\
+34 & \texttt{TNEG}        & 0x103D     & 0   & 34 &  18 \\
+35 & \texttt{TNOT}        & 0x103E     & 0   & 35 &  18 \\
+36 & \texttt{TOR}         & 0x103F     & 0   & 36 &   8 \\
+37 & \texttt{TORS}        & 0x1040     & 0   & 37 &  12 \\
+38 & \texttt{TPARTADD}    & 0x1041     & 0   & 38 &  36 \\
+39 & \texttt{TPARTMAX}    & 0x1042     & 0   & 39 &  48 \\
+40 & \texttt{TPARTMIN}    & 0x1043     & 0   & 40 &  48 \\
+41 & \texttt{TPARTMUL}    & 0x1044     & 0   & 41 &  36 \\
+42 & \texttt{TRECIP}      & 0x1048     & 0   & 42 &  18 \\
+43 & \texttt{TRELU}       & 0x1049     & 0   & 43 &   9 \\
+44 & \texttt{TROWARGMAX}  & 0xF000     & 1   & 44 &  72 \\
+45 & \texttt{TROWARGMIN}  & 0xF001     & 1   & 45 &  72 \\
+46 & \texttt{TROWEXPAND}   & 0x104D     & 0   & 46 &  18 \\
+47 & \texttt{TROWEXPANDADD} & 0x104E     & 0   & 47 &  28 \\
+48 & \texttt{TROWEXPANDDIV} & 0xF002     & 1   & 48 &  56 \\
+49 & \texttt{TROWEXPANDEXPDIF} & 0x104F & 0   & 49 &  20 \\
+50 & \texttt{TROWEXPANDMAX} & 0x1050     & 0   & 50 &  28 \\
+51 & \texttt{TROWEXPANDMIN} & 0x1051     & 0   & 51 &  28 \\
+52 & \texttt{TROWEXPANDMUL} & 0xF003     & 1   & 52 &  28 \\
+53 & \texttt{TROWEXPANDSUB} & 0xF004     & 1   & 53 &  28 \\
+54 & \texttt{TROWMAX}     & 0x1052     & 0   & 54 &  84 \\
+55 & \texttt{TROWMIN}     & 0x1053     & 0   & 55 &  84 \\
+56 & \texttt{TROWPROD}    & 0xF005     & 1   & 56 &  54 \\
+57 & \texttt{TROWSUM}     & 0x1054     & 0   & 57 &  60 \\
+58 & \texttt{TRSQRT}      & 0x1055     & 0   & 58 &  12 \\
+59 & \texttt{TSEL}        & 0x1057     & 0   & 59 &  50 \\
+60 & \texttt{TSELS}       & 0x1058     & 0   & 60 &  88 \\
+61 & \texttt{TSHL}        & 0x105F     & 0   & 61 &   8 \\
+62 & \texttt{TSHLS}       & 0x1060     & 0   & 62 &  12 \\
+63 & \texttt{TSHR}        & 0x1061     & 0   & 63 &   8 \\
+64 & \texttt{TSHRS}       & 0x1062     & 0   & 64 &  12 \\
+65 & \texttt{TSQRT}       & 0x1064     & 0   & 65 &  12 \\
+66 & \texttt{TSUB}        & 0x1067     & 0   & 66 &   8 \\
+67 & \texttt{TSUBS}       & 0x1069     & 0   & 67 &  18 \\
+68 & \texttt{TXOR}        & 0x106E     & 0   & 68 &   8 \\
+69 & \texttt{TXORS}       & 0x106F     & 0   & 69 &  12 \\
 \bottomrule
 \end{longtable}
 \end{landscape}
@@ -186,12 +194,12 @@ Tile-scalar              &  12 &  262 &  2,096 & 2.047 \\
 Tile-tile elementwise    &  11 &  112 &    896 & 0.875 \\
 Unary / special         &  12 &  180 &  1,440 & 1.406 \\
 \midrule
-\textbf{Total}          & \textbf{70} & \textbf{1,906} & \textbf{15,248} & \textbf{14.89} \\
+\textbf{Total}          & \textbf{69} & \textbf{1,900} & \textbf{15,200} & \textbf{14.84} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Total microinstruction instances: 1,906. Each instance = 2 $\times$ 32-bit words = 64 bits = 8 bytes. Reference encoding: 15,248 bytes (14.89 KiB).
+Total microinstruction instances: 1,900. Each instance = 2 $\times$ 32-bit words = 64 bits = 8 bytes. Reference encoding: 15,200 bytes (14.84 KiB).
 
 The two-word format is the target binary representation. The reference 64-bit encoding in the original manual maps directly: WO encodes opcode + flags + SEQ + operands; WM encodes ENTRY\_ID + OP\_COUNT + types + variant.
 
@@ -838,10 +846,6 @@ Seq & WO (hex) & opcode & flags & seq & op\_a & op\_b & op\_c \\
 \multicolumn{8}{l}{\textbf{tfillpad} (Entry 23, Unary/special, 30 microinstructions)} \\
   & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tfillpad $\rightarrow$ tstore pattern ...}} \\
 
-% tfillpad_expand (entry 24, 6 microinstructions)
-\multicolumn{8}{l}{\textbf{tfillpad\_expand} (Entry 24, Axis expand/broadcast, 6 microinstructions)} \\
-  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tfillpad\_expand $\rightarrow$ tstore pattern ...}} \\
-
 % tload (entry 25, 12 microinstructions)
 \multicolumn{8}{l}{\textbf{tload} (Entry 25, Memory movement, 12 microinstructions)} \\
   & \multicolumn{7}{r}{\textit{... tload is the primitive memory load operation ...}} \\
@@ -1078,7 +1082,7 @@ Field & Bits & Values & Encoding & Notes \\
 % =============================================================================
 \section{TSTORE Opcode Reference}
 
-The \texttt{tstore} opcode (PTO-BC 0x1065, Opcode Index 25, WO\_OPCODE=25) is the primitive store operation. Its WO encoding follows the same format as tload, with WO\_OP\_A=addr register, WO\_OP\_B=data register, WO\_OP\_C=unused.
+The \texttt{TSTORE} opcode (PTO-BC 0x1065, Opcode Index 25, WO\_OPCODE=25) is the primitive store operation. Its WO encoding follows the same format as tload, with WO\_OP\_A=addr register, WO\_OP\_B=data register, WO\_OP\_C=unused.
 
 \begin{center}
 \begin{tabular}{llr}

@@ -1,19 +1,11 @@
-\section{\texttt{TSEL}}
-\noindent\textbf{Descriptor profile.} Vec entry 57, tile catalog opcode \texttt{0x1057}. Descriptor bundle: \texttt{B.OP + B.ATTR + B.IOT + B.IOT}; WO/WM sites: 27; VEC beat-level sites: 20; ROM bytes: 216.\par\smallskip
-\TileInstructionEncoding{figs/encoding/tile_instruction_entries/entry_57_pto_tsel_th0.pdf}{figs/encoding/tile_instruction_entries/entry_57_pto_tsel_th2.pdf}{0x1057}{57}{B.OP + B.ATTR + B.IOT + B.IOT}
-\paragraph{Bundled descriptor (PTO-ISA header).}
-\begin{description}[leftmargin=0.18\linewidth,style=nextline]
-\item[Bundle] \texttt{B.OP + B.ATTR + B.IOT + B.IOT}. \texttt{B.OP.desc\_count} = 3; \texttt{B.OP.rom\_entry\_id} = 57.
-\item[Assembly] 0: \texttt{B.OP} selects \texttt{TSEL}, carries element format/variant, declares \texttt{desc\_count}, and names the ROM entry. 1: \texttt{B.ATTR} carries predicate/mask interpretation metadata. 2: \texttt{B.IOT[0]} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs \texttt{mask}, and outputs \texttt{dst}. 3: \texttt{B.IOT[1]} binds architectural tile operands. Across all \texttt{B.IOT} descriptors: tile inputs \texttt{src0}, \texttt{src1}, mask inputs \texttt{mask}, and outputs \texttt{dst}.
-\item[Tile operands] 2 tile input(s): \texttt{src0}, \texttt{src1}; 1 mask tile input(s): \texttt{mask}; 1 tile output(s): \texttt{dst}. Bound by 2 architectural \texttt{B.IOT} descriptors; each \texttt{B.IOT} supplies at most two source selectors plus one destination selector. ROM scratch tiles are not counted in \texttt{B.OP.desc\_count}.
-\item[Scalar GPR operands] No scalar GPR import/export descriptor is required.
-\item[Metadata operands] \texttt{B.ATTR} carries predicate/mask interpretation metadata.
-\item[ROM scratch operands] \texttt{tmp} are allocated by lowering or the implementation profile for the microcode body. They are not encoded in the CPU-visible PTO-ISA header.
-\end{description}
-\par\smallskip
+\subsection{\texttt{TSEL}}
+\noindent\textbf{Bundle encoding.} UOP entry 57, opcode \texttt{0x1057}. Bundle: \texttt{B.OP + B.ARG + B.ATTR + B.IOTI + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1057}. \texttt{B.IOTI[0]}: selector=\texttt{110 continue}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size; \texttt{B.IOTI[1]}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{mask}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.ATTR} carries predicate/mask interpretation metadata. Scratch operand(s) \texttt{tmp} are implementation-local and are not encoded in the CPU-visible bundle.\par\smallskip
 {\small
 \paragraph{PTO ISA description.}
 Select between two tiles using a mask tile (per-element selection).
+\paragraph{Example.}
+mask [[T,F],[F,T]], src0 [[1,2],[3,4]], src1 [[5,6],[7,8]] gives [[1,6],[7,4]].
+\par\smallskip
 \paragraph{PTO ISA operation.}
 For each element \texttt{(i, j)} in the valid region:
 
@@ -25,6 +17,8 @@ For each element \texttt{(i, j)} in the valid region:
 \end{cases}
 \]
 }\par\smallskip
+\paragraph{Notes.}
+All three tiles must have the same shape. The mask tile's element type is boolean; it is not the same as the data element type. Both src0 and src1 are read under the per-lane mask.
 \paragraph{Microcode site table.}
 {\scriptsize
 \begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
@@ -61,9 +55,9 @@ Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
 \bottomrule
 \end{longtable}
 }
-\paragraph{ROM body DSL.}
+\paragraph{Microcode body DSL.}
 \begin{lstlisting}[style=ptocode]
-def rom_tsel(mask, src0, src1, tmp, dst):
+def uop_tsel(mask, src0, src1, tmp, dst):
     dtype = dst.element_type
     valid_rows, valid_cols = dst.valid_shape
 

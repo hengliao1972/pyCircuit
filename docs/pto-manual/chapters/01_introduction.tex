@@ -1,64 +1,110 @@
 \chapter{Introduction}
 \label{chap:introduction}
-\section{Scope}
-This chapter defines the PTO instruction set surface covered by this manual and the abstraction boundary between CPU-visible tile instructions and ROM-resident micro instructions.
-This manual specifies the Vec tile instruction catalog and the corresponding Davinci vector-buffer micro instruction bodies. A tile instruction mnemonic such as \texttt{pto.tadd} is an instruction-set-level tile instruction with its own tile catalog opcode and PTO-ISA header bundle. Its implementation body is a loop over lower-level Vec micro instructions such as \texttt{u\_vec.vlds}, \texttt{u\_vec.vadd}, and \texttt{u\_vec.vsts}.
-The implementation listings contain the source DSL body used to derive the ROM-facing microcode: local predicates, loops, address calculations, and \texttt{pto.*} calls. The encoded micro instruction mnemonics use the \texttt{u\_vec.*} prefix below. Python decorators, kernel registration wrappers, module construction, tensor-view setup, navigation text, and traceability text are omitted.
-\subsection{Coverage}
-\begin{tabular}{@{}L{0.42\linewidth}R{0.30\linewidth}@{}}
-\toprule
-Item & Value \\
-\midrule
-Vec tile instruction implementation entries & 68 \\
-Chapter scope & Vec tile instructions only \\
-Static Vec WO/WM micro instruction sites & 387 \\
-Static VEC beat-level call sites & 367 \\
-Static WO/WM ROM storage at 64 bits/site & 3096 bytes (3.0234375 KiB) \\
-\bottomrule
-\end{tabular}
-\par\smallskip
-The static storage figure counts each encoded Vec micro instruction site once, excluding DSL registration, compile-time query helpers, and type or constant constructors. Runtime execution count is shape-dependent because each body contains loops over valid rows, valid columns, or vector lanes.
 
-\section{Execution Model}
-This chapter defines the execution model used by the tile instruction and micro instruction encodings in this manual. The PTO instruction set is described at tile granularity: a program is an ordered sequence of operations over tiles, scalar attributes, global-memory views, and synchronization state.
+\section{What PTO Is and Why It Exists}
+The PTO instruction set is the ISA for the Davinci out-of-order (OOO) core. It is built around one central idea: keeping entire 2D tiles of data on-chip and operating on them directly, rather than streaming individual elements through a narrow memory port. Traditional GPU-style or DSP-style ISAs are fundamentally row-at-a-time or element-at-a-time. PTO takes a different approach. A tile lives in on-chip storage as a named object with a known shape, a valid region, and an element format. The ISA exposes tile-level operations as first-class instructions.
 
-\subsection{Execution Agents}
-\begin{longtable}{@{}L{0.20\linewidth}L{0.68\linewidth}@{}}
+This design choice matters because many important workloads --- matrix multiplications, convolutions, attention layers, pooling, normalization --- exhibit strong 2D data reuse. Moving entire tiles avoids the address-generation overhead and bandwidth pressure of element-by-element streaming. It also lets the microarchitecture schedule loads, computes, and stores for the whole tile at once, which gives the implementation more freedom to overlap memory latency with arithmetic.
+
+This manual describes the architecture contract seen by Davinci software and by tools that assemble, decode, emulate, or verify Davinci tile programs. It also distinguishes architectural state from Davinci implementation details such as the physical tile tag namespace, issue queues, and UOP Engine internals.
+
+\section{Coverage}
+This manual covers:
+\begin{itemize}
+  \item The 32-bit scalar ISA surface (\texttt{X0}--\texttt{X31}, program counter, SSR state, event state) used by tile program control.
+  \item The CPU-visible tile instruction surface (\texttt{T*}) as bundled descriptor sequences in the instruction stream.
+  \item The UOP Engine vector micro-instruction surface (\texttt{u\_vec.*}) generated for tile instruction bodies.
+  \item The encoding layer that connects descriptors to microcode and the Davinci OOO microarchitectural integration.
+\end{itemize}
+The Vec tile instruction catalog contains 67 entries. The scalar catalog contains 239 instructions.
+
+\section{The Three-Layer ISA Model}
+PTO presents three distinct ISA surfaces at three different abstraction levels. Understanding which layer you are working with matters.
+
+\begin{longtable}{@{}L{0.22\linewidth}L{0.20\linewidth}L{0.48\linewidth}@{}}
 \toprule
-Agent & Responsibility \\
+Layer & Surface & What it means for the programmer \\
 \midrule
-Host machine & Prepares work, allocates global resources, compiles or caches tile programs, submits work to devices, and coordinates completion. Host behavior is outside the tile instruction encoding, but it defines where work submission and global buffer ownership begin. \\
-Device machine & Schedules tile programs across cores, manages work distribution, coordinates global-memory movement, and preserves architecture-visible dependency and synchronization rules. \\
-Core machine & Executes the tile instruction stream, scalar control, synchronization primitives, and vector or matrix tile pipelines. This manual describes the Vec tile instruction subset for one such core. \\
+CPU-visible ISA & \texttt{T*} tile instructions & What the assembler, compiler, and debugger see. One tile instruction = one descriptor bundle. \\
+Bundle & \texttt{B.OP + B.*} descriptors & The instruction encoding. Decoded once; supplies operands, metadata, and the tile opcode/profile used to select the UOP Engine entry. Not directly observable by software. \\
+Generated microcode & \texttt{u\_vec.*} micro instructions & The implementation of a tile instruction. The UOP Engine generates this microcode from the decoded descriptor bundle and implementation templates. It never appears in the instruction stream. \\
 \bottomrule
 \end{longtable}
 
-\subsection{Tile Program Granularity}
-A tile program is a sequence of tile instructions and scalar-control operations. The fundamental data object is a tile: a two-dimensional array of elements stored in on-chip tile storage and described by metadata. Independent tile programs MAY execute concurrently or out of order. Dependent operations MUST preserve the required happens-before relation established by data, event, or memory dependencies.
+The relationship is shown in the figure below. The CPU fetches a descriptor bundle; the decoder uses the \texttt{B.OP} tile opcode profile to identify the required following 32-bit descriptor words, then sends the decoded bundle to the UOP Engine. The UOP Engine generates the vector microcode for the selected tile instruction.
 
-\subsection{Ordering Domains}
-\begin{longtable}{@{}L{0.24\linewidth}L{0.64\linewidth}@{}}
+\begin{center}
+\captionof{figure}{Descriptor bundle structure. \texttt{B.OP} is always first; the remaining descriptor words follow in canonical order. The bundle decodes as one architectural tile instruction.}
+\noindent\includegraphics[width=0.90\linewidth]{figs/encoding/execution_overview.pdf}
+\end{center}
+
+\section{Execution Model}
+PTO programs are ordered sequences of tile instructions. Each tile instruction names one or more tiles as operands and describes a data-movement, compute, or synchronization operation over those tiles. The tile program is authored at the \texttt{T*} level; the descriptor bundle and generated microcode are implementation layers beneath that surface.
+
+The execution flow for a single tile instruction is:
+
+\begin{enumerate}
+  \item \textbf{Fetch.} The front end fetches \texttt{B.OP}, applies the selected tile opcode profile, and fetches the following \texttt{B.*} descriptor words.
+  \item \textbf{Decode.} The decoder identifies the \texttt{B.OP} tile opcode, element type, descriptor profile, and UOP Engine template. Tile operand selectors are resolved against the tile metadata table.
+  \item \textbf{UOP Engine generation.} The decoded opcode and descriptor metadata select a UOP Engine template. The UOP Engine generates the 64-bit \texttt{u\_vec.*} micro instructions for the tile body.
+  \item \textbf{Microassemble.} The microassembler combines each 64-bit \texttt{u\_vec.*} site with the decoded metadata (tile shape, valid region, format, variant) to produce one or more vector beat words.
+  \item \textbf{Issue and execute.} Beat words are dispatched to the VEC execution datapath. Loads and stores go through the memory queue. Arithmetic, logical, and special-function operations go through the vector ALU.
+  \item \textbf{Retire.} The tile instruction retires as one atomic PTO operation. The result tile is written to the destination tile buffer.
+\end{enumerate}
+
+\begin{center}
+\captionof{figure}{Tile instruction execution pipeline from CPU fetch through UOP Engine microcode generation to VEC beat execution.}
+\noindent\includegraphics[width=0.90\linewidth]{figs/encoding/execution_pipeline.pdf}
+\end{center}
+
+\section{Execution Agents}
+PTO has three conceptual execution agents that communicate through the tile instruction surface:
+
+\begin{longtable}{@{}L{0.20\linewidth}L{0.68\linewidth}@{}}
 \toprule
-Ordering domain & Rule \\
+Agent & Role \\
 \midrule
-Program order & Within one dependent chain, later consumers MUST observe the committed effects of earlier producers. \\
-Event and synchronization & Event waits and synchronization points establish explicit ordering between producer and consumer instruction groups. Toolchain optimizations MUST preserve these ordering points. \\
-Memory visibility & Global-memory effects become visible according to the dependency-ordered consistency model. Backend-private caches, prefetching, or buffering MAY vary, but they MUST preserve explicit producer-consumer visibility. \\
-Independent work & Instructions or tile programs without dependencies MAY execute in any order or concurrently. \\
+Host & Prepares tile programs, allocates global memory, compiles or caches work, submits tile kernels, and coordinates completion. Host behaviour is outside the PTO encoding but defines the work-submission contract. \\
+Device & Schedules tile programs across cores, manages work distribution, coordinates global-memory movement, and preserves dependency and synchronization rules. \\
+Core & Executes the tile instruction stream, scalar control, synchronization primitives, and vector pipelines for one tile program. \\
 \bottomrule
 \end{longtable}
 
 \section{Programming Model}
-This chapter states the contract for PTO tile code, then relates that contract to bundled tile descriptors and ROM-resident microcode bodies.
-The tile instruction surface owns tile-shaped operands, valid shapes, layouts, element formats, and tile-buffer residency. The microcode surface owns vector-register execution inside the loop body. The boundary is explicit: tile instruction operands are read or written by lower-level operations in the body; tile instructions do not appear inside the implementation loops.
+PTO is tile-first. Every data object is a tile: a 2D array with a known shape, a valid region, an element format, and an on-chip storage location. Scalar values (\texttt{X0}--\texttt{X31}) are used for control flow, loop bounds, indices, address calculation, and scalar imports into tile operations.
+
+A tile program typically follows this load-compute-sync-store pattern:
+
+\begin{enumerate}
+  \item \textbf{Load.} \texttt{TLOAD} moves a tile-shaped window from global memory into on-chip tile storage.
+  \item \textbf{Compute.} One or more \texttt{T*} instructions operate on tiles element-by-element, row-wise, or column-wise.
+  \item \textbf{Synchronize.} \texttt{TSYNC} establishes ordering between tile operations that have data or event dependencies.
+  \item \textbf{Store.} \texttt{TSTORE} moves a tile from on-chip storage back to global memory.
+\end{enumerate}
+
+As a concrete example, a GEMM rank-1 update $C += u v^\top$ on $4 \times 4$ tiles looks like this:
+
+\begin{lstlisting}[style=ptoscalarcode]
+# u: [4x1] column vector tile
+# v: [1x4] row vector tile
+# C: [4x4] accumulator tile
+TMUL(u, v, acc)   // acc[row, col] += u[row, 0] * v[0, col]
+TADD(acc, acc, C) // C += acc  (accumulate into C)
+TSYNC              // ensure tile ops complete before next kernel
+\end{lstlisting}
+
+PTO supports SPMD, MPMD, and hybrid dispatch. Independent tile programs may execute in any order or concurrently. Dependent programs must preserve happens-before ordering through events, synchronization, or explicit memory dependencies.
+
+\section{Normative Notation}
+This manual uses RFC 2119 keywords to express the strength of architectural requirements:
+
 \begin{itemize}
-\item \textbf{Tile instruction}: an instruction-set-level \texttt{pto.t*} operation with a tile catalog opcode and architectural tile operands.
-\item \textbf{Vector micro instruction}: a lower-level \texttt{u\_vec.*} operation emitted by the tile instruction body. A target may read it from ROM or generate it dynamically from the decoded bundle and tile metadata.
-\item \textbf{Static site}: one encoded executable \texttt{u\_vec.*} operation in a body. Loops can execute the site multiple times at runtime.
+  \item \textbf{MUST / MUST NOT} --- an absolute architectural requirement. Violating it means the implementation is not PTO-compliant.
+  \item \textbf{SHOULD / SHOULD NOT} --- a strong recommendation. An implementation that does not follow it should document the deviation.
+  \item \textbf{MAY} --- a permitted behaviour.
 \end{itemize}
 
-\subsection{Valid-Region Programming Rule}
-Portable code MUST treat the valid region as the semantic domain of a tile. Elementwise operations require compatible valid rows and valid columns across operands unless the instruction family defines a different rule. Reductions, broadcasts, padding, and transforms MUST state how they map source valid domains to destination valid domains. Reading or depending on values outside the valid region is not portable.
+\texttt{Undefined} behaviour is behaviour that this manual does not constrain; an implementation is free to define it. \texttt{Implementation-defined} behaviour is defined by the target profile but not mandated by the architecture. This manual distinguishes the two.
 
-\subsection{Dispatch Styles}
-PTO programs can be dispatched as SPMD, MPMD, or hybrid work. In SPMD, many cores execute the same tile program over different data bundles. In MPMD, different cores or tasks may execute different tile programs or different control paths. The scheduler MAY choose either form, but the visible behavior MUST respect explicit dependencies and valid-domain semantics.
+\section{Davinci Profile}
+This manual uses the Davinci-v2 microarchitectural profile as its reference implementation. Davinci is an out-of-order core with a tiled vector execution datapath (VEC-4K-v2), a tile register file (TRegFile-4K), and a block-granularity retirement model (BROB/BID). The micro-instruction buffer, issue queues (Vector RS, MTE RS, GVIQ), and physical tile tags (\texttt{PT0}--\texttt{PT255}) are Davinci implementation details that are explicitly outside the PTO architectural contract. The manual marks each such mechanism as implementation-defined.
