@@ -1,0 +1,145 @@
+\chapter{Scalar Instructions}
+\label{chap:scalar-instructions}
+
+\section{Overview and Scalar Register Model}
+The scalar ISA is the control surface of a PTO tile program. Scalar instructions operate on 64-bit registers \texttt{X0}--\texttt{X31}, manipulate the program counter, access SSR and cache-control state, and manage event-based synchronization. They do not directly touch tile storage; tile instructions consume scalar values as parameters, loop bounds, addresses, or indices.
+
+PTO uses a flat scalar register file with no condition-code register. Comparisons (\texttt{cmp.*}) write a 0 or 1 into a scalar register. Conditional branches read the register directly. This design avoids the flag-confusion problems that plague condition-code ISAs and makes instruction scheduling simpler for the compiler.
+
+\begin{longtable}{@{}L{0.18\linewidth}L{0.70\linewidth}@{}}
+\toprule
+Register & Contract \\
+\midrule
+\texttt{X0} & Hardwired to zero. Reads return 0. Writes are discarded without creating a dependency. \\
+\texttt{X1}--\texttt{X31} & General-purpose 64-bit registers. May hold integer values, pointers, indices, or scalar operands. \\
+PC & Program counter. Points to the next instruction parcel. Modified by branches, jumps, and exception delivery. \\
+SSR.* & System status registers. Control and status state managed by SSR access, cache, and system instructions. \\
+\bottomrule
+\end{longtable}
+
+The scalar profile is entirely 32-bit encoded. Every scalar instruction is one fixed-width 32-bit word in the instruction stream. There are no variable-length scalar instructions; 64-bit instruction words belong only to the wide-tile-descriptor or extended-immediate forms described in the encodings chapter.
+
+The 239 scalar instructions fall into six functional categories. The sections below explain the purpose and design rationale of each category before the instruction reference.
+
+\section{Integer ALU and Bit-Manipulation (60 instructions)}
+These instructions form the computational core of scalar code. They cover 64-bit and 32-bit arithmetic, logical operations, shifts, rotates, bit-counting, and compound select.
+
+Integer arithmetic instructions (\texttt{add}, \texttt{sub}, \texttt{mul}, \texttt{div}, and their immediate and word-width variants) are straightforward. The main design decisions worth noting are:
+
+\begin{itemize}
+  \item \textbf{Word-width variants.} \texttt{addw}/\texttt{subw} perform 64-bit operations but produce a 32-bit result sign-extended to 64 bits. \texttt{addiw} is an immediate add that sign-extends its 12-bit immediate to 64 bits before adding. These forms map directly to common RISC-V equivalents and avoid needing separate sign-extend or narrow operations.
+  \item \textbf{Multiply/divide latencies.} Multiplication and integer division are multi-cycle operations (\texttt{mul}, \texttt{mulu}, \texttt{div}, \texttt{divu} and word variants). The scalar ISA encodes them with the same format as single-cycle ALU operations; the microarchitecture routes them to the appropriate execution pipeline. A program that issues \texttt{div} followed immediately by a use of the result will stall until the division completes.
+  \item \textbf{Zero vs sign extension.} Immediate loads (\texttt{lui}, \texttt{addi}) sign-extend 12-bit immediates. \texttt{addiw} also sign-extends. For zero-extension of an immediate, use \texttt{ori} with \texttt{x0} as the left operand.
+\end{itemize}
+
+Bit-manipulation instructions deserve attention because some are non-obvious:
+
+\begin{itemize}
+  \item \texttt{clz} / \texttt{ctz} count leading or trailing zeros in a 64-bit value. These are used heavily in normalization, popcount, and div/mod lowering.
+  \item \texttt{bcnt} counts total set bits. Often implemented as \texttt{clz(ctz(x))} on narrow architectures, but the ISA exposes it as a first-class opcode.
+  \item \texttt{bic}, \texttt{bis}, \texttt{bxs}, \texttt{bxu} are RISC-V-inspired bit-clear, bit-set, bit-xor-sum variants. \texttt{bxs} computes \texttt{(a XOR b) AND a} (extract bits of \texttt{a} that differ from \texttt{b}); \texttt{bxu} computes \texttt{(a XOR b) AND b}.
+  \item \texttt{rev} reverses the byte order of a 64-bit register. Used for endianness conversion.
+  \item \texttt{csel} (conditional select) is a compound instruction: \texttt{csel rd, rs1, rs2, cond} writes \texttt{rs1} to \texttt{rd} if \texttt{cond} is true, else \texttt{rs2}. It implements \texttt{rd = cond ? rs1 : rs2} without a branch. This is the only compound scalar ALU instruction in the ISA; others such as \texttt{cneg}, \texttt{cswap}, \texttt{cmov} can be composed from it.
+\end{itemize}
+
+\section{Branch, Compare, and PC Control (28 instructions)}
+PTO branch instructions operate on scalar register values and update the program counter. There is no condition-code register; compare instructions write a 0/1 result to a scalar register, and branch instructions test that register.
+
+The compare family (\texttt{cmp.eq}, \texttt{cmp.ne}, \texttt{cmp.lt}, \texttt{cmp.ge}, \texttt{cmp.ltu}, \texttt{cmp.geu} and their immediate variants) compares two 64-bit registers and writes 1 or 0 to the destination. Each compare has a \texttt{SrcRType} modifier field that can negate the right operand (producing \texttt{a - b} semantics), take the unsigned form, or leave the register unchanged.
+
+The branch family (\texttt{b.eq}, \texttt{b.ne}, \texttt{b.lt}, \texttt{b.ge}, \texttt{b.ltu}, \texttt{b.geu}) takes a 16-bit signed PC-relative offset. A branch is taken when the condition is true, adding the offset to the current PC. Branch encoding uses a compact 16-bit signed immediate; for larger offsets the programmer must use a compare + jump combination.
+
+A subtle point: the compare instructions with the \texttt{.i} suffix (e.g. \texttt{cmp.lti}) compare against a sign-extended 12-bit immediate, not a register. \texttt{cmp.eqi x5, x6, 0} tests whether \texttt{x6} equals zero and writes the result to \texttt{x5}.
+
+PTO also provides branch-on-zero and branch-on-nonzero (\texttt{b.z}, \texttt{b.nz}) as single-register conditional branches. These are smaller and faster than a \texttt{cmp + b.eq} sequence for common null-pointer and sentinel checks.
+
+The jump family (\texttt{j}, \texttt{jal}, \texttt{jr}, \texttt{jalr}) handles procedure call and return. \texttt{jal rd, imm} writes the return address (PC+4) to \texttt{rd} and jumps to PC+imm. \texttt{jalr rd, rs, imm} computes \texttt{addr = (rs + imm) \& -2} (the low bit is forced to zero), writes the return address to \texttt{rd}, and jumps to \texttt{addr}. This is the standard ABIs procedure-call convention for register arguments and return values.
+
+\section{Load, Store, and Address Generation (46 instructions)}
+These instructions move scalar data between memory and the register file. The address is always formed by adding a base register and an offset; the offset can be an immediate or a second register. PTO provides unscaled, register-offset, symbol-relative, and immediate-offset forms.
+
+The most common form is \texttt{ld} / \texttt{sd} for 64-bit loads and stores:
+
+\begin{lstlisting}[style=ptoscalarcode]
+ld [x10, x11], ->x12    // x12 = Mem[x10 + x11] (64-bit)
+sd x12, [x10, x11]      // Mem[x10 + x11] = x12 (64-bit)
+\end{lstlisting}
+
+For register-offset addressing with scaling, \texttt{SrcRType} can apply a left-shift (1 for halfword, 2 for word, 3 for doubleword) before adding:
+
+\begin{lstlisting}[style=ptoscalarcode]
+ld [x10, x11 << 2], ->x12   // x12 = Mem[x10 + x11*4] (load 32-bit at scaled offset)
+ld [x10, x11 << 3], ->x12   // x12 = Mem[x10 + x11*8] (load 64-bit at scaled offset)
+\end{lstlisting}
+
+The \texttt{SrcRType} field also supports negation, which is useful for pre-decrement or post-increment addressing patterns in circular buffer code:
+
+\begin{lstlisting}[style=ptoscalarcode]
+ld [x10, x11 .neg], ->x12   // x12 = Mem[x10 - x11]
+\end{lstlisting}
+
+PCR-relative loads (\texttt{lb.pcr}, \texttt{lh.pcr}, \texttt{lw.pcr}, \texttt{ld.pcr}) compute the address as PC + immediate offset. These are used for accessing small, position-independent data objects embedded near code, such as jump tables or small constants.
+
+Load-immediate-offset forms (\texttt{lbi}, \texttt{lhi}, \texttt{lwui}) load with an unsigned 20-bit or 32-bit immediate added to a base register, without needing a separate \texttt{addi}.
+
+All loads zero-extend or sign-extend to 64 bits according to the opcode. A signed load (\texttt{lb}, \texttt{lh}, \texttt{lw}) sign-extends the loaded value to 64 bits; an unsigned load (\texttt{lbu}, \texttt{lhu}, \texttt{lwu}) zero-extends.
+
+\section{Atomic Memory Operations (44 instructions)}
+Atomic instructions perform read-modify-write operations on memory atomically, with respect to other cores and the memory system. PTO's atomic set covers the standard LR/SC sequences, arithmetic fetch-and-op atomics, and swap.
+
+The \texttt{lr.*}/\texttt{sc.*} pair implements load-reserved and store-conditional:
+
+\begin{lstlisting}[style=ptoscalarcode]
+lr.d x5, [x10]       // load-reserved 64-bit: x5 = Mem[x10]; set reservation
+sc.d x6, x5, [x10]   // store-conditional: if reservation valid, Mem[x10] = x5; x6 = 0 on success
+\end{lstlisting}
+
+The \texttt{sc} returns 0 on success (reservation still held and store succeeded) or 1 on failure (reservation lost, another store occurred, or the access was not cacheable). A typical compare-and-swap loop looks like:
+
+\begin{lstlisting}[style=ptoscalarcode]
+retry:
+    lr.d x5, [x10]        // load old value
+    cmp.eq x7, x5, x6     // x7 = (x5 == x6)?
+    b.z x7, done           // if equal, already had expected value
+    sc.d x7, x6, [x10]    // attempt store
+    b.nz x7, retry         // if sc failed (x7 != 0), retry
+done:
+\end{lstlisting}
+
+Arithmetic atomics (\texttt{amo.add}, \texttt{amo.swap}, \texttt{amo.and}, \texttt{amo.or}, \texttt{amo.xor}, \texttt{amo.max}, \texttt{amo.min}, and their unsigned variants) perform the read-modify-write in a single atomic transaction. The optional \texttt{.aq} (acquire) and \texttt{.rl} (release) orderings control the memory ordering semantics:
+
+\begin{itemize}
+  \item No suffix: no ordering guarantees beyond atomicity.
+  \item \texttt{.aq}: the atomic operation has acquire semantics (subsequent loads/stores cannot move before it).
+  \item \texttt{.rl}: the atomic operation has release semantics (prior loads/stores cannot move after it).
+  \item \texttt{.aqrl}: both acquire and release.
+\end{itemize}
+
+Swap (\texttt{swap.b}, \texttt{swap.h}, \texttt{swap.w}, \texttt{swap.d}) writes the register value to memory and loads the previous memory value into the destination. It is the primitive from which all other atomic operations can be built.
+
+\section{Floating-Point and Conversion (30 instructions)}
+The floating-point unit supports IEEE 754 single-precision (\texttt{f32}) and half-precision (\texttt{f16}) arithmetic. There is no dedicated floating-point register file; FP values are held in the same \texttt{X0}--\texttt{X31} scalar registers as integers. This means every FP instruction implicitly knows whether its register contains an integer or a float based on the opcode; there is no separate register-file namespace.
+
+This design simplifies register allocation (one register file) at the cost of requiring the compiler to track register types. The SSA form of the IR separates integer and FP values, so the type confusion is a frontend concern, not a backend concern.
+
+FP arithmetic instructions (\texttt{fadd}, \texttt{fsub}, \texttt{fmul}, \texttt{fdiv}, \texttt{fsqrt}, \texttt{frecip}, \texttt{frsqrt}) follow IEEE 754 semantics by default. Rounding mode is controlled by the FPCR (Floating-Point Control Register) accessed through \texttt{fsr} / \texttt{fset} / \texttt{fget} instructions.
+
+Fused multiply-add (\texttt{fmadd}, \texttt{fmsub}, \texttt{fnmadd}, \texttt{fnmsub}) compute \texttt{a * b +/- c} in a single rounding step with a single final rounding. This gives higher accuracy and better throughput than separate multiply and add. \texttt{fnmadd} computes \texttt{-a * b - c}, which is useful for negation and for matrix multiply inner loops where the accumulator is negated at the end.
+
+FP comparisons (\texttt{feq}, \texttt{flt}, \texttt{fle}, \texttt{fge}, and their signalling variants \texttt{fnes}, \texttt{flts}, etc.) write 0 or 1 to a scalar register, matching the scalar compare convention. Signalling comparisons raise an exception on unordered inputs (NaN); quiet comparisons return 0 for unordered.
+
+Conversion instructions (\texttt{fcvtn}, \texttt{fcvta}, \texttt{fcvtp}, \texttt{fcvt}, \texttt{ucvtf}, \texttt{scvtf}) convert between integer and FP formats, and between different FP precisions. \texttt{fcvtn} converts to narrower FP (e.g. \texttt{f32} to \texttt{f16}) with round-to-nearest. \texttt{fcvta} converts with directed rounding (toward $+\infty$ or $-\infty$ depending on the instruction variant). \texttt{scvtf} converts signed integer to FP; \texttt{ucvtf} converts unsigned integer.
+
+\section{System, Cache, SSR, and Execution Control (31 instructions)}
+These instructions manage execution state that is outside the normal integer datapath. They cover SSR access, cache maintenance, memory fences, architectural control, and traps.
+
+SSR (System Status Register) instructions access the SSR namespace. \texttt{ssrset} writes an SSR; \texttt{ssrget} reads an SSR. The SSR namespace covers STATUS, MODE, EVT (event state), TMETA (tile metadata context), TCFG (tile configuration), FPCTRL (FP control), and XFORM (transform configuration) as described in the Architectural State chapter.
+
+Cache maintenance instructions (\texttt{dc.cva}, \texttt{dc.cisw}, \texttt{dc.csw}, \texttt{dc.iall}, \texttt{dc.iva}, \texttt{ic.iall}, \texttt{ic.iva}) operate on the data and instruction caches. These are primarily needed for cache-coherency protocol maintenance when sharing data between cores or for self-modifying code. Most tile programs do not need explicit cache maintenance because the tile engine operates on on-chip tile storage, not on the cache hierarchy directly.
+
+Fence instructions (\texttt{fence}, \texttt{fence.i}) enforce ordering between memory operations. \texttt{fence} establishes a memory ordering boundary; \texttt{fence.i} ensures that instruction fetches see the most recent instruction-store results. In PTO, tile memory ordering is primarily managed by event-based synchronization (\texttt{TSYNC}, \texttt{TEVENT}, \texttt{TWAIT}); fence instructions are needed for scalar memory access ordering and for instruction-fetch coherence.
+
+TLB instructions (\texttt{tlb.iav}, \texttt{tlb.ia}, \texttt{tlb.iv}, \texttt{tlb.iall}) manage the translation lookaside buffer. These are privileged or system-level instructions used by the OS or hypervisor for virtual-to-physical address translation setup. User-mode tile code does not normally encounter them.
+
+\section{Scalar Instruction Reference}
+\input{scalar-instructions/generated_scalar_instruction_catalog.tex}

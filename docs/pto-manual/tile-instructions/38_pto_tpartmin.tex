@@ -1,0 +1,81 @@
+\subsection{\texttt{TPARTMIN}}
+\noindent\textbf{Bundle encoding.} UOP entry 38, opcode \texttt{0x1043}. Bundle: \texttt{B.OP + B.ARG + B.ATTR + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1043}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.ATTR} carries partial-valid-region policy.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Partial elementwise min with implementation-defined handling of mismatched valid regions.
+\paragraph{Example.}
+Same pattern as \texttt{TPARTADD} $+$ but with min instead of add.
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the destination valid region:
+
+\[
+\mathrm{dst}_{i,j} =
+\begin{cases}
+\min(\mathrm{src0}_{i,j}, \mathrm{src1}_{i,j}) & \text{if both inputs are defined at } (i,j) \\
+\mathrm{src0}_{i,j} & \text{if only src0 is defined at } (i,j) \\
+\mathrm{src1}_{i,j} & \text{if only src1 is defined at } (i,j)
+\end{cases}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+Same NaN handling as \texttt{TPARTMAX}.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=0, kind=c} & \texttt{entry=38, cnt=0, res=vec, var=0} \\
+1 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=38, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.mem\_bar} & \texttt{opc=0x00, x=0, fl=setup, seq=2, kind=u} & \texttt{entry=38, cnt=1, res=vec, var=0} \\
+3 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=38, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=38, cnt=2, res=vec, var=0} \\
+5 & \texttt{u\_vec.mem\_bar} & \texttt{opc=0x00, x=0, fl=setup, seq=5, kind=u} & \texttt{entry=38, cnt=1, res=vec, var=0} \\
+6 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=6, kind=b} & \texttt{entry=38, cnt=2, res=vec, var=0} \\
+7 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=7, kind=b} & \texttt{entry=38, cnt=2, res=vec, var=0} \\
+8 & \texttt{u\_vec.vmin} & \texttt{opc=0x1C, x=0, fl=alu, seq=8, kind=b} & \texttt{entry=38, cnt=2, res=vec, var=0} \\
+9 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=9, kind=b} & \texttt{entry=38, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tpartmin(src0, src1, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+    src0_valid_rows, src0_valid_cols = src0.valid_shape
+    src1_valid_rows, src1_valid_cols = src1.valid_shape
+    lanes = pto.get_lanes(dtype)
+
+    pad_scalar = pto.PadValue.MAX.eval(dtype)
+    pad_vec = pto.vbr(pad_scalar)
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            pto.vsts(pad_vec, dst[row, col:], mask)
+
+    pto.mem_bar(pto.BarrierType.VST_VLD)
+
+    for row in range(0, src0_valid_rows, 1):
+        remained = src0_valid_cols
+        for col in range(0, src0_valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec0 = pto.vlds(src0[row, col:])
+            pto.vsts(vec0, dst[row, col:], mask)
+
+    pto.mem_bar(pto.BarrierType.VST_VLD)
+
+    for row in range(0, src1_valid_rows, 1):
+        remained = src1_valid_cols
+        for col in range(0, src1_valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec_dst = pto.vlds(dst[row, col:])
+            vec1 = pto.vlds(src1[row, col:])
+            result = pto.vmin(vec_dst, vec1, mask)
+            pto.vsts(result, dst[row, col:], mask)
+
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

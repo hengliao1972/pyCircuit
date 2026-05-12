@@ -1,0 +1,34 @@
+% Scalar instruction entry source: tools/generate_scalar_instruction_catalog.py.
+\subsection{\texttt{CLZ}}
+\label{sec:scalar-clz}
+\index{CLZ@\texttt{CLZ}}
+\begin{sloppypar}\noindent\textbf{Purpose.} Count leading zeros.\end{sloppypar}\smallskip
+\noindent\textbf{Syntax.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+clz SrcL,  M, N, ->RegDst
+\end{lstlisting}
+\noindent\textbf{Encoding.}\par
+\noindent\includegraphics[width=\textwidth]{figs/encoding/scalar_instruction_entries/enc_clz.pdf}\par\smallskip
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Format] \texttt{L32} \texttt{32-bit} scalar word.
+\item[Pattern] \texttt{.................101.....1100111}.
+\end{description}
+\noindent\textbf{Classification.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Category] Integer ALU and Bit-Manipulation.
+\item[Family] Bit Operation.
+\item[Execution class] \texttt{ALU}; uop\_kind=ALU.
+\end{description}
+\noindent\textbf{Operand fields.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[\texttt{RegDst}] Bits \texttt{11:7 (5b)}. 5-bit scalar destination register written by this instruction; X0 is hardwired to zero, so writes to X0 are ignored.
+\item[\texttt{SrcL}] Bits \texttt{19:15 (5b)}. 5-bit scalar source register used as the left input operand.
+\item[\texttt{imml}] Bits \texttt{25:20 (6b)}. 6-bit unsigned immediate operand consumed directly by the operation.
+\item[\texttt{imms}] Bits \texttt{31:26 (6b)}. 6-bit unsigned immediate operand consumed directly by the operation.
+\end{description}
+\noindent\textbf{Operation.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+field = ExtractBits(Read(SrcL), M, N)
+Write(RegDst, CountLeadingZeros(field))
+\end{lstlisting}
+\Needspace{0.08\textheight}

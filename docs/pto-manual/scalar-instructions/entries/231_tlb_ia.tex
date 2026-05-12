@@ -1,0 +1,30 @@
+% Scalar instruction entry source: tools/generate_scalar_instruction_catalog.py.
+\subsection{\texttt{TLB.IA}}
+\label{sec:scalar-tlb_ia}
+\index{TLB.IA@\texttt{TLB.IA}}
+\begin{sloppypar}\noindent\textbf{Purpose.} Invalidates address-translation state for the supplied address operand.\end{sloppypar}\smallskip
+\noindent\textbf{Syntax.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+tlb.ia SrcL
+\end{lstlisting}
+\noindent\textbf{Encoding.}\par
+\noindent\includegraphics[width=\textwidth]{figs/encoding/scalar_instruction_entries/enc_tlb_ia.pdf}\par\smallskip
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Format] \texttt{L32} \texttt{32-bit} scalar word.
+\item[Pattern] \texttt{000000000000.....111000000101011}.
+\end{description}
+\noindent\textbf{Classification.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Category] System, Cache, SSR, and Execution Control.
+\item[Family] Cache Maintain.
+\item[Execution class] \texttt{SYS}; uop\_kind=SYS, sys\_kind=CACHE\_MAINT.
+\end{description}
+\noindent\textbf{Operand fields.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[\texttt{SrcL}] Bits \texttt{19:15 (5b)}. 5-bit scalar source register supplying the address or selector operand for this maintenance operation.
+\end{description}
+\noindent\textbf{Operation.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+Maintain(op, address=Read(SrcL))
+\end{lstlisting}
+\Needspace{0.08\textheight}

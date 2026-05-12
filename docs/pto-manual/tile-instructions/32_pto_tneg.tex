@@ -1,0 +1,45 @@
+\subsection{\texttt{TNEG}}
+\noindent\textbf{Bundle encoding.} UOP entry 32, opcode \texttt{0x103D}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x103D}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise negation of a tile.
+\paragraph{Example.}
+Tile elements [-1, 0, 1] give [1, 0, -1]. FP: [-1.5, 0.0, 2.0] give [1.5, -0.0, -2.0].
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = -\mathrm{src}_{i,j}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+For i8, -128 becomes -128 (wraps). For FP types, -0.0 maps to +0.0.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=32, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vneg} & \texttt{opc=0x20, x=0, fl=alu, seq=1, kind=u} & \texttt{entry=32, cnt=1, res=vec, var=0} \\
+2 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=32, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tneg(src, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            vinput = pto.vlds(src[row, col:])
+            result = pto.vneg(vinput, mask)
+            pto.vsts(result, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

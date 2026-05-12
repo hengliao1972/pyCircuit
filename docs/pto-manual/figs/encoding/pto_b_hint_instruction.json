@@ -1,0 +1,52 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "X"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "RSVD"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 1,
+      "name": "V",
+      "attr": "VLD"
+    },
+    {
+      "bits": 1,
+      "name": "L/UL",
+      "attr": "LU"
+    },
+    {
+      "bits": 2,
+      "name": "temp",
+      "attr": "TMP"
+    },
+    {
+      "bits": 1,
+      "name": "RSVD"
+    },
+    {
+      "bits": 12,
+      "name": "pref_size",
+      "attr": "PSZ"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

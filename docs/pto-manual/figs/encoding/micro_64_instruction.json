@@ -1,0 +1,88 @@
+{
+  "reg": [
+    {
+      "bits": 9,
+      "name": "WM.RSV",
+      "attr": "0"
+    },
+    {
+      "bits": 3,
+      "name": "WM.VAR",
+      "attr": "V"
+    },
+    {
+      "bits": 3,
+      "name": "WM.SRC2",
+      "attr": "S2"
+    },
+    {
+      "bits": 3,
+      "name": "WM.SRC1",
+      "attr": "S1"
+    },
+    {
+      "bits": 3,
+      "name": "WM.SRC0",
+      "attr": "S0"
+    },
+    {
+      "bits": 2,
+      "name": "WM.RES",
+      "attr": "R"
+    },
+    {
+      "bits": 2,
+      "name": "WM.COUNT",
+      "attr": "C"
+    },
+    {
+      "bits": 7,
+      "name": "WM.ENTRY",
+      "attr": "EID"
+    },
+    {
+      "bits": 4,
+      "name": "WO.OP_C",
+      "attr": "C"
+    },
+    {
+      "bits": 4,
+      "name": "WO.OP_B",
+      "attr": "B"
+    },
+    {
+      "bits": 4,
+      "name": "WO.OP_A",
+      "attr": "A"
+    },
+    {
+      "bits": 2,
+      "name": "WO.KIND",
+      "attr": "K"
+    },
+    {
+      "bits": 7,
+      "name": "WO.SEQ",
+      "attr": "S"
+    },
+    {
+      "bits": 3,
+      "name": "WO.FLAGS",
+      "attr": "F"
+    },
+    {
+      "bits": 1,
+      "name": "WO.X",
+      "attr": "X"
+    },
+    {
+      "bits": 7,
+      "name": "WO.OPCODE",
+      "attr": "OP"
+    }
+  ],
+  "config": {
+    "bits": 64,
+    "lanes": 2
+  }
+}

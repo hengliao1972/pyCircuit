@@ -1,0 +1,46 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "X"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "KIND"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "Family",
+      "attr": "VSEQ"
+    },
+    {
+      "bits": 5,
+      "name": "RSVD"
+    },
+    {
+      "bits": 2,
+      "name": "Mode",
+      "attr": "M"
+    },
+    {
+      "bits": 5,
+      "name": "RSVD"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

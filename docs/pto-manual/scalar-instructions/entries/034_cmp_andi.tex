@@ -1,0 +1,35 @@
+% Scalar instruction entry source: tools/generate_scalar_instruction_catalog.py.
+\subsection{\texttt{CMP.ANDI}}
+\label{sec:scalar-cmp_andi}
+\index{CMP.ANDI@\texttt{CMP.ANDI}}
+\begin{sloppypar}\noindent\textbf{Purpose.} Tests whether the bitwise AND of SrcL and the immediate operand is nonzero, then writes 1 or 0 to RegDst.\end{sloppypar}\smallskip
+\noindent\textbf{Syntax.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+cmp.andi SrcL, simm, ->RegDst
+\end{lstlisting}
+\noindent\textbf{Encoding.}\par
+\noindent\includegraphics[width=\textwidth]{figs/encoding/scalar_instruction_entries/enc_cmp_andi.pdf}\par\smallskip
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Format] \texttt{L32} \texttt{32-bit} scalar word.
+\item[Pattern] \texttt{.................010.....1010101}.
+\end{description}
+\noindent\textbf{Classification.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[Category] Branch, Compare, and PC Control.
+\item[Family] Compare Instruction.
+\item[Execution class] \texttt{BRU}; uop\_kind=BRU, bru\_kind=CMP.
+\end{description}
+\noindent\textbf{Operand fields.}\par
+\begin{description}[leftmargin=0.18\linewidth,style=nextline]
+\item[\texttt{RegDst}] Bits \texttt{11:7 (5b)}. 5-bit scalar destination register that receives the boolean compare result, encoded as 1 for true and 0 for false; X0 discards the write.
+\item[\texttt{SrcL}] Bits \texttt{19:15 (5b)}. 5-bit scalar source register used as the left operand of the comparison.
+\item[\texttt{simm12}] Bits \texttt{31:20 (12b)}. 12-bit signed immediate operand that is sign-extended before use.
+\end{description}
+\noindent\textbf{Operation.}\par
+\begin{lstlisting}[style=ptoscalarcode]
+lhs = Read(SrcL)
+imm = SignExtend(simm)
+result = ((lhs & imm) != 0) ? 1 : 0
+Write(RegDst, result)
+\end{lstlisting}
+\Needspace{0.08\textheight}

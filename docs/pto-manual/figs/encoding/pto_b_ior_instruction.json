@@ -1,0 +1,48 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "X"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "RegDst",
+      "attr": "RD"
+    },
+    {
+      "bits": 3,
+      "name": "PREFIX"
+    },
+    {
+      "bits": 5,
+      "name": "RegSrc0",
+      "attr": "RS0"
+    },
+    {
+      "bits": 5,
+      "name": "RegSrc1",
+      "attr": "RS1"
+    },
+    {
+      "bits": 2,
+      "name": "RSVD"
+    },
+    {
+      "bits": 5,
+      "name": "RegSrc2",
+      "attr": "RS2"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

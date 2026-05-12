@@ -1,0 +1,306 @@
+\chapter{Tile Instructions}
+\label{chap:tile-instructions}
+
+\section{What This Chapter Is About}
+This chapter documents the CPU-visible tile instruction surface: the 67 \texttt{T*} instructions that form the programmer's interface to PTO's tiled dataflow engine. Each tile instruction is encoded as a descriptor bundle in the instruction stream; the bundle indexes a microcode body of \texttt{u\_vec.*} micro-instructions that carry out the actual work.
+
+A tile instruction operates on one or more tiles: 2D arrays of elements of a known shape and format. The instruction specifies the tile operands through descriptor fields, and the microcode body iterates over the valid region of each operand, applying vector micro-instructions lane by lane.
+
+The reference pages are grouped by family. Each family section explains the common architectural contract first, then lists the instruction pages that use that contract.
+
+\section{Tile Instruction Families}
+PTO's 67 tile instructions fall into ten families. The groupings reflect real usage patterns in linear algebra and neural-network kernels, not just encoding similarity.
+
+\begin{longtable}{@{}L{0.18\linewidth}L{0.30\linewidth}L{0.42\linewidth}@{}}
+\toprule
+Family & Instructions & Why it matters \\
+\midrule
+Tile-tile elementwise and shifts & \texttt{TADD}, \texttt{TSUB}, \texttt{TMUL}, \texttt{TDIV}, \texttt{TMAX}, \texttt{TMIN}, \texttt{TAND}, \texttt{TOR}, \texttt{TXOR}, \texttt{TSHL}, \texttt{TSHR} & The backbone of any tile program. Per-element arithmetic, bitwise operations, and tile-sourced shifts on full tiles. All tile operands must have compatible valid regions. \\
+Tile-scalar elementwise and shifts & \texttt{TADDS}, \texttt{TSUBS}, \texttt{TMULS}, \texttt{TDIVS}, \texttt{TMAXS}, \texttt{TMINS}, \texttt{TANDS}, \texttt{TORS}, \texttt{TXORS}, \texttt{TSHLS}, \texttt{TSHRS} & Broadcasts one scalar register into every lane. Used for bias addition, scalar offsets, element-wise scaling, and scalar shift amounts. \\
+Unary and special math & \texttt{TABS}, \texttt{TNEG}, \texttt{TNOT}, \texttt{TRECIP}, \texttt{TRSQRT}, \texttt{TRELU}, \texttt{TLRELU}, \texttt{TSQRT}, \texttt{TLOG}, \texttt{TEXP} & Per-element transforms. Special functions (sqrt, log, exp) invoke hardware accelerators. Accuracy is implementation-defined. \\
+Row reductions & \texttt{TROWSUM}, \texttt{TROWMAX}, \texttt{TROWMIN}, \texttt{TROWPROD}, \texttt{TROWARGMAX}, \texttt{TROWARGMIN} & Collapses each row to one value. Output shape $[R_{src}, 1]$. Used in max-pooling, softmax, and argmax-based attention. \\
+Column reductions & \texttt{TCOLSUM}, \texttt{TCOLMAX}, \texttt{TCOLMIN}, \texttt{TCOLPROD} & Collapses each column to one value. Output shape $[1, C_{src}]$. Used in GEMM inner products and column-wise feature aggregation. \\
+Row expands & \texttt{TROWEXPAND}, \texttt{TROWEXPANDADD}, \texttt{TROWEXPANDDIV}, \texttt{TROWEXPANDEXPDIF}, \texttt{TROWEXPANDMAX}, \texttt{TROWEXPANDMIN}, \texttt{TROWEXPANDMUL}, \texttt{TROWEXPANDSUB} & Broadcasts a column vector into a full matrix along rows. The canonical primitive for row-bias addition in a GEMM rank-1 update. \\
+Column expands & \texttt{TCOLEXPAND}, \texttt{TCOLEXPANDADD}, \texttt{TCOLEXPANDDIV}, \texttt{TCOLEXPANDEXPDIF}, \texttt{TCOLEXPANDMAX}, \texttt{TCOLEXPANDMIN}, \texttt{TCOLEXPANDMUL}, \texttt{TCOLEXPANDSUB}, \texttt{TEXPANDS} & Broadcasts a row vector, column-wise source, or scalar into a full matrix along columns. Used for column-bias addition and channel-wise scaling. \\
+Partial/valid-region & \texttt{TPARTADD}, \texttt{TPARTMUL}, \texttt{TPARTMAX}, \texttt{TPARTMIN}, \texttt{TFILLPAD} & Handles tiles of different shapes gracefully. No need to reshape before computing when shapes do not match. Essential for ragged tensors and partial tiles. \\
+Select and predication & \texttt{TSEL}, \texttt{TSELS} & Per-element conditional move using a mask tile. Equivalent to NumPy's \texttt{where()} or SIMD conditional select. The hardware primitive for SIMD if-conversion. \\
+Conversion & \texttt{TCVT} & Changes element format (f16-to-f32, i32-to-f32, etc.) without changing shape. The key primitive for mixed-precision pipelines. \\
+\bottomrule
+\end{longtable}
+
+\section{Normative Rules}
+Three rules apply to every tile instruction in this catalog. An implementation that violates any of them is not PTO-compliant.
+
+\begin{enumerate}
+  \item \textbf{Valid region contract.} Every tile instruction is defined only over the valid rows and valid columns of its operands, as reported by the tile metadata. Elements outside the valid region MUST NOT be read by the microcode body unless the instruction description explicitly defines fill, padding, or extension behaviour.
+  \item \textbf{IEEE 754 for floating-point types.} All floating-point tile instructions follow IEEE 754. NaN propagates with the sign bit preserved. Division by zero produces Inf with the dividend's sign. The rounding mode is encoded in the \texttt{VARIANT} field; when present, it MUST be applied to all FP results for which rounding is defined.
+  \item \textbf{Illegal operand combinations.} An implementation MUST reject illegal combinations --- mismatched shapes where the instruction requires matching shapes, unsupported element formats, or missing required descriptors --- with a deterministic diagnostic. PTO does not define silent truncation, padding, or format coercion.
+\end{enumerate}
+
+Each instruction page gives a compact bundle encoding line, PTO ISA semantics, microcode site table, and source DSL for the generated microcode body.
+
+\section{Family: Tile-Tile Elementwise and Shift Operations}
+\index{elementwise}\index{tadd}\index{tsub}\index{tmul}\index{tshl}\index{tshr}
+The tile-tile elementwise family covers the per-lane binary operations that appear in every tile program. \texttt{TADD} uses the minimal bundle \texttt{B.OP + B.IOTI}; other profiles in this family may add an argument descriptor when the opcode profile requires one. No scalar GPR import or dimension descriptor is used.
+
+The common microcode body pattern is load source-0, load source-1, execute the arithmetic or bitwise micro-instruction, then store the result. The three tiles (two sources, one destination) must have matching valid regions. If their physical shapes differ but valid regions agree, the operation proceeds over the valid region only; no implicit padding or clipping occurs.
+
+Concrete usage: a GEMM inner loop accumulates \texttt{C += A @ B} by tiling the inner dimension. Each tile-tile \texttt{TMUL} computes one block of the rank-1 product; each tile-tile \texttt{TADD} accumulates it into the destination accumulator tile. The shape of all tiles is identical throughout the loop.
+
+\begin{longtable}[t]{@{}ll@{}}
+\texttt{TADD} & $a + b$ \\
+\texttt{TSUB} & $a - b$ \\
+\texttt{TMUL} & $a \times b$ \\
+\texttt{TDIV} & $a / b$ \\
+\texttt{TMAX} & $\max(a, b)$ \\
+\texttt{TMIN} & $\min(a, b)$ \\
+\texttt{TAND} & $a \,\&\, b$ (bitwise AND) \\
+\texttt{TOR} & $a \,|\, b$ (bitwise OR) \\
+\texttt{TXOR} & $a \oplus b$ (bitwise XOR) \\
+\texttt{TSHL} & $a \ll b$ \\
+\texttt{TSHR} & $a \gg b$ \\
+\end{longtable}
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/01_pto_tadd.tex}
+\clearpage
+\input{tile-instructions/64_pto_tsub.tex}
+\clearpage
+\input{tile-instructions/30_pto_tmul.tex}
+\clearpage
+\input{tile-instructions/18_pto_tdiv.tex}
+\clearpage
+\input{tile-instructions/26_pto_tmax.tex}
+\clearpage
+\input{tile-instructions/28_pto_tmin.tex}
+\clearpage
+\input{tile-instructions/03_pto_tand.tex}
+\clearpage
+\input{tile-instructions/34_pto_tor.tex}
+\clearpage
+\input{tile-instructions/66_pto_txor.tex}
+\clearpage
+\input{tile-instructions/59_pto_tshl.tex}
+\clearpage
+\input{tile-instructions/61_pto_tshr.tex}
+\clearpage
+
+\section{Family: Tile-Scalar Elementwise and Shift Operations}
+\index{tadds}\index{tsubs}\index{tmuls}\index{tdivs}\index{tshls}\index{tshrs}
+These instructions combine one tile with one scalar GPR value, broadcasting the scalar into every lane. The descriptor profile adds \texttt{B.IOR} to carry the 5-bit scalar register ID. Inside the microcode body, a scalar-form vector micro-instruction consumes the imported scalar lane-wise.
+
+The most common uses are bias addition, scalar offsets, element-wise scaling by a compile-time constant loaded into a register, and scalar shift amounts.
+
+\begin{longtable}[t]{@{}ll@{}}
+\texttt{TADDS} & $a + \mathrm{scalar}$ \\
+\texttt{TSUBS} & $a - \mathrm{scalar}$ \\
+\texttt{TMULS} & $a \times \mathrm{scalar}$ \\
+\texttt{TDIVS} & $a / \mathrm{scalar}$ \\
+\texttt{TMAXS} & $\max(a, \mathrm{scalar})$ \\
+\texttt{TMINS} & $\min(a, \mathrm{scalar})$ \\
+\texttt{TANDS} & $a \,\&\, \mathrm{scalar}$ \\
+\texttt{TORS} & $a \,|\, \mathrm{scalar}$ \\
+\texttt{TXORS} & $a \oplus \mathrm{scalar}$ \\
+\texttt{TSHLS} & $a \ll \mathrm{scalar}$ \\
+\texttt{TSHRS} & $a \gg \mathrm{scalar}$ \\
+\end{longtable}
+
+Shift operations treat the shift amount as an unsigned integer. Right shift is arithmetic (sign-extending) for signed types and logical (zero-extending) for unsigned types.
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/02_pto_tadds.tex}
+\clearpage
+\input{tile-instructions/65_pto_tsubs.tex}
+\clearpage
+\input{tile-instructions/31_pto_tmuls.tex}
+\clearpage
+\input{tile-instructions/19_pto_tdivs.tex}
+\clearpage
+\input{tile-instructions/27_pto_tmaxs.tex}
+\clearpage
+\input{tile-instructions/29_pto_tmins.tex}
+\clearpage
+\input{tile-instructions/04_pto_tands.tex}
+\clearpage
+\input{tile-instructions/35_pto_tors.tex}
+\clearpage
+\input{tile-instructions/67_pto_txors.tex}
+\clearpage
+\input{tile-instructions/60_pto_tshls.tex}
+\clearpage
+\input{tile-instructions/62_pto_tshrs.tex}
+\clearpage
+
+\section{Family: Unary and Special Math}
+\index{tabs}\index{tneg}\index{tnot}\index{trecip}\index{trsqrt}\index{tsqrt}\index{tlog}\index{texp}\index{trelu}\index{tlrelu}
+These instructions apply a per-element unary transform. Most use a compact opcode-plus-tile-operand bundle and a three-site microcode body: load, unary micro-instruction, store. \texttt{TLRELU} additionally imports its slope through \texttt{B.IOR}.
+
+The family has three groups. Basic arithmetic includes \texttt{TABS}, \texttt{TNEG}, and \texttt{TNOT}. Piecewise-linear activations include \texttt{TRELU} and \texttt{TLRELU}. Transcendental and reciprocal approximations include \texttt{TSQRT}, \texttt{TRSQRT}, \texttt{TRECIP}, \texttt{TEXP}, and \texttt{TLOG}. The accuracy contract for the approximation forms is implementation-defined; NaN and Inf propagation follow IEEE 754.
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/00_pto_tabs.tex}
+\clearpage
+\input{tile-instructions/32_pto_tneg.tex}
+\clearpage
+\input{tile-instructions/33_pto_tnot.tex}
+\clearpage
+\input{tile-instructions/41_pto_trelu.tex}
+\clearpage
+\input{tile-instructions/25_pto_tlrelu.tex}
+\clearpage
+\input{tile-instructions/63_pto_tsqrt.tex}
+\clearpage
+\input{tile-instructions/56_pto_trsqrt.tex}
+\clearpage
+\input{tile-instructions/40_pto_trecip.tex}
+\clearpage
+\input{tile-instructions/20_pto_texp.tex}
+\clearpage
+\input{tile-instructions/24_pto_tlog.tex}
+\clearpage
+
+\section{Family: Row Reductions}
+\index{trowsum}\index{trowmax}\index{trowmin}\index{trowprod}\index{trowargmax}\index{trowargmin}
+Row reductions collapse each source row to one value written at column 0 of the output tile. The output tile has shape $[R_{src}, 1]$. \texttt{B.DIM} carries the axis and valid bounds that determine how many columns to reduce.
+
+The microcode bodies use a multi-pass algorithm: a partial reduction within each row using vector lanes, followed by a cross-lane reduction to produce the final scalar. \texttt{TROWARGMAX} and \texttt{TROWARGMIN} maintain both a value accumulator and an index accumulator.
+
+\begin{longtable}[t]{@{}ll@{}}
+\texttt{TROWSUM} & $\sum_j a_{i,j}$ \\
+\texttt{TROWMAX} & $\max_j a_{i,j}$ \\
+\texttt{TROWMIN} & $\min_j a_{i,j}$ \\
+\texttt{TROWPROD} & $\prod_j a_{i,j}$ \\
+\texttt{TROWARGMAX} & $\operatorname{arg\,max}_j\, a_{i,j}$ (column index of max) \\
+\texttt{TROWARGMIN} & $\operatorname{arg\,min}_j\, a_{i,j}$ (column index of min) \\
+\end{longtable}
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/55_pto_trowsum.tex}
+\clearpage
+\input{tile-instructions/52_pto_trowmax.tex}
+\clearpage
+\input{tile-instructions/53_pto_trowmin.tex}
+\clearpage
+\input{tile-instructions/54_pto_trowprod.tex}
+\clearpage
+\input{tile-instructions/42_pto_trowargmax.tex}
+\clearpage
+\input{tile-instructions/43_pto_trowargmin.tex}
+\clearpage
+
+\section{Family: Column Reductions}
+\index{tcolsum}\index{tcolmax}\index{tcolmin}\index{tcolprod}
+Column reductions collapse each source column to one value written at row 0 of the output tile. The output tile has shape $[1, C_{src}]$. \texttt{B.DIM} carries the axis and valid bounds that determine how many rows to reduce.
+
+\begin{longtable}[t]{@{}ll@{}}
+\texttt{TCOLSUM} & $\sum_i a_{i,j}$ \\
+\texttt{TCOLMAX} & $\max_i a_{i,j}$ \\
+\texttt{TCOLMIN} & $\min_i a_{i,j}$ \\
+\texttt{TCOLPROD} & $\prod_i a_{i,j}$ \\
+\end{longtable}
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/16_pto_tcolsum.tex}
+\clearpage
+\input{tile-instructions/13_pto_tcolmax.tex}
+\clearpage
+\input{tile-instructions/14_pto_tcolmin.tex}
+\clearpage
+\input{tile-instructions/15_pto_tcolprod.tex}
+\clearpage
+
+\section{Family: Row Expands}
+\index{trowexpand}\index{trowexpandadd}\index{trowexpanddiv}\index{trowexpandexpdif}\index{trowexpandmax}\index{trowexpandmin}\index{trowexpandmul}\index{trowexpandsub}
+Row expands broadcast the first element of each row of the source tile across all columns of the destination. The source is a column vector (shape $[R, 1]$) or a scalar treated as $[1, 1]$. The output is $[R, C_{dst}]$. The inverse operation is \texttt{TROWSUM} reduced over columns.
+
+The binary row-expand variants combine the broadcast with an elementwise operation in one instruction, such as \texttt{dst[row, col] += broadcast[row]}. This avoids an extra \texttt{TADD} pass for row-bias and row-normalization patterns.
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/44_pto_trowexpand.tex}
+\clearpage
+\input{tile-instructions/45_pto_trowexpandadd.tex}
+\clearpage
+\input{tile-instructions/46_pto_trowexpanddiv.tex}
+\clearpage
+\input{tile-instructions/47_pto_trowexpandexpdif.tex}
+\clearpage
+\input{tile-instructions/48_pto_trowexpandmax.tex}
+\clearpage
+\input{tile-instructions/49_pto_trowexpandmin.tex}
+\clearpage
+\input{tile-instructions/50_pto_trowexpandmul.tex}
+\clearpage
+\input{tile-instructions/51_pto_trowexpandsub.tex}
+\clearpage
+
+\section{Family: Column Expands}
+\index{tcolexpand}\index{tcolexpandadd}\index{tcolexpanddiv}\index{tcolexpandexpdif}\index{tcolexpandmax}\index{tcolexpandmin}\index{tcolexpandmul}\index{tcolexpandsub}\index{texpands}
+Column expands broadcast the first element of each column of the source tile across all rows of the destination. The source is a row vector (shape $[1, C]$) or a scalar. The output is $[R_{dst}, C]$. The inverse operation is \texttt{TCOLSUM} reduced over rows.
+
+The binary column-expand variants combine the broadcast with an elementwise operation in one instruction, such as \texttt{dst[row, col] += broadcast[col]}. \texttt{TEXPANDS} is grouped here because it expands a scalar value into the destination tile rather than combining a scalar with an existing source tile.
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/05_pto_tcolexpand.tex}
+\clearpage
+\input{tile-instructions/06_pto_tcolexpandadd.tex}
+\clearpage
+\input{tile-instructions/07_pto_tcolexpanddiv.tex}
+\clearpage
+\input{tile-instructions/08_pto_tcolexpandexpdif.tex}
+\clearpage
+\input{tile-instructions/09_pto_tcolexpandmax.tex}
+\clearpage
+\input{tile-instructions/10_pto_tcolexpandmin.tex}
+\clearpage
+\input{tile-instructions/11_pto_tcolexpandmul.tex}
+\clearpage
+\input{tile-instructions/12_pto_tcolexpandsub.tex}
+\clearpage
+\input{tile-instructions/21_pto_texpands.tex}
+\clearpage
+
+\section{Family: Partial and Valid-Region Operations}
+\index{tpartadd}\index{tpartmul}\index{tpartmax}\index{tpartmin}\index{tfillpad}
+These instructions handle mismatched valid regions between source and destination tiles. When two tiles have different valid regions, a standard tile-tile elementwise instruction would read an undefined element for the non-overlapping parts. Partial operations define the behaviour explicitly, avoiding the need to fill or reshape before computing.
+
+The four partial elementwise instructions operate on the element-wise intersection of their two source tiles using the binary operation. For non-overlapping parts, they copy the defined operand to the destination without modification. \texttt{TFILLPAD} fills the invalid or padding region of a tile with a specified value from either a scalar GPR or the \texttt{B.ATTR.pad\_value} field.
+
+These instructions use \texttt{B.ATTR} for the pad value or valid-region policy.
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/36_pto_tpartadd.tex}
+\clearpage
+\input{tile-instructions/37_pto_tpartmax.tex}
+\clearpage
+\input{tile-instructions/38_pto_tpartmin.tex}
+\clearpage
+\input{tile-instructions/39_pto_tpartmul.tex}
+\clearpage
+\input{tile-instructions/22_pto_tfillpad.tex}
+\clearpage
+
+\section{Family: Select and Predication}
+\index{tsel}\index{tsels}
+Selection instructions choose between two source operands element-by-element using a mask tile. The mask is a tile of boolean values; lanes where the mask is true select from the first source, lanes where it is false select from the second.
+
+\begin{longtable}[t]{@{}ll@{}}
+\texttt{TSEL} & \texttt{dst = mask ? src0 : src1} (tile-tile select) \\
+\texttt{TSELS} & \texttt{dst = mask ? tile : scalar} (tile-scalar select) \\
+\end{longtable}
+
+The mask tile and the data tiles must have the same shape. The mask element type is always boolean, independent of the data element type. Selection is the hardware primitive for SIMD if-conversion on tiles.
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/57_pto_tsel.tex}
+\clearpage
+\input{tile-instructions/58_pto_tsels.tex}
+\clearpage
+
+\section{Family: Format Conversion}
+\index{tcvt}
+Conversion instructions change the element format of a tile without altering its shape. \texttt{TCVT} converts from the source tile's format to the destination format declared by the tile opcode profile and descriptor metadata. \texttt{B.ATTR} may carry rounding refinements for FP-to-FP or FP-to-integer conversions.
+
+The microcode body for \texttt{TCVT} is one of the most complex in the catalog because format conversion may require lane unpacking, saturation logic, and lane repacking. The key use case is mixed-precision pipelines.
+
+\Needspace{0.34\textheight}
+\input{tile-instructions/17_pto_tcvt.tex}

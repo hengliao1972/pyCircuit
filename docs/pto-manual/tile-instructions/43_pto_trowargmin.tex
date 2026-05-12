@@ -1,0 +1,90 @@
+\subsection{\texttt{TROWARGMIN}}
+\noindent\textbf{Bundle encoding.} UOP entry 43, opcode \texttt{0xF001}. Bundle: \texttt{B.OP + B.ARG + B.DIM + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0xF001}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. Scratch operand(s) \texttt{tmp} are implementation-local and are not encoded in the CPU-visible bundle.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Get the column index of the minimum element for each row.
+\paragraph{Example.}
+Source row [3, 1, 7, 2]: output row[0] = 1 (0-indexed column of min value 1).
+\par\smallskip
+\paragraph{PTO ISA operation.}
+Let \texttt{R = src.GetValidRow()} and \texttt{C = src.GetValidCol()}. For \texttt{0 \textless{}= i \textless{} R}:
+
+\[
+\mathrm{dst}_{i,0} = \operatorname*{arg\,min}_{0 \le j < C}\; \mathrm{src}_{i,j}
+\]
+
+\noindent where the result is the column index $j$ that minimises $\mathrm{src}_{i,j}$.
+}\par\smallskip
+\paragraph{Notes.}
+Same tie-breaking as \texttt{TROWARGMAX}. Output type should be an integer type.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=0, kind=c} & \texttt{entry=43, cnt=0, res=vec, var=0} \\
+1 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=1, kind=c} & \texttt{entry=43, cnt=0, res=vec, var=0} \\
+2 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=43, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vcmin} & \texttt{opc=0x0E, x=0, fl=alu, seq=3, kind=b} & \texttt{entry=43, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vdintlv} & \texttt{opc=0x11, x=0, fl=alu, seq=4, kind=u} & \texttt{entry=43, cnt=1, res=vec, var=0} \\
+5 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=5, kind=c} & \texttt{entry=43, cnt=0, res=vec, var=0} \\
+6 & \texttt{u\_vec.vbitcast} & \texttt{opc=0x0A, x=0, fl=alu, seq=6, kind=u} & \texttt{entry=43, cnt=1, res=vec, var=0} \\
+7 & \texttt{u\_vec.vadds} & \texttt{opc=0x08, x=0, fl=alu, seq=7, kind=b} & \texttt{entry=43, cnt=2, res=vec, var=0} \\
+8 & \texttt{u\_vec.vcmp} & \texttt{opc=0x0F, x=0, fl=alu, seq=8, kind=b} & \texttt{entry=43, cnt=2, res=vec, var=0} \\
+9 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=9, kind=t} & \texttt{entry=43, cnt=3, res=vec, var=0} \\
+10 & \texttt{u\_vec.pbitcast} & \texttt{opc=0x01, x=0, fl=setup, seq=10, kind=u} & \texttt{entry=43, cnt=1, res=vec, var=0} \\
+11 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=11, kind=t} & \texttt{entry=43, cnt=3, res=vec, var=0} \\
+12 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=12, kind=b} & \texttt{entry=43, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_trowargmin(src, tmp, dst):
+    src_dtype = src.element_type
+    idx_dtype = dst.element_type
+    lanes = pto.get_lanes(src_dtype)
+    valid_rows, valid_cols = src.valid_shape
+    elem_bytes = pto.bytewidth(idx_dtype)
+
+    init_val = pto.PadValue.MAX.eval(src_dtype)
+
+    if pto.constexpr(elem_bytes == 4):
+        store_dist = pto.VStoreDist.ONE_POINT_B32
+    elif pto.constexpr(elem_bytes == 2):
+        store_dist = pto.VStoreDist.ONE_POINT_B16
+    else:
+        store_dist = pto.VStoreDist.ONE_POINT_B8
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+
+        v_val_acc = pto.vbr(init_val)
+        init_zero_idx = idx_dtype(0)
+        v_idx_acc = pto.vbr(init_zero_idx)
+
+        mask_1, _ = pto.make_mask(src_dtype, 1)
+        mask_1_idx, _ = pto.make_mask(idx_dtype, 1)
+
+        for col in range(0, valid_cols, lanes):
+            mask, remained = pto.make_mask(src_dtype, remained)
+            v_src = pto.vlds(src[row, col:])
+            v_reduced = pto.vcmin(v_src, mask)
+
+            v_val, v_idx = pto.vdintlv(v_reduced, pto.vbr(src_dtype(0)))
+            v_idx = pto.vbitcast(v_idx, idx_dtype)
+
+            col_offset = idx_dtype(col)
+            v_idx = pto.vadds(v_idx, col_offset, mask_1_idx)
+
+            cmp_mask = pto.vcmp(v_val_acc, v_val, mask_1, "gt")
+
+            v_val_acc = pto.vsel(v_val, v_val_acc, cmp_mask)
+            cmp_mask_b32 = pto.pbitcast(cmp_mask, pto.mask_b32)
+            v_idx_acc = pto.vsel(v_idx, v_idx_acc, cmp_mask_b32)
+
+        pto.vsts(v_idx_acc, dst[row, 0:], mask_1_idx, dist=store_dist)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

@@ -1,0 +1,50 @@
+\chapter{UOP Engine Microcode Size Analysis}
+This appendix estimates the microcode body size if the PTO tile instruction portion is implemented on Davinci OoO entirely through WO/WM microcode. The estimate counts only UOP Engine-generated micro instruction instances. It does not count CPU front-end decode logic, implementation-local operand rename state, decoded metadata state, vector beat-buffer expansion, or scalar/control instructions outside the tile instruction surface.
+
+The size rule is fixed for this manual:
+\[
+\texttt{code\_size\_bytes} = \texttt{micro\_instruction\_count} \times 8
+\]
+Each micro instruction instance is one 64-bit WO/WM microcode word: \texttt{WM} occupies bits \texttt{31:0}, and \texttt{WO} occupies bits \texttt{63:32}.
+
+\section{Current Vec Subset}
+The current Davinci Vec subset is the exact body set listed by this manual. The CPU-visible TH0--TH2 header words select entries and operands; those header words are instruction-stream state and are not counted again in the microcode body.
+\begin{longtable}{@{}L{0.36\linewidth}R{0.12\linewidth}R{0.16\linewidth}R{0.14\linewidth}R{0.14\linewidth}@{}}
+\toprule
+Scope & Entries & WO/WM sites & Bytes & KiB \\
+\midrule
+Current Davinci Vec tile instructions & 67 & 379 & 3032 & 2.9609375 \\
+\bottomrule
+\end{longtable}
+
+\section{All Tile Instruction Estimate}
+For the full PTO tile instruction surface, the UOP Engine microcode estimate uses 69 tile instruction entries and 1,900 micro instruction instances. At 8 bytes per 64-bit micro instruction, the full tile instruction microcode body is 15,200 bytes, or 14.84 KiB. This all tile instruction figure is an upper-bound estimate from the wider tile instruction corpus; the current Vec subset above is the exact count after removing type and constant constructors from the encoded micro instruction stream.
+\begin{longtable}{@{}L{0.36\linewidth}R{0.12\linewidth}R{0.18\linewidth}R{0.14\linewidth}R{0.12\linewidth}@{}}
+\toprule
+Scope & Entries & Micro instructions & Bytes & KiB \\
+\midrule
+All PTO tile instructions through microcode & 69 & 1900 & 15200 & 14.84 \\
+\bottomrule
+\end{longtable}
+
+\section{All Tile Instruction Breakdown}
+\begin{longtable}{@{}L{0.38\linewidth}R{0.12\linewidth}R{0.18\linewidth}R{0.14\linewidth}R{0.10\linewidth}@{}}
+\toprule
+Category & Entries & Micro instructions & Bytes & KiB \\
+\midrule
+Axis arg-reduce & 2 & 144 & 1152 & 1.125 \\
+Axis expand / broadcast & 17 & 446 & 3568 & 3.484 \\
+Axis reduce & 8 & 519 & 4152 & 4.055 \\
+Composite kernel & 1 & 7 & 56 & 0.055 \\
+Memory movement & 1 & 12 & 96 & 0.094 \\
+Partial / valid-region & 4 & 168 & 1344 & 1.312 \\
+Select / predication & 1 & 50 & 400 & 0.391 \\
+Tile-scalar & 12 & 262 & 2096 & 2.047 \\
+Tile-tile elementwise & 11 & 112 & 896 & 0.875 \\
+Unary / special & 12 & 180 & 1440 & 1.406 \\
+\midrule
+\textbf{Total} & \textbf{69} & \textbf{1900} & \textbf{15200} & \textbf{14.84} \\
+\bottomrule
+\end{longtable}
+
+The conclusion is that the full tile instruction UOP Engine microcode is approximately 15 KiB, while the current Davinci Vec subset is approximately 2.96 KiB. The Davinci microassembler expands 64-bit WO/WM micro instructions with Tile Metadata RAT state into VEC beat words; that expansion does not add microcode body bytes.

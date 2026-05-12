@@ -1,0 +1,37 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "1"
+    },
+    {
+      "bits": 3,
+      "name": "100"
+    },
+    {
+      "bits": 3,
+      "name": "011"
+    },
+    {
+      "bits": 5,
+      "name": "RegDst",
+      "attr": "11:7"
+    },
+    {
+      "bits": 3,
+      "name": "110"
+    },
+    {
+      "bits": 17,
+      "name": "simm17",
+      "attr": "31:15"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "hflip": true,
+    "lanes": 1,
+    "fontsize": 12,
+    "hspace": 820
+  }
+}

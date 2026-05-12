@@ -1,0 +1,47 @@
+\subsection{\texttt{TMAX}}
+\noindent\textbf{Bundle encoding.} UOP entry 26, opcode \texttt{0x1034}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1034}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise maximum of two tiles.
+\paragraph{Example.}
+[1, 4, 2] max [3, 2, 5] = [3, 4, 5].
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \max(\mathrm{src0}_{i,j}, \mathrm{src1}_{i,j})
+\]
+}\par\smallskip
+\paragraph{Notes.}
+For integer types, ties resolve toward the second source (src1). For FP types, if one input is NaN the result is NaN; if both are NaN the result is NaN.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=26, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=26, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vmax} & \texttt{opc=0x1A, x=0, fl=alu, seq=2, kind=b} & \texttt{entry=26, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=26, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tmax(src0, src1, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            lhs = pto.vlds(src0[row, col:])
+            rhs = pto.vlds(src1[row, col:])
+            max_val = pto.vmax(lhs, rhs, mask)
+            pto.vsts(max_val, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

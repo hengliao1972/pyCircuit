@@ -1,0 +1,47 @@
+\subsection{\texttt{TMUL}}
+\noindent\textbf{Bundle encoding.} UOP entry 30, opcode \texttt{0x103B}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x103B}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise multiply of two tiles.
+\paragraph{Example.}
+[[1,2],[3,4]] Hadamard [[5,6],[7,8]] = [[5,12],[21,32]].
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \mathrm{src0}_{i,j} \cdot \mathrm{src1}_{i,j}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+FP multiplication follows IEEE 754. Integer multiplication wraps modulo 2\textsuperscript{N}. Saturated integer types (\texttt{si8}, etc.) saturate on overflow instead of wrapping.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=30, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=30, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vmul} & \texttt{opc=0x1E, x=0, fl=alu, seq=2, kind=b} & \texttt{entry=30, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=30, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tmul(src0, src1, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            lhs = pto.vlds(src0[row, col:])
+            rhs = pto.vlds(src1[row, col:])
+            multiplied = pto.vmul(lhs, rhs, mask)
+            pto.vsts(multiplied, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

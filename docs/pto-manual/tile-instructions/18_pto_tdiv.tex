@@ -1,0 +1,57 @@
+\subsection{\texttt{TDIV}}
+\noindent\textbf{Bundle encoding.} UOP entry 18, opcode \texttt{0x101D}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x101D}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
+
+\textit{Semantics.} Performs element-wise division of \texttt{src0} by \texttt{src1} across the destination tile's valid region. The quotient is written to \texttt{dst[r, c]} for each valid position.
+
+\textit{Division by zero.} When \texttt{src1[r, c]} is exactly zero, the result is Inf with the sign of \texttt{src0[r, c]}. When both dividend and divisor are zero, the result is NaN. Dividing Inf by zero yields NaN with the correct sign of zero.
+
+\textit{NaN propagation.} When either operand element is NaN, the result is NaN. Signaling NaN (sNaN) is quieted before propagation.
+
+\textit{Overflow and underflow.} Follow IEEE 754 with the rounding mode specified by the instruction's VARIANT field.
+
+\textit{VARIANT.} VARIANT field encodes the floating-point rounding mode. Defined values: 0 = RINT (round to nearest even, default), 1 = RZ (round toward zero), 2 = RP (round toward +Inf), 3 = RM (round toward -Inf). For integer divide variants, VARIANT may encode saturation mode.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise division of two tiles.
+\paragraph{Example.}
+tile\_a / tile\_b: element at (i,j) = tile\_a[i,j] / tile\_b[i,j]. Division by zero produces Inf with the dividend's sign.
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \frac{\mathrm{src0}_{i,j}}{\mathrm{src1}_{i,j}}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+IEEE 754 applies: 0.0/0.0 = NaN, x/0.0 for non-zero x = +/-Inf. FP rounding mode from VARIANT field. Integer division truncates toward zero.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=18, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=18, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vdiv} & \texttt{opc=0x12, x=0, fl=alu, seq=2, kind=b} & \texttt{entry=18, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=18, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tdiv(src0, src1, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            lhs = pto.vlds(src0[row, col:])
+            rhs = pto.vlds(src1[row, col:])
+            divided = pto.vdiv(lhs, rhs, mask)
+            pto.vsts(divided, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

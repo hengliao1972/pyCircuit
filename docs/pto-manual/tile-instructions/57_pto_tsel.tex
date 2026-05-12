@@ -1,0 +1,124 @@
+\subsection{\texttt{TSEL}}
+\noindent\textbf{Bundle encoding.} UOP entry 57, opcode \texttt{0x1057}. Bundle: \texttt{B.OP + B.ARG + B.ATTR + B.IOTI + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1057}. \texttt{B.IOTI[0]}: selector=\texttt{110 continue}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size; \texttt{B.IOTI[1]}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{mask}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.ATTR} carries predicate/mask interpretation metadata. Scratch operand(s) \texttt{tmp} are implementation-local and are not encoded in the CPU-visible bundle.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Select between two tiles using a mask tile (per-element selection).
+\paragraph{Example.}
+mask [[T,F],[F,T]], src0 [[1,2],[3,4]], src1 [[5,6],[7,8]] gives [[1,6],[7,4]].
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} =
+\begin{cases}
+\mathrm{src0}_{i,j} & \text{if } \mathrm{mask}_{i,j}\ \text{is true} \\
+\mathrm{src1}_{i,j} & \text{otherwise}
+\end{cases}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+All three tiles must have the same shape. The mask tile's element type is boolean; it is not the same as the data element type. Both src0 and src1 are read under the per-lane mask.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.pset\_b16} & \texttt{opc=0x04, x=0, fl=setup, seq=0, kind=u} & \texttt{entry=57, cnt=1, res=vec, var=0} \\
+1 & \texttt{u\_vec.plds} & \texttt{opc=0x03, x=0, fl=setup, seq=1, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.pintlv\_b16} & \texttt{opc=0x02, x=0, fl=setup, seq=2, kind=u} & \texttt{entry=57, cnt=1, res=vec, var=0} \\
+3 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+5 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=5, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+6 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=6, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+7 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=7, kind=t} & \texttt{entry=57, cnt=3, res=vec, var=0} \\
+8 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=8, kind=t} & \texttt{entry=57, cnt=3, res=vec, var=0} \\
+9 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=9, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+10 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=10, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+11 & \texttt{u\_vec.plds} & \texttt{opc=0x03, x=0, fl=setup, seq=11, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+12 & \texttt{u\_vec.punpack} & \texttt{opc=0x05, x=0, fl=setup, seq=12, kind=u} & \texttt{entry=57, cnt=1, res=vec, var=0} \\
+13 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=13, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+14 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=14, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+15 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=15, kind=t} & \texttt{entry=57, cnt=3, res=vec, var=0} \\
+16 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=16, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+17 & \texttt{u\_vec.plds} & \texttt{opc=0x03, x=0, fl=setup, seq=17, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+18 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=18, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+19 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=19, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+20 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=20, kind=t} & \texttt{entry=57, cnt=3, res=vec, var=0} \\
+21 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=21, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+22 & \texttt{u\_vec.plds} & \texttt{opc=0x03, x=0, fl=setup, seq=22, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+23 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=23, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+24 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=24, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+25 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=25, kind=t} & \texttt{entry=57, cnt=3, res=vec, var=0} \\
+26 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=26, kind=b} & \texttt{entry=57, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tsel(mask, src0, src1, tmp, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    lanes = pto.get_lanes(dtype)
+    mask_row_stride = mask.shape[1]
+    mask_ptr = pto.castptr(mask.as_ptr(), pto.ptr(pto.ui8, pto.MemorySpace.UB))
+
+    if pto.constexpr(dtype == pto.f32):
+        full_mask_b16 = pto.pset_b16(pto.MaskPattern.ALL)
+        pair_width = lanes * 2
+        paired_cols = (valid_cols // pair_width) * pair_width
+        for row in range(0, valid_rows, 1):
+            for col in range(0, paired_cols, pair_width):
+                mask_offset = row * mask_row_stride + col // 8
+                select_mask_raw = pto.plds(mask_ptr, mask_offset, pto.PredicateDist.US)
+                select_mask = select_mask_raw.astype(pto.mask_b16)
+                pred0, _ = pto.make_mask(dtype, pair_width)
+                pred1, _ = pto.make_mask(dtype, lanes)
+                select_mask0, select_mask1 = pto.pintlv_b16(select_mask, full_mask_b16)
+                select_mask0 = select_mask0.astype(pto.mask_b32)
+                select_mask1 = select_mask1.astype(pto.mask_b32)
+                lhs0 = pto.vlds(src0[row, col:])
+                rhs0 = pto.vlds(src1[row, col:])
+                lhs1 = pto.vlds(src0[row, col + lanes:])
+                rhs1 = pto.vlds(src1[row, col + lanes:])
+                selected0 = pto.vsel(lhs0, rhs0, select_mask0)
+                selected1 = pto.vsel(lhs1, rhs1, select_mask1)
+                pto.vsts(selected0, dst[row, col:], pred0)
+                pto.vsts(selected1, dst[row, col + lanes:], pred1)
+            tail_cols = valid_cols - paired_cols
+            if tail_cols > 0:
+                col = paired_cols
+                mask_offset = row * mask_row_stride + col // 8
+                select_mask_raw = pto.plds(mask_ptr, mask_offset, pto.PredicateDist.US)
+                select_mask = select_mask_raw.astype(pto.mask_b16)
+                select_mask0 = pto.punpack(select_mask, pto.PredicatePart.LOWER)
+                select_mask0 = select_mask0.astype(pto.mask_b32)
+                pred0, _ = pto.make_mask(dtype, tail_cols)
+                lhs0 = pto.vlds(src0[row, col:])
+                rhs0 = pto.vlds(src1[row, col:])
+                selected0 = pto.vsel(lhs0, rhs0, select_mask0)
+                pto.vsts(selected0, dst[row, col:], pred0)
+    else:
+        for row in range(0, valid_rows, 1):
+            remained = valid_cols
+            for col in range(0, valid_cols, lanes):
+                pred_mask, remained = pto.make_mask(dtype, remained)
+                mask_offset = row * mask_row_stride + col // 8
+                if pto.constexpr(dtype == pto.f16):
+                    select_mask_raw = pto.plds(mask_ptr, mask_offset, pto.PredicateDist.US)
+                    select_mask = select_mask_raw.astype(pto.mask_b16)
+                    lhs = pto.vlds(src0[row, col:])
+                    rhs = pto.vlds(src1[row, col:])
+                    selected = pto.vsel(lhs, rhs, select_mask)
+                    pto.vsts(selected, dst[row, col:], pred_mask)
+                else:
+                    select_mask = pto.plds(mask_ptr, mask_offset, pto.PredicateDist.NORM)
+                    lhs = pto.vlds(src0[row, col:])
+                    rhs = pto.vlds(src1[row, col:])
+                    selected = pto.vsel(lhs, rhs, select_mask)
+                    pto.vsts(selected, dst[row, col:], pred_mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

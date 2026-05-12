@@ -1,0 +1,51 @@
+\subsection{\texttt{TROWEXPANDMIN}}
+\noindent\textbf{Bundle encoding.} UOP entry 49, opcode \texttt{0x1051}. Bundle: \texttt{B.OP + B.ARG + B.DIM + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1051}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{src1}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Row-wise broadcast min: take \texttt{min(src0, src1)} where \texttt{src1} provides one scalar per row.
+\paragraph{Example.}
+dst[i,:] = min(tile[i,:], src[i,0]) for each row i.
+\par\smallskip
+\paragraph{PTO ISA operation.}
+Let \texttt{R = dst.GetValidRow()} and \texttt{C = dst.GetValidCol()}. Let \texttt{s\_i} be the per-row scalar taken from \texttt{src1} (one value per row).
+
+For \texttt{0 \textless{}= i \textless{} R} and \texttt{0 \textless{}= j \textless{} C}:
+
+\[
+\mathrm{dst}_{i,j} = \min(\mathrm{src0}_{i,j}, s_i)
+\]
+}\par\smallskip
+\paragraph{Notes.}
+NaN propagates for FP types.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=49, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vdup} & \texttt{opc=0x13, x=0, fl=alu, seq=1, kind=u} & \texttt{entry=49, cnt=1, res=vec, var=0} \\
+2 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=49, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vmin} & \texttt{opc=0x1C, x=0, fl=alu, seq=3, kind=b} & \texttt{entry=49, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=4, kind=b} & \texttt{entry=49, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_trowexpandmin(src0, src1, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            scalar_vec = pto.vlds(src1[row, :])  # load entire row of src1 for broadcast into destination row
+            broadcasted = pto.vdup(scalar_vec, mask)
+            lhs = pto.vlds(src0[row, col:])
+            result = pto.vmin(lhs, broadcasted, mask)
+            pto.vsts(result, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

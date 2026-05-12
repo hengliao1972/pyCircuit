@@ -1,0 +1,51 @@
+\subsection{\texttt{TSQRT}}
+\noindent\textbf{Bundle encoding.} UOP entry 63, opcode \texttt{0x1064}. Bundle: \texttt{B.OP + B.ARG + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1064}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size.\par\smallskip
+
+\textit{Semantics.} Computes the element-wise square root of \texttt{src} and writes results to \texttt{dst} across the valid region.
+
+\textit{Domain errors.} When \texttt{src[r, c] < 0}, the result is NaN. When \texttt{src[r, c]} is negative zero, the result is negative zero. When \texttt{src[r, c]} is +Inf, the result is +Inf. When \texttt{src[r, c]} is NaN, the result is NaN.
+
+\textit{VARIANT.} VARIANT field encodes the rounding mode. Defined values: 0 = RINT (default), 1 = RZ, 2 = RP, 3 = RM.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise square root.
+\paragraph{Example.}
+Tile elements [0, 1, 4, 9] give [0, 1, 2, 3].
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \sqrt{\mathrm{src}_{i,j}}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+sqrt(-0) = -0. sqrt(negative non-zero) = NaN. sqrt(Inf) = Inf. Accuracy is implementation-defined; hardware implementations typically use a Newton-Raphson refinement.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=63, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vsqrt} & \texttt{opc=0x29, x=0, fl=alu, seq=1, kind=u} & \texttt{entry=63, cnt=1, res=vec, var=0} \\
+2 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=63, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tsqrt(src, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            vinput = pto.vlds(src[row, col:])
+            result = pto.vsqrt(vinput, mask)
+            pto.vsts(result, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

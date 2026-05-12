@@ -1,0 +1,48 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "Marker",
+      "attr": "M"
+    },
+    {
+      "bits": 3,
+      "name": "Primary",
+      "attr": "PRI"
+    },
+    {
+      "bits": 1,
+      "name": "Ext",
+      "attr": "E"
+    },
+    {
+      "bits": 3,
+      "name": "Variant",
+      "attr": "VAR"
+    },
+    {
+      "bits": 4,
+      "name": "DescCnt",
+      "attr": "1"
+    },
+    {
+      "bits": 5,
+      "name": "ROMEntry",
+      "attr": "40"
+    },
+    {
+      "bits": 5,
+      "name": "DataType",
+      "attr": "profile"
+    },
+    {
+      "bits": 10,
+      "name": "OpcodeSel",
+      "attr": "0x1048"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "lanes": 1
+  }
+}

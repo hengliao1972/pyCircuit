@@ -1,0 +1,71 @@
+\subsection{\texttt{TROWMIN}}
+\noindent\textbf{Bundle encoding.} UOP entry 53, opcode \texttt{0x1053}. Bundle: \texttt{B.OP + B.ARG + B.DIM + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1053}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.DIM} supplies row-axis reduction or row-broadcast bounds. Scratch operand(s) \texttt{tmp} are implementation-local and are not encoded in the CPU-visible bundle.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Reduce each row by taking the minimum across columns.
+\paragraph{Example.}
+Source row [3, 1, 7, 2]: output[0] = 1.
+\par\smallskip
+\paragraph{PTO ISA operation.}
+Let \texttt{R = src.GetValidRow()} and \texttt{C = src.GetValidCol()}. For \texttt{0 \textless{}= i \textless{} R}:
+
+\[
+\mathrm{dst}_{i,0} = \min_{0 \le j < C} \mathrm{src}_{i,j}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+Output tile has shape $[R_{src}, 1]$. NaN propagates for FP types.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vbr} & \texttt{opc=0x0B, x=0, fl=alu, seq=0, kind=c} & \texttt{entry=53, cnt=0, res=vec, var=0} \\
+1 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=53, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vcmin} & \texttt{opc=0x0E, x=0, fl=alu, seq=2, kind=b} & \texttt{entry=53, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vsel} & \texttt{opc=0x24, x=0, fl=alu, seq=3, kind=t} & \texttt{entry=53, cnt=3, res=vec, var=0} \\
+4 & \texttt{u\_vec.vmin} & \texttt{opc=0x1C, x=0, fl=alu, seq=4, kind=b} & \texttt{entry=53, cnt=2, res=vec, var=0} \\
+5 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=5, kind=b} & \texttt{entry=53, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_trowmin(src, tmp, dst):
+    dtype = dst.element_type
+    lanes = pto.get_lanes(dtype)
+    valid_rows, valid_cols = src.valid_shape
+    elem_bytes = pto.bytewidth(dtype)
+
+    init_val = pto.PadValue.MAX.eval(dtype)
+
+    if pto.constexpr(elem_bytes == 4):
+        store_dist = pto.VStoreDist.ONE_POINT_B32
+    elif pto.constexpr(elem_bytes == 2):
+        store_dist = pto.VStoreDist.ONE_POINT_B16
+    else:
+        store_dist = pto.VStoreDist.ONE_POINT_B8
+
+    mask_1, _ = pto.make_mask(dtype, 1)
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+
+        v_acc = pto.vbr(init_val)
+
+        for col in range(0, valid_cols, lanes):
+            mask, remained = pto.make_mask(dtype, remained)
+            v_src = pto.vlds(src[row, col:])
+
+            v_reduced = pto.vcmin(v_src, mask)
+
+            if pto.constexpr(dtype == pto.f32 or dtype == pto.f16):
+                v_reduced = pto.vsel(v_reduced, v_acc, mask)
+
+            v_acc = pto.vmin(v_acc, v_reduced, mask_1)
+
+        pto.vsts(v_acc, dst[row, 0:], mask_1, dist=store_dist)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

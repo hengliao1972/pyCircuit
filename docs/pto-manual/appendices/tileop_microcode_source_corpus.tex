@@ -1,0 +1,1107 @@
+\chapter{TileOp Microcode Source Corpus}
+\section{Legacy Notice}
+\label{sec:legacy_corpus}
+This appendix documents the TileOp microcode source corpus as it was defined in an earlier revision of this manual. The binary encoding described in this appendix (the 32-bit WO / 32-bit WM split with the field widths documented below) is a v0 encoding that predates the current revision.
+
+\textbf{This appendix is informational only.} The authoritative encoding for this revision is Chapter~\ref{chap:encodings}, which defines the current 64-bit WO/WM micro-instruction format (WO at bits \texttt{63:32}, WM at bits \texttt{31:0}) with the field widths given in Section~\ref{sec:micro_instruction_encoding}. The v0 encoding in this appendix MUST NOT be used as the reference for new implementations; it is retained for historical context and for tooling that was built against the older format.
+
+Implementers who need to understand the current PTO micro-instruction encoding should begin with Section~\ref{sec:micro_instruction_encoding} and the per-instruction microcode site tables in the tile instruction reference pages.
+
+This appendix provides the TileOp microcode source corpus used by the encoding tables. It records field definitions, opcode body sketches, and corpus-level reference material for implementers.
+\par\smallskip
+% SECTION 1: BINARY ENCODING
+% =============================================================================
+\section{Two-Word 64-bit Microinstruction Format (v0 Legacy)}
+
+Each TileOp microinstruction is encoded as a pair of 32-bit RISC words. WO (Word Operation) encodes the PTO TileOp and its operands. WM (Word Metadata) encodes microcode sequencing and control.
+
+\textbf{Note: this section describes the v0 encoding.} In the current revision, the micro-instruction format is a single 64-bit word with WO at bits \texttt{63:32} and WM at bits \texttt{31:0} (see Section~\ref{sec:micro_instruction_encoding}). The field widths and semantic assignments below differ from the current format.
+
+\subsection{Word Operation (WO) --- 32 bits}
+
+\begin{center}
+\begin{tabular}{cllr}
+\toprule
+Bits & Field & Description & Bits \\
+\midrule
+31:25 & \texttt{WO\_OPCODE} & PTO TileOp opcode index (0--69) & 7 \\
+24 & \texttt{WO\_IS\_EXT} & 0=PTO-BC v0, 1=golden/vendor extension & 1 \\
+23:21 & \texttt{WO\_FLAGS} & Op kind: 000=mem, 001=compute, 010=compute+var, 011=composite & 3 \\
+20:14 & \texttt{WO\_SEQ} & Zero-based microinstruction sequence within TileOp entry (max 87) & 7 \\
+13:12 & \texttt{WO\_OP\_KIND} & 00=tile reg, 01=imm addr, 10=scalar, 11=imm value & 2 \\
+11:8 & \texttt{WO\_OP\_A} & Operand A: register index or immediate value & 4 \\
+7:4 & \texttt{WO\_OP\_B} & Operand B: register index or immediate value & 4 \\
+3:0 & \texttt{WO\_OP\_C} & Operand C: register index or immediate value & 4 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Total: $7+1+3+7+2+4+4+4 = 32$ bits.
+
+The PTO opcode index is the flat index into the unified opcode table (see Section~\ref{sec:opcode_table}). Opcode indices 0--63 correspond to PTO-BC v0; 64--69 correspond to golden/vendor extensions.
+
+WO encodes the operation itself. Operands A, B, C are register specifiers or immediate values depending on WO\_OP\_KIND. For memory operations (WO\_FLAGS=000), A is the address register, B is the data register. For compute operations (WO\_FLAGS=001), A and B are source tile registers, C is the destination tile register.
+
+\subsection{Word Metadata (WM) --- 32 bits}
+
+\begin{center}
+\begin{tabular}{cllr}
+\toprule
+Bits & Field & Description & Bits \\
+\midrule
+31:25 & \texttt{WM\_ENTRY\_ID} & Microcode entry ID: index into TileOp lookup table (0--69) & 7 \\
+24:23 & \texttt{WM\_OP\_COUNT} & Number of operands: 01=1, 10=2, 11=3, 00=4 & 2 \\
+22:21 & \texttt{WM\_RES\_TYPE} & Result tile type: 00=vec, 01=scalar, 10=accum, 11=reserved & 2 \\
+20:18 & \texttt{WM\_SRC\_TYPE\_A} & Source A tile type & 2 \\
+17:15 & \texttt{WM\_SRC\_TYPE\_B} & Source B tile type & 2 \\
+14:12 & \texttt{WM\_SRC\_TYPE\_C} & Source C tile type & 2 \\
+11:9 & \texttt{WM\_VARIANT} & PTO-BC variant (always 0 in corpus; reserved) & 3 \\
+8:0 & \texttt{WM\_SPARE} & Reserved for future use & 9 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Total: $7+2+2+2+2+2+3+9 = 29$ bits. Plus 3 spare bits in WO (bits 20:18 unused when WO\_OP\_KIND=00). Combined total: 64 bits.
+
+WM provides microcode sequencing metadata. WM\_ENTRY\_ID indexes the TileOp microcode lookup table to locate the base address of this TileOp's microinstruction sequence. WM\_OP\_COUNT is the effective bytecode operand count. Tile types (RES\_TYPE, SRC\_TYPE\_*) encode the expected tile storage class: vec=UB tile buffer, scalar=SPR/GPR, accum=accumulator tile.
+
+\subsection{Decoding Algorithm}
+
+For each 64-bit microinstruction pair (WO, WM):
+
+\begin{enumerate}
+  \item Decode WO: extract WO\_OPCODE + WO\_IS\_EXT $\rightarrow$ PTO TileOp opcode.
+  \item Use WM\_ENTRY\_ID to look up the TileOp microcode entry base address.
+  \item Use WO\_SEQ to index into the microinstruction sequence starting at that base.
+  \item Check WO\_FLAGS to determine operation kind (memory/compute/composite).
+  \item Extract operands from WO\_OP\_A, WO\_OP\_B, WO\_OP\_C per WO\_OP\_KIND.
+  \item Validate WM\_OP\_COUNT against the TileOp's expected arity.
+\end{enumerate}
+
+\clearpage
+
+% =============================================================================
+% SECTION 2: OPCODE TABLE
+% =============================================================================
+\section{Unified Opcode Table}
+\label{sec:opcode_table}
+
+\begin{landscape}
+\scriptsize
+\begin{longtable}{r p{0.17\linewidth} r r r r}
+\toprule
+Idx & TileOp & PTO-BC Opcode & Ext & Entry & Micro \\
+\midrule
+\endfirsthead
+\toprule
+Idx & TileOp & PTO-BC Opcode & Ext & Entry & Micro \\
+\midrule
+\endhead
+ 0 & \texttt{softmax}     & mixed      & -   & 0  &   7 \\
+ 1 & \texttt{TABS}        & 0x1006     & 0   & 1  &  12 \\
+ 2 & \texttt{TADD}       & 0x1007     & 0   & 2  &   8 \\
+ 3 & \texttt{TADDS}       & 0x1009     & 0   & 3  &  18 \\
+ 4 & \texttt{TAND}       & 0x100B     & 0   & 4  &   8 \\
+ 5 & \texttt{TANDS}      & 0x100C     & 0   & 5  &  12 \\
+ 6 & \texttt{TCOLEXPAND}         & 0x1010     & 0   & 6  &  18 \\
+ 7 & \texttt{TCOLEXPANDADD}       & 0x1011     & 0   & 7  &  24 \\
+ 8 & \texttt{TCOLEXPANDDIV}       & 0x1012     & 0   & 8  &  36 \\
+ 9 & \texttt{TCOLEXPANDEXPDIF}    & 0x1013     & 0   & 9  &  16 \\
+10 & \texttt{TCOLEXPANDMAX}       & 0x1014     & 0   & 10 &  24 \\
+11 & \texttt{TCOLEXPANDMIN}       & 0x1015     & 0   & 11 &  24 \\
+12 & \texttt{TCOLEXPANDMUL}       & 0x1016     & 0   & 12 &  24 \\
+13 & \texttt{TCOLEXPANDSUB}       & 0x1017     & 0   & 13 &  24 \\
+14 & \texttt{TCOLMAX}     & 0x1018     & 0   & 14 &  72 \\
+15 & \texttt{TCOLMIN}     & 0x1019     & 0   & 15 &  72 \\
+16 & \texttt{TCOLPROD}    & 0x101A     & 0   & 16 &  45 \\
+17 & \texttt{TCOLSUM}     & 0x101B     & 0   & 17 &  48 \\
+18 & \texttt{TCVT}        & 0x101C     & 0   & 18 &  15 \\
+19 & \texttt{TDIV}        & 0x101D     & 0   & 19 &   8 \\
+20 & \texttt{TDIVS}       & 0x101E     & 0   & 20 &  24 \\
+21 & \texttt{TEXP}        & 0x101F     & 0   & 21 &  12 \\
+22 & \texttt{TEXPANDS}     & 0x1020     & 0   & 22 &  22 \\
+23 & \texttt{TFILLPAD}    & 0x1023     & 0   & 23 &  30 \\
+25 & \texttt{TLOAD}       & 0x102F     & 0   & 25 &  12 \\
+26 & \texttt{TLOG}        & 0x1030     & 0   & 26 &  12 \\
+27 & \texttt{TLRELU}      & 0x1031     & 0   & 27 &  12 \\
+28 & \texttt{TMAX}        & 0x1034     & 0   & 28 &   8 \\
+29 & \texttt{TMAXS}       & 0x1035     & 0   & 29 &  18 \\
+30 & \texttt{TMIN}        & 0x1036     & 0   & 30 &  32 \\
+31 & \texttt{TMINS}       & 0x1037     & 0   & 31 &  18 \\
+32 & \texttt{TMUL}        & 0x103B     & 0   & 32 &   8 \\
+33 & \texttt{TMULS}       & 0x103C     & 0   & 33 &  18 \\
+34 & \texttt{TNEG}        & 0x103D     & 0   & 34 &  18 \\
+35 & \texttt{TNOT}        & 0x103E     & 0   & 35 &  18 \\
+36 & \texttt{TOR}         & 0x103F     & 0   & 36 &   8 \\
+37 & \texttt{TORS}        & 0x1040     & 0   & 37 &  12 \\
+38 & \texttt{TPARTADD}    & 0x1041     & 0   & 38 &  36 \\
+39 & \texttt{TPARTMAX}    & 0x1042     & 0   & 39 &  48 \\
+40 & \texttt{TPARTMIN}    & 0x1043     & 0   & 40 &  48 \\
+41 & \texttt{TPARTMUL}    & 0x1044     & 0   & 41 &  36 \\
+42 & \texttt{TRECIP}      & 0x1048     & 0   & 42 &  18 \\
+43 & \texttt{TRELU}       & 0x1049     & 0   & 43 &   9 \\
+44 & \texttt{TROWARGMAX}  & 0xF000     & 1   & 44 &  72 \\
+45 & \texttt{TROWARGMIN}  & 0xF001     & 1   & 45 &  72 \\
+46 & \texttt{TROWEXPAND}   & 0x104D     & 0   & 46 &  18 \\
+47 & \texttt{TROWEXPANDADD} & 0x104E     & 0   & 47 &  28 \\
+48 & \texttt{TROWEXPANDDIV} & 0xF002     & 1   & 48 &  56 \\
+49 & \texttt{TROWEXPANDEXPDIF} & 0x104F & 0   & 49 &  20 \\
+50 & \texttt{TROWEXPANDMAX} & 0x1050     & 0   & 50 &  28 \\
+51 & \texttt{TROWEXPANDMIN} & 0x1051     & 0   & 51 &  28 \\
+52 & \texttt{TROWEXPANDMUL} & 0xF003     & 1   & 52 &  28 \\
+53 & \texttt{TROWEXPANDSUB} & 0xF004     & 1   & 53 &  28 \\
+54 & \texttt{TROWMAX}     & 0x1052     & 0   & 54 &  84 \\
+55 & \texttt{TROWMIN}     & 0x1053     & 0   & 55 &  84 \\
+56 & \texttt{TROWPROD}    & 0xF005     & 1   & 56 &  54 \\
+57 & \texttt{TROWSUM}     & 0x1054     & 0   & 57 &  60 \\
+58 & \texttt{TRSQRT}      & 0x1055     & 0   & 58 &  12 \\
+59 & \texttt{TSEL}        & 0x1057     & 0   & 59 &  50 \\
+60 & \texttt{TSELS}       & 0x1058     & 0   & 60 &  88 \\
+61 & \texttt{TSHL}        & 0x105F     & 0   & 61 &   8 \\
+62 & \texttt{TSHLS}       & 0x1060     & 0   & 62 &  12 \\
+63 & \texttt{TSHR}        & 0x1061     & 0   & 63 &   8 \\
+64 & \texttt{TSHRS}       & 0x1062     & 0   & 64 &  12 \\
+65 & \texttt{TSQRT}       & 0x1064     & 0   & 65 &  12 \\
+66 & \texttt{TSUB}        & 0x1067     & 0   & 66 &   8 \\
+67 & \texttt{TSUBS}       & 0x1069     & 0   & 67 &  18 \\
+68 & \texttt{TXOR}        & 0x106E     & 0   & 68 &   8 \\
+69 & \texttt{TXORS}       & 0x106F     & 0   & 69 &  12 \\
+\bottomrule
+\end{longtable}
+\end{landscape}
+\normalsize
+
+\clearpage
+
+% =============================================================================
+% SECTION 3: SIZE SUMMARY
+% =============================================================================
+\section{Code Size Summary}
+
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+Category & Entries & Microinstructions & Bytes & KiB \\
+\midrule
+Axis arg-reduce          &   2 &  144 &  1,152 & 1.125 \\
+Axis expand / broadcast   &  18 &  452 &  3,616 & 3.531 \\
+Axis reduce              &   8 &  519 &  4,152 & 4.055 \\
+Composite kernel         &   1 &    7 &     56 & 0.055 \\
+Memory movement          &   1 &   12 &     96 & 0.094 \\
+Partial / valid-region   &   4 &  168 &  1,344 & 1.312 \\
+Select / predication     &   1 &   50 &    400 & 0.391 \\
+Tile-scalar              &  12 &  262 &  2,096 & 2.047 \\
+Tile-tile elementwise    &  11 &  112 &    896 & 0.875 \\
+Unary / special         &  12 &  180 &  1,440 & 1.406 \\
+\midrule
+\textbf{Total}          & \textbf{69} & \textbf{1,900} & \textbf{15,200} & \textbf{14.84} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Total microinstruction instances: 1,900. Each instance = 2 $\times$ 32-bit words = 64 bits = 8 bytes. Reference encoding: 15,200 bytes (14.84 KiB).
+
+The two-word format is the target binary representation. The reference 64-bit encoding in the original manual maps directly: WO encodes opcode + flags + SEQ + operands; WM encodes ENTRY\_ID + OP\_COUNT + types + variant.
+
+\clearpage
+
+% =============================================================================
+% SECTION 4: PER-TILEOP MICROCODE BINARY ENCODING
+% =============================================================================
+\section{Per-TileOp Microcode Binary Encoding}
+
+For each TileOp entry: the microinstruction sequence is listed as pairs of WO:WM hex values. The WO field breakdown (opcode, flags, seq, op\_a, op\_b, op\_c) is shown. WM (entry\_id, op\_count, types, variant) is shown per entry.
+
+Notation: \texttt{WO[31:25]=opcode, WO[24]=ext, WO[23:21]=flags, WO[20:14]=seq, WO[11:8]=op\_a, WO[7:4]=op\_b, WO[3:0]=op\_c} and \texttt{WM[31:25]=entry, WM[24:23]=op\_count, WM[22:21]=res\_type, WM[20:18]=src\_type\_a, WM[17:15]=src\_type\_b, WM[14:12]=src\_type\_c, WM[11:9]=variant}.
+
+\scriptsize
+\begin{longtable}{r r r r r r r r}
+\toprule
+Seq & WO (hex) & opcode & flags & seq & op\_a & op\_b & op\_c \\
+    & WM (hex) & entry & op\_cnt & res\_type & src\_a & src\_b & src\_c \\
+\midrule
+\endfirsthead
+\toprule
+Seq & WO (hex) & opcode & flags & seq & op\_a & op\_b & op\_c \\
+    & WM (hex) & entry & op\_cnt & res\_type & src\_a & src\_b & src\_c \\
+\midrule
+\endhead
+
+% softmax (entry 0, 7 microinstructions)
+\multicolumn{8}{l}{\textbf{softmax} (Entry 0, Composite kernel, 7 microinstructions)} \\
+0 & 0x64001901 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00000301 & 0 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x64001911 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00000301 & 0 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x64001921 & 25 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x00000301 & 0 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x00000341 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x00000301 & 0 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x00000351 & 25 & 0 & 4 & 0 & 0 & 1 \\
+  & 0x00000301 & 0 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x00000361 & 25 & 0 & 5 & 0 & 0 & 1 \\
+  & 0x00000301 & 0 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x00000371 & 25 & 0 & 6 & 0 & 0 & 1 \\
+  & 0x00000301 & 0 & 3 & 0 & 0 & 0 & 0 \\
+
+% tabs (entry 1, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tabs} (Entry 1, Unary/special, 12 microinstructions)} \\
+0 & 0x64001911 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+1 & 0x02001921 & 1 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+2 & 0x00000341 & 25 & 0 & 2 & 0 & 0 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+3 & 0x64001951 & 25 & 0 & 3 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+4 & 0x02001961 & 1 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+5 & 0x00000381 & 25 & 0 & 5 & 0 & 0 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+6 & 0x64001991 & 25 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+7 & 0x020019A1 & 1 & 0 & 7 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+8 & 0x000003C1 & 25 & 0 & 8 & 0 & 0 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+9 & 0x640019D1 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+10 & 0x020019E1 & 1 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+11 & 0x00000201 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x00010201 & 1 & 2 & 0 & 0 & 0 & 0 \\
+
+% tadd (entry 2, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tadd} (Entry 2, Tile-tile elementwise, 8 microinstructions)} \\
+0 & 0x64001921 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x64001931 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x04001941 & 2 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x00000241 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001951 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001961 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x04001971 & 2 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x00000281 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x00020301 & 2 & 3 & 0 & 0 & 0 & 0 \\
+
+% tadds (entry 3, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tadds} (Entry 3, Tile-scalar, 18 microinstructions)} \\
+0 & 0x64001931 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x06001941 & 3 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x00000251 & 25 & 0 & 2 & 0 & 0 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x64001961 & 25 & 0 & 3 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x06001971 & 3 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x00000281 & 25 & 0 & 5 & 0 & 0 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x64001991 & 25 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x060019A1 & 3 & 0 & 7 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x000002B1 & 25 & 0 & 8 & 0 & 0 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x640019C1 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x060019D1 & 3 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x000002E1 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x640019F1 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x06001A01 & 3 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x00000311 & 25 & 0 & 14 & 0 & 0 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x64001A21 & 25 & 0 & 15 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+16 & 0x06001A31 & 3 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+17 & 0x00000341 & 25 & 0 & 17 & 0 & 0 & 1 \\
+  & 0x00030301 & 3 & 3 & 0 & 0 & 0 & 0 \\
+
+% tand (entry 4, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tand} (Entry 4, Tile-tile elementwise, 8 microinstructions)} \\
+0 & 0x64001941 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x64001951 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x08001961 & 4 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x00000271 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001981 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001991 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x080019A1 & 4 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x000002C1 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x00040301 & 4 & 3 & 0 & 0 & 0 & 0 \\
+
+% tands (entry 5, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tands} (Entry 5, Tile-scalar, 12 microinstructions)} \\
+0 & 0x64001951 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x0A001961 & 5 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x00000281 & 25 & 0 & 2 & 0 & 0 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x64001991 & 25 & 0 & 3 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x0A0019A1 & 5 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x000002B1 & 25 & 0 & 5 & 0 & 0 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x640019D1 & 25 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x0A0019E1 & 5 & 0 & 7 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x000002F1 & 25 & 0 & 8 & 0 & 0 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001A11 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x0A001A21 & 5 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x00000341 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x00050301 & 5 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolexpand (entry 6, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpand} (Entry 6, Axis expand/broadcast, 18 microinstructions)} \\
+0 & 0x64001961 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+1 & 0x0C001971 & 6 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+2 & 0x000002A1 & 25 & 0 & 2 & 0 & 0 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+3 & 0x640019D1 & 25 & 0 & 3 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+4 & 0x0C0019E1 & 6 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+5 & 0x00000311 & 25 & 0 & 5 & 0 & 0 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+6 & 0x64001A51 & 25 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+7 & 0x0C001A61 & 6 & 0 & 7 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+8 & 0x00000391 & 25 & 0 & 8 & 0 & 0 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+9 & 0x64001AD1 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+10 & 0x0C001AE1 & 6 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+11 & 0x00000411 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+12 & 0x64001B51 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+13 & 0x0C001B61 & 6 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+14 & 0x00000491 & 25 & 0 & 14 & 0 & 0 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+15 & 0x64001BD1 & 25 & 0 & 15 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+16 & 0x0C001BE1 & 6 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+17 & 0x00000511 & 25 & 0 & 17 & 0 & 0 & 1 \\
+  & 0x00060201 & 6 & 2 & 0 & 0 & 0 & 0 \\
+
+% tcolexpandadd (entry 7, 24 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpandadd} (Entry 7, Axis expand/broadcast, 24 microinstructions)} \\
+0 & 0x64001971 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x64001981 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x0E001991 & 7 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x000002C1 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001A01 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001A11 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x0E001A21 & 7 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x00000331 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x64001A81 & 25 & 0 & 8 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001A91 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x0E001AA1 & 7 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x000003A1 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x64001B11 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x64001B21 & 25 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x0E001B31 & 7 & 0 & 14 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x00000411 & 25 & 0 & 15 & 0 & 0 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+16 & 0x64001B91 & 25 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+17 & 0x64001BA1 & 25 & 0 & 17 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+18 & 0x0E001BB1 & 7 & 0 & 18 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+19 & 0x00000481 & 25 & 0 & 19 & 0 & 0 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+20 & 0x64001C21 & 25 & 0 & 20 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+21 & 0x64001C31 & 25 & 0 & 21 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+22 & 0x0E001C41 & 7 & 0 & 22 & 1 & 9 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+23 & 0x00000501 & 25 & 0 & 23 & 0 & 0 & 1 \\
+  & 0x00070301 & 7 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolexpanddiv (entry 8, 36 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpanddiv} (Entry 8, Axis expand/broadcast, 36 microinstructions)} \\
+0 & 0x64001981 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x64001991 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x100019A1 & 8 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x000002D1 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001A11 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001A21 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x10001A31 & 8 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x00000341 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x64001A91 & 25 & 0 & 8 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001AA1 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x10001AB1 & 8 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x000003B1 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x64001B21 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x64001B31 & 25 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x10001B41 & 8 & 0 & 14 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x00000421 & 25 & 0 & 15 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+16 & 0x64001BA1 & 25 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+17 & 0x64001BB1 & 25 & 0 & 17 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+18 & 0x10001BC1 & 8 & 0 & 18 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+19 & 0x00000491 & 25 & 0 & 19 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+20 & 0x64001C21 & 25 & 0 & 20 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+21 & 0x64001C31 & 25 & 0 & 21 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+22 & 0x10001C41 & 8 & 0 & 22 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+23 & 0x00000501 & 25 & 0 & 23 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+24 & 0x64001CA1 & 25 & 0 & 24 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+25 & 0x64001CB1 & 25 & 0 & 25 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+26 & 0x10001CC1 & 8 & 0 & 26 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+27 & 0x00000571 & 25 & 0 & 27 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+28 & 0x64001D21 & 25 & 0 & 28 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+29 & 0x64001D31 & 25 & 0 & 29 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+30 & 0x10001D41 & 8 & 0 & 30 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+31 & 0x000005E1 & 25 & 0 & 31 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+32 & 0x64001DA1 & 25 & 0 & 32 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+33 & 0x64001DB1 & 25 & 0 & 33 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+34 & 0x10001DC1 & 8 & 0 & 34 & 1 & 9 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+35 & 0x00000651 & 25 & 0 & 35 & 0 & 0 & 1 \\
+  & 0x00080301 & 8 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolexpandexpdif (entry 9, 16 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpandexpdif} (Entry 9, Axis expand/broadcast, 16 microinstructions)} \\
+0 & 0x64001991 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x640019A1 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x120019B1 & 9 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x000002E1 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001B11 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001B21 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x12001B31 & 9 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x000003A1 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x64001C11 & 25 & 0 & 8 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001C21 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x12001C31 & 9 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x00000441 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x64001D11 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x64001D21 & 25 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x12001D31 & 9 & 0 & 14 & 1 & 9 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x000004E1 & 25 & 0 & 15 & 0 & 0 & 1 \\
+  & 0x00090301 & 9 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolexpandmax (entry 10, 24 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpandmax} (Entry 10, Axis expand/broadcast, 24 microinstructions)} \\
+0 & 0x640019A1 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x640019B1 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x140019C1 & 10 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x000002F1 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001B21 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001B31 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x14001B41 & 10 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x000003A1 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x64001C21 & 25 & 0 & 8 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001C31 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x14001C41 & 10 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x00000411 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x64001D21 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x64001D31 & 25 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x14001D41 & 10 & 0 & 14 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x00000481 & 25 & 0 & 15 & 0 & 0 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+16 & 0x64001E21 & 25 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+17 & 0x64001E31 & 25 & 0 & 17 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+18 & 0x14001E41 & 10 & 0 & 18 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+19 & 0x00000501 & 25 & 0 & 19 & 0 & 0 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+20 & 0x64001F21 & 25 & 0 & 20 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+21 & 0x64001F31 & 25 & 0 & 21 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+22 & 0x14001F41 & 10 & 0 & 22 & 1 & 9 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+23 & 0x00000571 & 25 & 0 & 23 & 0 & 0 & 1 \\
+  & 0x000A0301 & 10 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolexpandmin (entry 11, 24 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpandmin} (Entry 11, Axis expand/broadcast, 24 microinstructions)} \\
+0 & 0x640019B1 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x640019C1 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x160019D1 & 11 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x00000301 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001B31 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001B41 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x16001B51 & 11 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x000003B1 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x64001C31 & 25 & 0 & 8 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001C41 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x16001C51 & 11 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x00000421 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x64001D31 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x64001D41 & 25 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x16001D51 & 11 & 0 & 14 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x00000491 & 25 & 0 & 15 & 0 & 0 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+16 & 0x64001E31 & 25 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+17 & 0x64001E41 & 25 & 0 & 17 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+18 & 0x16001E51 & 11 & 0 & 18 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+19 & 0x00000501 & 25 & 0 & 19 & 0 & 0 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+20 & 0x64001F31 & 25 & 0 & 20 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+21 & 0x64001F41 & 25 & 0 & 21 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+22 & 0x16001F51 & 11 & 0 & 22 & 1 & 9 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+23 & 0x00000571 & 25 & 0 & 23 & 0 & 0 & 1 \\
+  & 0x000B0301 & 11 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolexpandmul (entry 12, 24 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpandmul} (Entry 12, Axis expand/broadcast, 24 microinstructions)} \\
+0 & 0x640019C1 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x640019D1 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x180019E1 & 12 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x00000311 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001B41 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001B51 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x18001B61 & 12 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x000003C1 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x64001C41 & 25 & 0 & 8 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001C51 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x18001C61 & 12 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x00000441 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x64001D41 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x64001D51 & 25 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x18001D61 & 12 & 0 & 14 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x000004C1 & 25 & 0 & 15 & 0 & 0 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+16 & 0x64001E41 & 25 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+17 & 0x64001E51 & 25 & 0 & 17 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+18 & 0x18001E61 & 12 & 0 & 18 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+19 & 0x00000541 & 25 & 0 & 19 & 0 & 0 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+20 & 0x64001F41 & 25 & 0 & 20 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+21 & 0x64001F51 & 25 & 0 & 21 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+22 & 0x18001F61 & 12 & 0 & 22 & 1 & 9 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+23 & 0x000005C1 & 25 & 0 & 23 & 0 & 0 & 1 \\
+  & 0x000C0301 & 12 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolexpandsub (entry 13, 24 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolexpandsub} (Entry 13, Axis expand/broadcast, 24 microinstructions)} \\
+0 & 0x640019D1 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+1 & 0x640019E1 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+2 & 0x1A0019F1 & 13 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+3 & 0x00000321 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+4 & 0x64001B51 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+5 & 0x64001B61 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+6 & 0x1A001B71 & 13 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+7 & 0x000003D1 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+8 & 0x64001C51 & 25 & 0 & 8 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+9 & 0x64001C61 & 25 & 0 & 9 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+10 & 0x1A001C71 & 13 & 0 & 10 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+11 & 0x00000451 & 25 & 0 & 11 & 0 & 0 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+12 & 0x64001D51 & 25 & 0 & 12 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+13 & 0x64001D61 & 25 & 0 & 13 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+14 & 0x1A001D71 & 13 & 0 & 14 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+15 & 0x000004D1 & 25 & 0 & 15 & 0 & 0 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+16 & 0x64001E51 & 25 & 0 & 16 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+17 & 0x64001E61 & 25 & 0 & 17 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+18 & 0x1A001E71 & 13 & 0 & 18 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+19 & 0x00000551 & 25 & 0 & 19 & 0 & 0 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+20 & 0x64001F51 & 25 & 0 & 20 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+21 & 0x64001F61 & 25 & 0 & 21 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+22 & 0x1A001F71 & 13 & 0 & 22 & 1 & 9 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+23 & 0x000005D1 & 25 & 0 & 23 & 0 & 0 & 1 \\
+  & 0x000D0301 & 13 & 3 & 0 & 0 & 0 & 0 \\
+
+% tcolmax (entry 14, 72 microinstructions) --- representative entries
+\multicolumn{8}{l}{\textbf{tcolmax} (Entry 14, Axis reduce, 72 microinstructions)} \\
+0 & 0x64001A01 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x000E0201 & 14 & 2 & 0 & 0 & 0 & 0 \\
+1 & 0x1C001A11 & 14 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x000E0201 & 14 & 2 & 0 & 0 & 0 & 0 \\
+2 & 0x00000221 & 25 & 0 & 2 & 0 & 0 & 1 \\
+  & 0x000E0201 & 14 & 2 & 0 & 0 & 0 & 0 \\
+  & \multicolumn{7}{r}{\textit{... entries 3--69 follow same pattern (tload, tcolmax, tstore triples) ...}} \\
+71 & 0x64002C01 & 25 & 0 & 71 & 1 & 9 & 1 \\
+  & 0x000E0201 & 14 & 2 & 0 & 0 & 0 & 0 \\
+72 & 0x1C002C11 & 14 & 0 & 72 & 1 & 9 & 1 \\
+  & 0x000E0201 & 14 & 2 & 0 & 0 & 0 & 0 \\
+73 & 0x00000291 & 25 & 0 & 73 & 0 & 0 & 1 \\
+  & 0x000E0201 & 14 & 2 & 0 & 0 & 0 & 0 \\
+
+% tcolmin (entry 15, 72 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolmin} (Entry 15, Axis reduce, 72 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow same pattern as tcolmax, opcode=15 ...}} \\
+
+% tcolprod (entry 16, 45 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolprod} (Entry 16, Axis reduce, 45 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tcolprod $\rightarrow$ tstore pattern ...}} \\
+
+% tcolsum (entry 17, 48 microinstructions)
+\multicolumn{8}{l}{\textbf{tcolsum} (Entry 17, Axis reduce, 48 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tcolsum $\rightarrow$ tstore pattern ...}} \\
+
+% tcvt (entry 18, 15 microinstructions)
+\multicolumn{8}{l}{\textbf{tcvt} (Entry 18, Unary/special, 15 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tcvt $\rightarrow$ tstore pattern ...}} \\
+
+% tdiv (entry 19, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tdiv} (Entry 19, Tile-tile elementwise, 8 microinstructions)} \\
+0 & 0x64001A11 & 25 & 0 & 0 & 1 & 9 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+1 & 0x64001A21 & 25 & 0 & 1 & 1 & 9 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+2 & 0x26001A31 & 19 & 0 & 2 & 1 & 9 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+3 & 0x00000241 & 25 & 0 & 3 & 0 & 0 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+4 & 0x64001C01 & 25 & 0 & 4 & 1 & 9 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+5 & 0x64001C11 & 25 & 0 & 5 & 1 & 9 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+6 & 0x26001C21 & 19 & 0 & 6 & 1 & 9 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+7 & 0x00000271 & 25 & 0 & 7 & 0 & 0 & 1 \\
+  & 0x00130201 & 19 & 2 & 0 & 0 & 0 & 0 \\
+
+% tdivs (entry 20, 24 microinstructions)
+\multicolumn{8}{l}{\textbf{tdivs} (Entry 20, Tile-scalar, 24 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tdivs $\rightarrow$ tstore pattern ...}} \\
+
+% texp (entry 21, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{texp} (Entry 21, Unary/special, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ texp $\rightarrow$ tstore pattern ...}} \\
+
+% texpands (entry 22, 22 microinstructions)
+\multicolumn{8}{l}{\textbf{texpands} (Entry 22, Axis expand/broadcast, 22 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ texpands $\rightarrow$ tstore pattern ...}} \\
+
+% tfillpad (entry 23, 30 microinstructions)
+\multicolumn{8}{l}{\textbf{tfillpad} (Entry 23, Unary/special, 30 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tfillpad $\rightarrow$ tstore pattern ...}} \\
+
+% tload (entry 25, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tload} (Entry 25, Memory movement, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... tload is the primitive memory load operation ...}} \\
+
+% tlog (entry 26, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tlog} (Entry 26, Unary/special, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tlog $\rightarrow$ tstore pattern ...}} \\
+
+% tlrelu (entry 27, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tlrelu} (Entry 27, Unary/special, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tlrelu $\rightarrow$ tstore pattern ...}} \\
+
+% tmax (entry 28, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tmax} (Entry 28, Tile-tile elementwise, 8 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tmax $\rightarrow$ tstore pattern ...}} \\
+
+% tmaxs (entry 29, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tmaxs} (Entry 29, Tile-scalar, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tmaxs $\rightarrow$ tstore pattern ...}} \\
+
+% tmin (entry 30, 32 microinstructions)
+\multicolumn{8}{l}{\textbf{tmin} (Entry 30, Tile-tile elementwise, 32 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tmin $\rightarrow$ tstore pattern ...}} \\
+
+% tmins (entry 31, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tmins} (Entry 31, Tile-scalar, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tmins $\rightarrow$ tstore pattern ...}} \\
+
+% tmul (entry 32, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tmul} (Entry 32, Tile-tile elementwise, 8 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tmul $\rightarrow$ tstore pattern ...}} \\
+
+% tmuls (entry 33, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tmuls} (Entry 33, Tile-scalar, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tmuls $\rightarrow$ tstore pattern ...}} \\
+
+% tneg (entry 34, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tneg} (Entry 34, Unary/special, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tneg $\rightarrow$ tstore pattern ...}} \\
+
+% tnot (entry 35, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tnot} (Entry 35, Unary/special, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tnot $\rightarrow$ tstore pattern ...}} \\
+
+% tor (entry 36, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tor} (Entry 36, Tile-tile elementwise, 8 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tor $\rightarrow$ tstore pattern ...}} \\
+
+% tors (entry 37, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tors} (Entry 37, Tile-scalar, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tors $\rightarrow$ tstore pattern ...}} \\
+
+% tpartadd (entry 38, 36 microinstructions)
+\multicolumn{8}{l}{\textbf{tpartadd} (Entry 38, Partial/valid-region, 36 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tpartadd $\rightarrow$ tstore pattern ...}} \\
+
+% tpartmax (entry 39, 48 microinstructions)
+\multicolumn{8}{l}{\textbf{tpartmax} (Entry 39, Partial/valid-region, 48 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tpartmax $\rightarrow$ tstore pattern ...}} \\
+
+% tpartmin (entry 40, 48 microinstructions)
+\multicolumn{8}{l}{\textbf{tpartmin} (Entry 40, Partial/valid-region, 48 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tpartmin $\rightarrow$ tstore pattern ...}} \\
+
+% tpartmul (entry 41, 36 microinstructions)
+\multicolumn{8}{l}{\textbf{tpartmul} (Entry 41, Partial/valid-region, 36 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tpartmul $\rightarrow$ tstore pattern ...}} \\
+
+% trecip (entry 42, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{trecip} (Entry 42, Unary/special, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trecip $\rightarrow$ tstore pattern ...}} \\
+
+% trelu (entry 43, 9 microinstructions)
+\multicolumn{8}{l}{\textbf{trelu} (Entry 43, Unary/special, 9 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trelu $\rightarrow$ tstore pattern ...}} \\
+
+% trowargmax (entry 44, 72 microinstructions, golden extension)
+\multicolumn{8}{l}{\textbf{trowargmax} (Entry 44, Axis arg-reduce, 72 microinstructions, WO\_IS\_EXT=1)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowargmax $\rightarrow$ tstore pattern ...}} \\
+
+% trowargmin (entry 45, 72 microinstructions, golden extension)
+\multicolumn{8}{l}{\textbf{trowargmin} (Entry 45, Axis arg-reduce, 72 microinstructions, WO\_IS\_EXT=1)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowargmin $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpand (entry 46, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{trowexpand} (Entry 46, Axis expand/broadcast, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpand $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpandadd (entry 47, 28 microinstructions)
+\multicolumn{8}{l}{\textbf{trowexpandadd} (Entry 47, Axis expand/broadcast, 28 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpandadd $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpanddiv (entry 48, 56 microinstructions, golden extension)
+\multicolumn{8}{l}{\textbf{trowexpanddiv} (Entry 48, Axis expand/broadcast, 56 microinstructions, WO\_IS\_EXT=1)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpanddiv $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpandexpdif (entry 49, 20 microinstructions)
+\multicolumn{8}{l}{\textbf{trowexpandexpdif} (Entry 49, Axis expand/broadcast, 20 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpandexpdif $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpandmax (entry 50, 28 microinstructions)
+\multicolumn{8}{l}{\textbf{trowexpandmax} (Entry 50, Axis expand/broadcast, 28 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpandmax $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpandmin (entry 51, 28 microinstructions)
+\multicolumn{8}{l}{\textbf{trowexpandmin} (Entry 51, Axis expand/broadcast, 28 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpandmin $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpandmul (entry 52, 28 microinstructions, golden extension)
+\multicolumn{8}{l}{\textbf{trowexpandmul} (Entry 52, Axis expand/broadcast, 28 microinstructions, WO\_IS\_EXT=1)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpandmul $\rightarrow$ tstore pattern ...}} \\
+
+% trowexpandsub (entry 53, 28 microinstructions, golden extension)
+\multicolumn{8}{l}{\textbf{trowexpandsub} (Entry 53, Axis expand/broadcast, 28 microinstructions, WO\_IS\_EXT=1)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowexpandsub $\rightarrow$ tstore pattern ...}} \\
+
+% trowmax (entry 54, 84 microinstructions)
+\multicolumn{8}{l}{\textbf{trowmax} (Entry 54, Axis reduce, 84 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowmax $\rightarrow$ tstore pattern ...}} \\
+
+% trowmin (entry 55, 84 microinstructions)
+\multicolumn{8}{l}{\textbf{trowmin} (Entry 55, Axis reduce, 84 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowmin $\rightarrow$ tstore pattern ...}} \\
+
+% trowprod (entry 56, 54 microinstructions, golden extension)
+\multicolumn{8}{l}{\textbf{trowprod} (Entry 56, Axis reduce, 54 microinstructions, WO\_IS\_EXT=1)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowprod $\rightarrow$ tstore pattern ...}} \\
+
+% trowsum (entry 57, 60 microinstructions)
+\multicolumn{8}{l}{\textbf{trowsum} (Entry 57, Axis reduce, 60 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trowsum $\rightarrow$ tstore pattern ...}} \\
+
+% trsqrt (entry 58, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{trsqrt} (Entry 58, Unary/special, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ trsqrt $\rightarrow$ tstore pattern ...}} \\
+
+% tsel (entry 59, 50 microinstructions)
+\multicolumn{8}{l}{\textbf{tsel} (Entry 59, Select/predication, 50 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tsel $\rightarrow$ tstore pattern ...}} \\
+
+% tsels (entry 60, 88 microinstructions)
+\multicolumn{8}{l}{\textbf{tsels} (Entry 60, Tile-scalar, 88 microinstructions, max micro\_seq)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tsels $\rightarrow$ tstore pattern ...}} \\
+
+% tshl (entry 61, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tshl} (Entry 61, Tile-tile elementwise, 8 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tshl $\rightarrow$ tstore pattern ...}} \\
+
+% tshls (entry 62, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tshls} (Entry 62, Tile-scalar, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tshls $\rightarrow$ tstore pattern ...}} \\
+
+% tshr (entry 63, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tshr} (Entry 63, Tile-tile elementwise, 8 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tshr $\rightarrow$ tstore pattern ...}} \\
+
+% tshrs (entry 64, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tshrs} (Entry 64, Tile-scalar, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tshrs $\rightarrow$ tstore pattern ...}} \\
+
+% tsqrt (entry 65, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{tsqrt} (Entry 65, Unary/special, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tsqrt $\rightarrow$ tstore pattern ...}} \\
+
+% tsub (entry 66, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{tsub} (Entry 66, Tile-tile elementwise, 8 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tsub $\rightarrow$ tstore pattern ...}} \\
+
+% tsubs (entry 67, 18 microinstructions)
+\multicolumn{8}{l}{\textbf{tsubs} (Entry 67, Tile-scalar, 18 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ tsubs $\rightarrow$ tstore pattern ...}} \\
+
+% txor (entry 68, 8 microinstructions)
+\multicolumn{8}{l}{\textbf{txor} (Entry 68, Tile-tile elementwise, 8 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ txor $\rightarrow$ tstore pattern ...}} \\
+
+% txors (entry 69, 12 microinstructions)
+\multicolumn{8}{l}{\textbf{txors} (Entry 69, Tile-scalar, 12 microinstructions)} \\
+  & \multicolumn{7}{r}{\textit{... entries follow tload $\rightarrow$ txors $\rightarrow$ tstore pattern ...}} \\
+
+\bottomrule
+\end{longtable}
+\normalsize
+
+\clearpage
+
+% =============================================================================
+% SECTION 5: BINARY WORD REFERENCE
+% =============================================================================
+\section{WO/WM Field Reference}
+
+\subsection{WO Field Encoding}
+
+\begin{center}
+\begin{longtable}{p{0.18\linewidth}rrrr}
+\toprule
+Field & Bits & Values & Encoding & Notes \\
+\midrule
+\texttt{WO\_OPCODE} & 7 & 0--69 & Opcode index into unified table & Section 2 \\
+\texttt{WO\_IS\_EXT} & 1 & 0, 1 & 0=PTO-BC v0, 1=golden/vendor & Ext opcodes: 0xF000--0xF005 \\
+\texttt{WO\_FLAGS} & 3 & 0--7 & 0=mem, 1=compute, 2=compute+var, 3=composite, 4--7=reserved & Determines op kind \\
+\texttt{WO\_SEQ} & 7 & 0--87 & Zero-based sequence within TileOp & Max seq in corpus=87 (tsels) \\
+\texttt{WO\_OP\_KIND} & 2 & 0--3 & 0=tile reg, 1=imm addr, 2=scalar, 3=imm value & Operand A/B/C interpretation \\
+\texttt{WO\_OP\_A} & 4 & 0--15 & Register index or immediate & For mem: addr reg; for compute: src0 \\
+\texttt{WO\_OP\_B} & 4 & 0--15 & Register index or immediate & For mem: data reg; for compute: src1 \\
+\texttt{WO\_OP\_C} & 4 & 0--15 & Register index or immediate & For mem: unused; for compute: dst \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\subsection{WM Field Encoding}
+
+\begin{center}
+\begin{longtable}{p{0.22\linewidth}rrrr}
+\toprule
+Field & Bits & Values & Encoding & Notes \\
+\midrule
+\texttt{WM\_ENTRY\_ID} & 7 & 0--69 & Microcode entry index & Corresponds to TileOp entry ID \\
+\texttt{WM\_OP\_COUNT} & 2 & 0--3 & 0=4 operands, 1=1, 2=2, 3=3 & Effective bytecode operand count \\
+\texttt{WM\_RES\_TYPE} & 2 & 0--3 & 0=vec, 1=scalar, 2=accum, 3=reserved & Result tile storage class \\
+\texttt{WM\_SRC\_TYPE\_A} & 2 & 0--3 & 0=vec, 1=scalar, 2=accum, 3=reserved & Source A tile type \\
+\texttt{WM\_SRC\_TYPE\_B} & 2 & 0--3 & 0=vec, 1=scalar, 2=accum, 3=reserved & Source B tile type \\
+\texttt{WM\_SRC\_TYPE\_C} & 2 & 0--3 & 0=vec, 1=scalar, 2=accum, 3=reserved & Source C tile type \\
+\texttt{WM\_VARIANT} & 3 & 0--7 & PTO-BC family variant & Always 0 in current corpus \\
+\texttt{WM\_SPARE} & 9 & -- & Reserved & Reserved for future use \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\clearpage
+
+% =============================================================================
+% SECTION 6: TSTORE OPCODE
+% =============================================================================
+\section{TSTORE Opcode Reference}
+
+The \texttt{TSTORE} opcode (PTO-BC 0x1065, Opcode Index 25, WO\_OPCODE=25) is the primitive store operation. Its WO encoding follows the same format as tload, with WO\_OP\_A=addr register, WO\_OP\_B=data register, WO\_OP\_C=unused.
+
+\begin{center}
+\begin{tabular}{llr}
+\toprule
+Field & Value & Notes \\
+\midrule
+WO\_OPCODE & 25 & tstore index in unified table \\
+WO\_IS\_EXT & 0 & PTO-BC v0 \\
+WO\_FLAGS & 000 & Memory operation \\
+WO\_SEQ & varies & Per-sequence position \\
+WO\_OP\_KIND & 00 & Tile register operands \\
+WO\_OP\_A & addr reg (0--15) & Tile buffer address register \\
+WO\_OP\_B & data reg (0--15) & Data source tile register \\
+WO\_OP\_C & 0 & Unused for tstore \\
+WM\_ENTRY\_ID & 25 & tstore entry ID \\
+WM\_OP\_COUNT & 10 & 2 operands (addr, data) \\
+WM\_RES\_TYPE & 00 & vec \\
+WM\_SRC\_TYPE\_A & 00 & vec (addr) \\
+WM\_SRC\_TYPE\_B & 00 & vec (data) \\
+\bottomrule
+\end{tabular}
+\end{center}

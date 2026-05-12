@@ -1,0 +1,73 @@
+\subsection{\texttt{TCVT}}
+\noindent\textbf{Bundle encoding.} UOP entry 17, opcode \texttt{0x101C}. Bundle: \texttt{B.OP + B.ARG + B.ATTR + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x101C}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.ATTR} carries source/destination format refinement for conversion.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise type conversion with a specified rounding mode.
+\paragraph{Example.}
+An f16 tile with values [1.5, 2.7, -0.3] converted to f32 gives [1.5, 2.7, -0.3]. [65000] in f16 to i32 with RNE gives 65000.
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \mathrm{cast}_{\mathrm{rmode}}\!\left(\mathrm{src}_{i,j}\right)
+\]
+
+where \texttt{rmode} is a rounding policy (see \texttt{pto::RoundMode}).
+}\par\smallskip
+\paragraph{Notes.}
+Rounding mode is encoded in the VARIANT field. Converting FP to integer with a value outside the integer range produces an implementation-defined result (typically saturating to \texttt{INT\_MAX} or \texttt{INT\_MIN}).
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=1, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+2 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+3 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=3, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+4 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=4, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+5 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=5, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+6 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=6, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+7 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=7, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+8 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=8, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+9 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=9, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+10 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=10, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+11 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=11, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+12 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=12, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+13 & \texttt{u\_vec.vcvt} & \texttt{opc=0x10, x=0, fl=alu, seq=13, kind=u} & \texttt{entry=17, cnt=1, res=vec, var=0} \\
+14 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=14, kind=b} & \texttt{entry=17, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+The DSL below is an illustrative reference for the conversion algorithm. The authoritative encoding is the microcode site table above. Each function shows one supported conversion path; the full \texttt{TCVT} microcode body selects among these based on the declared source and destination formats.
+
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+# Supported (src_dtype, dst_dtype) pairs: f32{-gt} f16, f32{-gt} i32,
+# f16{-gt} f32, i32{-gt} f32, i64{-gt} f32, and their symmetric inverses.
+# Rounding mode is encoded in the VARIANT field and passed
+# to the vcvt micro-instruction variant selector.
+
+def uop_tcvt(src, dst):
+    src_dtype = src.element_type
+    dst_dtype = dst.element_type
+    src_valid_rows, src_valid_cols = src.valid_shape
+    lanes = pto.get_lanes(src_dtype)
+
+    for row in range(0, src_valid_rows, 1):
+        remained = src_valid_cols
+        for col in range(0, src_valid_cols, lanes):
+            mask, remained = pto.make_mask(src_dtype, remained)
+            vec = pto.vlds(src[row, col:])
+            # vcvt selects src{-gt}dst format pair internally
+            # via the VARIANT field in the microcode site
+            converted = pto.vcvt(vec, mask,
+                                  src_format=src_dtype,
+                                  dst_format=dst_dtype)
+            pto.vsts(converted, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.50\textheight}

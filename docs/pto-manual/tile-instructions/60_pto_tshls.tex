@@ -1,0 +1,45 @@
+\subsection{\texttt{TSHLS}}
+\noindent\textbf{Bundle encoding.} UOP entry 60, opcode \texttt{0x1060}. Bundle: \texttt{B.OP + B.ARG + B.IOR + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1060}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.IOR} imports scalar operand(s): \texttt{scalar}.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Elementwise shift-left of a tile, shift bits given by scalar.
+\paragraph{Example.}
+See \texttt{TSHL}.
+\par\smallskip
+\paragraph{PTO ISA operation.}
+For each element \texttt{(i, j)} in the valid region:
+
+\[
+\mathrm{dst}_{i,j} = \mathrm{src}_{i,j} \ll \mathrm{scalar}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+Same semantics as \texttt{TSHL}.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=60, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vshls} & \texttt{opc=0x26, x=0, fl=alu, seq=1, kind=b} & \texttt{entry=60, cnt=2, res=vec, var=0} \\
+2 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=2, kind=b} & \texttt{entry=60, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tshls(src, scalar, dst):
+    dtype = src.element_type
+    valid_rows, valid_cols = src.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            vec = pto.vlds(src[row, col:])
+            result = pto.vshls(vec, scalar, mask)
+            pto.vsts(result, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

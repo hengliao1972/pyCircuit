@@ -1,0 +1,43 @@
+\subsection{\texttt{TCOLEXPAND}}
+\noindent\textbf{Bundle encoding.} UOP entry 5, opcode \texttt{0x1010}. Bundle: \texttt{B.OP + B.ARG + B.DIM + B.IOTI}. \texttt{B.OP.Opcode}=\texttt{0x1010}. \texttt{B.IOTI}: selector=\texttt{111 last}, \texttt{SrcTile0}=\texttt{src0}, \texttt{SrcTile1}=\texttt{absent}, \texttt{DstTile}=\texttt{dst}, \texttt{SizeCode}=profile tile size. \texttt{B.DIM} supplies column-axis reduction or column-broadcast bounds.\par\smallskip
+{\small
+\paragraph{PTO ISA description.}
+Broadcast the first element of each source column across the destination column.
+\paragraph{Example.}
+Source column vector [[a], [b], [c]] (3x1) broadcast to 4x3: result row i = [a, b, c] for all i in 0..3.
+\par\smallskip
+\paragraph{PTO ISA operation.}
+Let \texttt{R = dst.GetValidRow()} and \texttt{C = dst.GetValidCol()}. For \texttt{0 \textless{}= i \textless{} R} and \texttt{0 \textless{}= j \textless{} C}:
+
+\[
+\mathrm{dst}_{i,j} = \mathrm{src}_{0,j}
+\]
+}\par\smallskip
+\paragraph{Notes.}
+The source is implicitly treated as having $R_{src}$ rows and $C_{dst}$ columns; only the first row of the source is used. The $j$-th output column always uses $\mathrm{src}_{0,j}$.
+\paragraph{Microcode site table.}
+{\scriptsize
+\begin{longtable}{@{}R{0.055\linewidth}L{0.23\linewidth}L{0.31\linewidth}L{0.22\linewidth}@{}}
+\toprule
+Seq & Micro instruction & WO[63:32] fields & WM[31:0] fields \\
+\midrule
+0 & \texttt{u\_vec.vlds} & \texttt{opc=0x17, x=0, fl=mem, seq=0, kind=b} & \texttt{entry=5, cnt=2, res=vec, var=0} \\
+1 & \texttt{u\_vec.vsts} & \texttt{opc=0x2A, x=0, fl=mem, seq=1, kind=b} & \texttt{entry=5, cnt=2, res=vec, var=0} \\
+\bottomrule
+\end{longtable}
+}
+\paragraph{Microcode body DSL.}
+\begin{lstlisting}[style=ptocode]
+def uop_tcolexpand(src0, dst):
+    dtype = dst.element_type
+    valid_rows, valid_cols = dst.valid_shape
+
+    for row in range(0, valid_rows, 1):
+        remained = valid_cols
+        for col in range(0, valid_cols, pto.get_lanes(dtype)):
+            mask, remained = pto.make_mask(dtype, remained)
+            lhs = pto.vlds(src0[0, col:])
+            pto.vsts(lhs, dst[row, col:], mask)
+    return
+\end{lstlisting}
+\Needspace{0.34\textheight}

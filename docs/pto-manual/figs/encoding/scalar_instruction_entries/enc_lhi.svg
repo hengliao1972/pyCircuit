@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="96" viewBox="0 0 760 96">
+  <rect width="100%" height="100%" fill="white"/>
+  <g font-family="sans-serif" text-anchor="middle">
+    <line x1="28.00" y1="30.00" x2="28.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="50.00" y1="67.00" x2="50.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="72.00" y1="67.00" x2="72.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="94.00" y1="67.00" x2="94.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="116.00" y1="67.00" x2="116.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="138.00" y1="67.00" x2="138.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="160.00" y1="67.00" x2="160.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="182.00" y1="67.00" x2="182.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="204.00" y1="67.00" x2="204.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="226.00" y1="67.00" x2="226.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="248.00" y1="67.00" x2="248.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="270.00" y1="67.00" x2="270.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="292.00" y1="67.00" x2="292.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="314.00" y1="67.00" x2="314.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="336.00" y1="67.00" x2="336.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="358.00" y1="67.00" x2="358.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="380.00" y1="67.00" x2="380.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="402.00" y1="67.00" x2="402.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="424.00" y1="67.00" x2="424.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="446.00" y1="67.00" x2="446.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="468.00" y1="67.00" x2="468.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="490.00" y1="67.00" x2="490.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="512.00" y1="67.00" x2="512.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="534.00" y1="67.00" x2="534.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="556.00" y1="67.00" x2="556.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="578.00" y1="67.00" x2="578.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="600.00" y1="67.00" x2="600.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="622.00" y1="67.00" x2="622.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="644.00" y1="67.00" x2="644.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="666.00" y1="67.00" x2="666.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="688.00" y1="67.00" x2="688.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="710.00" y1="67.00" x2="710.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <line x1="732.00" y1="30.00" x2="732.00" y2="72.00" stroke="#111827" stroke-width="0.75"/>
+    <text x="28.00" y="17" font-size="12" fill="#111827">31</text>
+    <text x="292.00" y="17" font-size="12" fill="#111827">20</text>
+    <text x="402.00" y="17" font-size="12" fill="#111827">15</text>
+    <text x="446.00" y="17" font-size="12" fill="#111827">13</text>
+    <text x="468.00" y="17" font-size="12" fill="#111827">12</text>
+    <text x="578.00" y="17" font-size="12" fill="#111827">7</text>
+    <text x="622.00" y="17" font-size="12" fill="#111827">5</text>
+    <text x="666.00" y="17" font-size="12" fill="#111827">3</text>
+    <text x="710.00" y="17" font-size="12" fill="#111827">1</text>
+    <text x="732.00" y="17" font-size="12" fill="#111827">0</text>
+    <rect x="28.00" y="30" width="264.00" height="42" fill="#fef3c7" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="160.00" y="56" font-size="13" font-weight="700" fill="#111827">simm12</text>
+    <text x="160.00" y="88" font-size="12" fill="#4b5563">31:20</text>
+    <rect x="292.00" y="30" width="110.00" height="42" fill="#dcfce7" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="347.00" y="56" font-size="13" font-weight="700" fill="#111827">SrcL</text>
+    <text x="347.00" y="88" font-size="12" fill="#4b5563">19:15</text>
+    <rect x="402.00" y="30" width="44.00" height="42" fill="#f3f4f6" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="424.00" y="56" font-size="13" font-weight="700" fill="#111827">0</text>
+    <rect x="446.00" y="30" width="22.00" height="42" fill="#f3f4f6" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="457.00" y="56" font-size="13" font-weight="700" fill="#111827">1</text>
+    <rect x="468.00" y="30" width="110.00" height="42" fill="#dbeafe" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="523.00" y="56" font-size="13" font-weight="700" fill="#111827">RegDst</text>
+    <text x="523.00" y="88" font-size="12" fill="#4b5563">11:7</text>
+    <rect x="578.00" y="30" width="44.00" height="42" fill="#f3f4f6" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="600.00" y="56" font-size="13" font-weight="700" fill="#111827">0</text>
+    <rect x="622.00" y="30" width="44.00" height="42" fill="#f3f4f6" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="644.00" y="56" font-size="13" font-weight="700" fill="#111827">1</text>
+    <rect x="666.00" y="30" width="44.00" height="42" fill="#f3f4f6" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="688.00" y="56" font-size="13" font-weight="700" fill="#111827">0</text>
+    <rect x="710.00" y="30" width="22.00" height="42" fill="#f3f4f6" fill-opacity="0.42" stroke="#111827" stroke-width="1"/>
+    <text x="721.00" y="56" font-size="13" font-weight="700" fill="#111827">1</text>
+  </g>
+</svg>

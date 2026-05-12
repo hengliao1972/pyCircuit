@@ -1,0 +1,49 @@
+{
+  "reg": [
+    {
+      "bits": 1,
+      "name": "1"
+    },
+    {
+      "bits": 3,
+      "name": "101"
+    },
+    {
+      "bits": 3,
+      "name": "010"
+    },
+    {
+      "bits": 5,
+      "name": "00000"
+    },
+    {
+      "bits": 3,
+      "name": "010"
+    },
+    {
+      "bits": 5,
+      "name": "00000"
+    },
+    {
+      "bits": 4,
+      "name": "SUCC_IMM",
+      "attr": "23:20"
+    },
+    {
+      "bits": 4,
+      "name": "PRED_IMM",
+      "attr": "27:24"
+    },
+    {
+      "bits": 4,
+      "name": "0000"
+    }
+  ],
+  "config": {
+    "bits": 32,
+    "hflip": true,
+    "lanes": 1,
+    "fontsize": 12,
+    "hspace": 820
+  }
+}
