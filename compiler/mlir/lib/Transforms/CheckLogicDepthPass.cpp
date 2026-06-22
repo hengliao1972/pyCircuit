@@ -30,6 +30,29 @@ static bool isSequentialOp(Operation *op) {
              pyc::CdcSyncOp>(op);
 }
 
+static int64_t ceilLog2(int64_t n) {
+  if (n <= 1)
+    return 0;
+  int64_t depth = 0;
+  int64_t v = 1;
+  while (v < n) {
+    v <<= 1;
+    ++depth;
+  }
+  return depth;
+}
+
+template <typename ReduceOp>
+static int64_t vectorReduceCost(ReduceOp op) {
+  auto vecTy = dyn_cast<VectorType>(op.getVec().getType());
+  if (!vecTy)
+    return 1;
+  int64_t dim = op.getDim().value_or(0);
+  if (dim < 0 || dim >= vecTy.getRank())
+    return 1;
+  return std::max<int64_t>(1, ceilLog2(vecTy.getDimSize(dim)));
+}
+
 static int64_t opCost(Operation *op) {
   if (!op)
     return 0;
@@ -38,6 +61,14 @@ static int64_t opCost(Operation *op) {
   if (isa<pyc::WireOp, pyc::AliasOp, pyc::ResetActiveOp, pyc::ConstantOp, pyc::CombOp, pyc::YieldOp,
           arith::ConstantOp>(op))
     return 0;
+  if (isa<pyc::VGetOp, pyc::VCreateOp, pyc::VBroadcastOp>(op))
+    return 0;
+  if (auto vr = dyn_cast<pyc::VOrReduceOp>(op))
+    return vectorReduceCost(vr);
+  if (auto vr = dyn_cast<pyc::VAndReduceOp>(op))
+    return vectorReduceCost(vr);
+  if (auto vr = dyn_cast<pyc::VAddReduceOp>(op))
+    return vectorReduceCost(vr);
   return 1;
 }
 

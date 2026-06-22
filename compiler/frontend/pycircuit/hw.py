@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import inspect
 import json
@@ -23,6 +23,24 @@ from .connectors import (
 from .design import DesignError
 from .dsl import Module, Signal
 from .literals import LiteralValue, infer_literal_width
+
+
+_VEC_BINARY_METHODS: dict[str, str] = {
+    "add": "add",
+    "sub": "sub",
+    "mul": "mul",
+    "udiv": "udiv",
+    "urem": "urem",
+    "sdiv": "sdiv",
+    "srem": "srem",
+    "and": "and_",
+    "or": "or_",
+    "xor": "xor",
+    "eq": "eq",
+    "ult": "ult",
+    "slt": "slt",
+}
+_VEC_COMPARE_OPS = {"eq", "ult", "slt"}
 
 
 def _int_width(ty: str) -> int:
@@ -50,6 +68,23 @@ def _coerce_literal_width(
     if ctx_width is not None:
         return int(ctx_width), signed
     return infer_literal_width(int(lit.value), signed=signed), signed
+
+
+def _normalize_shape_arg(shape: int | tuple[int, ...] | list[int]) -> tuple[int, ...]:
+    # Normalize public shape arguments for vector ports/state. Accept a bare int
+    # for 1-D convenience and tuple/list for callers that already carry a shape.
+    if isinstance(shape, int):
+        dims = (int(shape),)
+    elif isinstance(shape, (tuple, list)):
+        dims = tuple(int(d) for d in shape)
+    else:
+        raise TypeError(f"shape must be int, tuple[int, ...], or list[int], got {type(shape).__name__}")
+    if not dims:
+        raise ValueError("shape cannot be empty")
+    for d in dims:
+        if d <= 0:
+            raise ValueError(f"shape dimensions must be > 0, got {dims}")
+    return dims
 
 
 @dataclass(frozen=True, eq=False)
@@ -129,76 +164,93 @@ class Wire:
             b = b._sext(width=out_w) if b.signed else b._zext(width=out_w)
         return a, b
 
-    def __add__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __add__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.add(a.sig, b.sig), signed=(a.signed or b.signed))
 
-    def __radd__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __radd__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         return self.__add__(other)
 
-    def __sub__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __sub__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.sub(a.sig, b.sig), signed=(a.signed or b.signed))
 
-    def __rsub__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __rsub__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         b = self._as_wire(self, width=None)
         a = self._as_wire(other, width=b.width)
         aa, bb = a._promote2(b) if isinstance(a, Wire) else (a, b)
         return Wire(self.m, self.m.sub(aa.sig, bb.sig), signed=(aa.signed or bb.signed))
 
-    def __mul__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __mul__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.mul(a.sig, b.sig), signed=(a.signed or b.signed))
 
-    def __rmul__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __rmul__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         return self.__mul__(other)
 
-    def __rfloordiv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __rfloordiv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         num = self._as_wire(other, width=None)
         return num.__floordiv__(self)
 
-    def __floordiv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __floordiv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         if a.signed or b.signed:
             return Wire(self.m, self.m.sdiv(a.sig, b.sig), signed=True)
         return Wire(self.m, self.m.udiv(a.sig, b.sig), signed=False)
 
-    def __rtruediv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
-        return self.__rfloordiv__(other)
+    def __rtruediv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
+        raise TypeError("hardware `/` division is not supported; use `//` for integer division")
 
-    def __truediv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
-        # Treat `/` as integer division for hardware values.
-        return self.__floordiv__(other)
+    def __truediv__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
+        raise TypeError("hardware `/` division is not supported; use `//` for integer division")
 
-    def __rmod__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __rmod__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         num = self._as_wire(other, width=None)
         return num.__mod__(self)
 
-    def __mod__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __mod__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         if a.signed or b.signed:
             return Wire(self.m, self.m.srem(a.sig, b.sig), signed=True)
         return Wire(self.m, self.m.urem(a.sig, b.sig), signed=False)
 
-    def __and__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __and__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.and_(a.sig, b.sig), signed=(a.signed or b.signed))
 
-    def __rand__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __rand__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         return self.__and__(other)
 
-    def __or__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __or__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.or_(a.sig, b.sig), signed=(a.signed or b.signed))
 
-    def __ror__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __ror__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         return self.__or__(other)
 
-    def __xor__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __xor__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.xor(a.sig, b.sig), signed=(a.signed or b.signed))
 
-    def __rxor__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __rxor__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         return self.__xor__(other)
 
     def __invert__(self) -> "Wire":
@@ -207,10 +259,11 @@ class Wire:
     def __lshift__(self, other: int) -> "Wire":
         if not isinstance(other, int):
             raise TypeError("<< only supports constant integer shift amounts")
-        return self.shl(amount=int(other))
+        return self.shl(amount=other)
 
     def lshr(self, *, amount: Union[int, "Wire", "Reg", Signal, LiteralValue]) -> "Wire":
         """Logical shift right by an immediate or dynamic amount (zero-fill)."""
+        if isinstance(amount, Vec): return NotImplemented
         if isinstance(amount, int):
             amt = int(amount)
             if amt < 0:
@@ -221,6 +274,7 @@ class Wire:
 
     def ashr(self, *, amount: Union[int, "Wire", "Reg", Signal, LiteralValue]) -> "Wire":
         """Arithmetic shift right by an immediate or dynamic amount (sign-fill)."""
+        if isinstance(amount, Vec): return NotImplemented
         if isinstance(amount, int):
             amt = int(amount)
             if amt < 0:
@@ -233,67 +287,80 @@ class Wire:
         if not isinstance(other, int):
             raise TypeError(">> only supports constant integer shift amounts")
         if self.signed:
-            return self.ashr(amount=int(other))
-        return self.lshr(amount=int(other))
+            return self.ashr(amount=other)
+        return self.lshr(amount=other)
 
     def __eq__(self, other: object) -> "Wire":  # type: ignore[override]
+        if isinstance(other, Vec): return NotImplemented
         if not isinstance(other, (Wire, Reg, Signal, Connector, int, LiteralValue)):
             return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.eq(a.sig, b.sig))
 
     def __ne__(self, other: object) -> "Wire":  # type: ignore[override]
+        if isinstance(other, Vec): return NotImplemented
         if not isinstance(other, (Wire, Reg, Signal, Connector, int, LiteralValue)):
             return NotImplemented
         return ~(self == other)
 
-    def eq(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def eq(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         return self == other
 
-    def ne(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def ne(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
+        if isinstance(other, Vec): return NotImplemented
         return self != other
 
-    def ult(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def ult(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Unsigned less-than compare (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.ult(a.sig, b.sig))
 
-    def slt(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def slt(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Signed less-than compare (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         return Wire(self.m, self.m.slt(a.sig, b.sig))
 
-    def __lt__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __lt__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Less-than compare respecting signed intent (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         a, b = self._promote2(other)
         if a.signed or b.signed:
             return Wire(self.m, self.m.slt(a.sig, b.sig))
         return Wire(self.m, self.m.ult(a.sig, b.sig))
 
-    def __gt__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __gt__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Greater-than compare respecting signed intent (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         other_w = self._as_wire(other, width=None)
         return other_w < self
 
-    def __le__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __le__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Less-than-or-equal compare respecting signed intent (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         return ~(self > other)
 
-    def __ge__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def __ge__(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Greater-than-or-equal compare respecting signed intent (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         return ~(self < other)
 
-    def ugt(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def ugt(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Unsigned greater-than compare (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         other_w = self._as_wire(other, width=None)
         return other_w.ult(self)
 
-    def ule(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def ule(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Unsigned less-than-or-equal compare (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         return ~self.ugt(other)
 
-    def uge(self, other: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
+    def uge(self, other: Union["Wire", "Reg", Signal, int, LiteralValue, "Vec"]) -> "Wire":
         """Unsigned greater-than-or-equal compare (result is i1)."""
+        if isinstance(other, Vec): return NotImplemented
         return ~self.ult(other)
 
     def _select_internal(self, a: Union["Wire", "Reg", Signal, int, LiteralValue], b: Union["Wire", "Reg", Signal, int, LiteralValue]) -> "Wire":
@@ -350,8 +417,9 @@ class Wire:
     def slice(self, *, lsb: int, width: int) -> "Wire":
         return Wire(self.m, self.m.extract(self.sig, lsb=lsb, width=width), signed=False)
 
-    def shl(self, *, amount: Union[int, "Wire", "Reg", Signal, LiteralValue]) -> "Wire":
+    def shl(self, *, amount: Union[int, "Wire", "Reg", Signal, LiteralValue, "Vec"]) -> "Wire":
         """Shift left by an immediate or dynamic amount."""
+        if isinstance(amount, Vec): return NotImplemented
         if isinstance(amount, int):
             return Wire(self.m, self.m.shli(self.sig, amount=int(amount)), signed=self.signed)
         amt = self._as_wire(amount, width=None)
@@ -753,17 +821,41 @@ class Circuit(Module):
         _ = (frequency_desc, reset_active_high)
         return CycleAwareDomain(self, str(name))
 
-    def input(self, name: str, *, width: int, signed: bool = False) -> Wire:  # type: ignore[override]
-        """Declare a module input port and return it as a `Wire`."""
-        return Wire(self, super().input(name, width=width), signed=bool(signed))
+    def input(  # type: ignore[override]
+        self,
+        name: str,
+        *,
+        width: int,
+        signed: bool = False,
+        shape: int | tuple[int, ...] | list[int] | None = None,
+    ) -> Union[Wire, "Vec"]:
+        """Declare a module input port.
+
+        Scalar inputs return ``Wire``. Shaped inputs return a vector-backed
+        ``Vec`` whose lanes are extracted lazily with ``pyc.v_get``.
+        """
+        if shape is None:
+            return Wire(self, super().input(name, width=width), signed=bool(signed))
+        dims = _normalize_shape_arg(shape)
+        sig = super().input(name, shape=list(dims), width=width)
+        return Vec._from_vector_signal(self, sig, signs=[bool(signed) for _ in range(dims[0])])
 
     def const(self, value: int, *, width: int) -> Wire:  # type: ignore[override]
         """Create an integer constant `Wire` (two's complement at `width`)."""
         return Wire(self, super().const(int(value), width=width), signed=(int(value) < 0))
 
-    def output(self, name: str, value: Union[Wire, Reg, Signal, Connector, int, LiteralValue]) -> None:  # type: ignore[override]
+    def output(self, name: str, value: Union[Wire, Reg, Signal, Connector, int, LiteralValue, "Vec"]) -> None:  # type: ignore[override]
         if isinstance(value, Connector):
             value = value.read()
+        if isinstance(value, Vec):
+            info = value._as_vector_signal()
+            if info is None:
+                raise TypeError("output(Vec) requires a rectangular Vec of wire-like elements")
+            _m, sig, _signs = info
+            if _m is not self:
+                raise ValueError("output(Vec) elements must belong to this module")
+            super().output(name, sig)
+            return
         if isinstance(value, Reg):
             super().output(name, value.q.sig)
             return
@@ -922,9 +1014,10 @@ class Circuit(Module):
         width: int,
         init: Union[Wire, Reg, Signal, int, LiteralValue] = 0,
         en: Union[Wire, Signal, int, LiteralValue] = 1,
+        shape: int | tuple[int, ...] | None = None,
         stage: str | None = None,
         signed: bool | None = None,  # reserved for future type inference / lowering
-    ) -> Reg:
+    ) -> Union[Reg, "Vec"]:
         """Declare a named stateful variable (backedge register).
 
         This is a higher-level replacement for `backedge_reg(...)` that:
@@ -939,6 +1032,43 @@ class Circuit(Module):
             rst = domain.rst
         if clk is None or rst is None:
             raise TypeError("out() requires either domain=... or both clk=... and rst=...")
+
+        if shape is not None:
+            dims = _normalize_shape_arg(shape)
+
+            def pick_axis(v: Any, idx: int) -> Any:
+                if isinstance(v, Vec):
+                    return v[idx]
+                if isinstance(v, (list, tuple)):
+                    return v[idx]
+                return v
+
+            def build_shaped(base_name: str, axis: int, axis_init: Any, axis_en: Any) -> "Vec | Reg":
+                if axis == len(dims):
+                    return self.out(
+                        base_name,
+                        clk=clk,
+                        rst=rst,
+                        width=width,
+                        init=axis_init,
+                        en=axis_en,
+                        stage=stage,
+                        signed=signed,
+                    )
+                n = dims[axis]
+                elems: list[Union[Wire, Reg, Vec]] = []
+                for i in range(n):
+                    child_name = f"{base_name}_{i}"
+                    child = build_shaped(
+                        child_name,
+                        axis + 1,
+                        pick_axis(axis_init, i),
+                        pick_axis(axis_en, i),
+                    )
+                    elems.append(child)
+                return Vec(elems)
+
+            return build_shaped(str(name), 0, init, en)
 
         full = str(name)
         if stage:
@@ -1924,35 +2054,135 @@ class Circuit(Module):
         return RvQueue(self, name, clk=clk, rst=rst, width=width, depth=depth)
 
 
+def _scalar_to_wire(m: Module, value: Any, *, width: int) -> Wire:
+    """将多种标量类型（Connector/Reg/Wire/Signal/LiteralValue/int）统一转为 Wire。"""
+    if isinstance(value, Connector):
+        value = value.read()
+    if isinstance(value, Reg):
+        value = value.q
+    if isinstance(value, Wire):
+        if value.m is not m:
+            raise ValueError("cannot combine wires from different modules")
+        return value
+    if isinstance(value, Signal):
+        return Wire(m, value)
+    if isinstance(value, LiteralValue):
+        lit_w, lit_signed = _coerce_literal_width(value, ctx_width=width, ctx_signed=value.signed)
+        return Wire(m, Module.const(m, int(value.value), width=int(lit_w)), signed=lit_signed)
+    if isinstance(value, int):
+        return Wire(m, Module.const(m, int(value), width=int(width)), signed=(int(value) < 0))
+    raise TypeError(f"unsupported operand type: {type(value).__name__}")
+
+
+def _scalar_signed(value: Any) -> bool | None:
+    """判断标量值是否有符号；无法识别则返回 None。"""
+    if isinstance(value, Connector):
+        value = value.read()
+    if isinstance(value, Reg):
+        return bool(value.signed)
+    if isinstance(value, Wire):
+        return bool(value.signed)
+    if isinstance(value, LiteralValue):
+        return bool(value.signed)
+    if isinstance(value, int):
+        return int(value) < 0
+    if isinstance(value, Signal):
+        return False
+    return None
+
+
+def _shift_amount_wire(m: Module, amount: Any) -> Wire | None:
+    """将移位量转为 Wire；失败返回 None（由调用方回退到逐元素路径）。"""
+    try:
+        return _scalar_to_wire(m, amount, width=32)
+    except TypeError:
+        return None
+
+
+
 @dataclass(frozen=True)
 class Vec:
     """A small fixed-length container of wires/regs for building pipelines."""
 
-    elems: tuple[Union[Wire, Reg], ...]
+    elems: list[Union[Wire, Reg, "Vec"]]
+    _vector_module: Module | None = None
+    _vector_sig: Signal | None = None
+    _vector_signs: list[bool] | None = None
+    _lane_cache: dict[int, Union[Wire, "Vec"]] = field(default_factory=dict, compare=False)
+
+    @staticmethod
+    def _normalize_init_elem(e: Any) -> Union[Wire, Reg, "Vec"]:
+        if isinstance(e, (Wire, Reg, Vec)):
+            return e
+
+        # Accept cycle-aware wrappers only when they denote the current-cycle
+        # value.  Reg is intentionally left untouched; Vec([reg]) should still
+        # expose Reg elements rather than silently rewriting them to reg.q.
+        cas = getattr(e, "_cas", e)
+        w = getattr(cas, "_w", None)
+        cycle = getattr(cas, "_cycle", None)
+        if isinstance(w, Wire) and cycle is not None:
+            if int(cycle) != 0:
+                raise ValueError(f"Vec only accepts cycle-aware signals at cycle=0, got cycle={int(cycle)}")
+            return w
+
+        return e
 
     def __post_init__(self) -> None:
+        if not isinstance(self.elems, list):
+            try:
+                object.__setattr__(self, "elems", list(self.elems))
+            except TypeError as e:
+                raise TypeError("Vec expects an iterable of elements") from e
+        object.__setattr__(self, "elems", [self._normalize_init_elem(e) for e in self.elems])
+
+        if self._vector_sig is not None:
+            if self._vector_module is None:
+                raise ValueError("vector-backed Vec requires a module")
+            if self._vector_signs is None:
+                raise ValueError("vector-backed Vec requires lane signedness")
+            shape, _ = self._vector_shape_elem_type(self._vector_sig.ty)
+            if shape[0] != len(self._vector_signs):
+                raise ValueError("vector-backed Vec lane count must match vector type")
+            if self.elems:
+                raise ValueError("vector-backed Vec must not also store eager elements")
+            return
+
         if not self.elems:
             raise ValueError("Vec cannot be empty")
 
-        m0 = self._module_of(self.elems[0])
+        first = self.elems[0]
+        if isinstance(first, Vec):
+            return  # nested Vec — defer module check to innermost Vec
+        m0 = self._module_of(first)
         for e in self.elems[1:]:
+            if isinstance(e, Vec):
+                continue
             if self._module_of(e) is not m0:
                 raise ValueError("Vec elements must belong to the same Circuit/Module")
 
     @staticmethod
-    def _module_of(e: Union[Wire, Reg]) -> Module:
+    def _module_of(e: Union[Wire, Reg, "Vec"]) -> Module:
         if isinstance(e, Wire):
             return e.m
-        return e.q.m
+        if isinstance(e, Reg):
+            return e.q.m
+        return e.m  # fallback (Vec or other with .m)
 
     @property
     def m(self) -> Module:
+        if self._vector_module is not None:
+            return self._vector_module
         return self._module_of(self.elems[0])
 
     def __len__(self) -> int:
+        if self._vector_sig is not None:
+            return len(self._vector_signs or [])
         return len(self.elems)
 
     def __iter__(self) -> Iterator[Union[Wire, Reg]]:
+        if self._vector_sig is not None:
+            return iter([self[i] for i in range(len(self))])
         return iter(self.elems)
 
     @overload
@@ -1961,14 +2191,941 @@ class Vec:
     @overload
     def __getitem__(self, idx: slice) -> "Vec": ...
 
-    def __getitem__(self, idx: int | slice) -> Union[Wire, Reg, "Vec"]:
+    @overload
+    def __getitem__(self, idx: tuple[int | slice, ...]) -> Union[Wire, Reg, "Vec"]: ...
+
+    def __getitem__(self, idx: int | slice | tuple[int | slice, ...]) -> Union[Wire, Reg, "Vec"]:
+        if self._vector_sig is not None:
+            if isinstance(idx, tuple):
+                if len(idx) == 0:
+                    return self
+                head, *tail = idx
+                elem = self[head]
+                if not tail:
+                    return elem
+                if not isinstance(elem, Vec):
+                    raise TypeError("tuple indexing into nested dimensions requires Vec elements")
+                rest = tuple(tail) if len(tail) > 1 else tail[0]
+                return elem[rest]
+            if isinstance(idx, slice):
+                return Vec([self[i] for i in range(len(self))[idx]])
+            lane = int(idx)
+            if lane < 0:
+                lane += len(self)
+            if lane < 0 or lane >= len(self):
+                raise IndexError("Vec index out of range")
+            cached = self._lane_cache.get(lane)
+            if cached is not None:
+                return cached
+            assert self._vector_sig is not None
+            assert self._vector_signs is not None
+            lane_sig = self.m.v_get(self._vector_sig, index=lane)
+            if lane_sig.ty.startswith("vector<"):
+                shape, _elem_ty = self._vector_shape_elem_type(lane_sig.ty)
+                sub_signs = [bool(self._vector_signs[lane]) for _ in range(shape[0])]
+                sub_vec = self._from_vector_signal(self.m, lane_sig, signs=sub_signs)
+                self._lane_cache[lane] = sub_vec
+                return sub_vec
+            wire = Wire(self.m, lane_sig, signed=bool(self._vector_signs[lane]))
+            self._lane_cache[lane] = wire
+            return wire
+
+        if isinstance(idx, tuple):
+            if len(idx) == 0:
+                return self
+            head, *tail = idx
+            if isinstance(head, slice):
+                selected = self.elems[head]
+                if not tail:
+                    return Vec(selected)
+                rest: int | slice | tuple[int | slice, ...]
+                rest = tuple(tail) if len(tail) > 1 else tail[0]
+                out: list[Union[Wire, Reg, Vec]] = []
+                for e in selected:
+                    if not isinstance(e, Vec):
+                        raise TypeError("tuple indexing into nested dimensions requires Vec elements")
+                    out.append(e[rest])
+                return Vec(out)
+            elem = self.elems[int(head)]
+            if not tail:
+                return elem
+            if not isinstance(elem, Vec):
+                raise TypeError("tuple indexing into nested dimensions requires Vec elements")
+            rest = tuple(tail) if len(tail) > 1 else tail[0]
+            return elem[rest]
         if isinstance(idx, slice):
             return Vec(self.elems[idx])
         return self.elems[int(idx)]
 
+    # -- internal helpers -------------------------------------------------------
+
+    @classmethod
+    def _vector_shape_elem_type(cls, ty: str) -> tuple[list[int], str]:
+        """从 MLIR 向量类型字符串解析 shape 和元素类型。
+        如 ``vector<4xi8>`` → ``([4], i8)``；``vector<4xvector<3xi8>>`` → ``([4, 3], i8)``。
+        维度是纯数字，从左边连续取；遇非数字段时剩余部分即元素类型。
+        """
+        raw = str(ty).strip()
+        if not (raw.startswith("vector<") and raw.endswith(">")):
+            raise ValueError(f"expected vector type, got {ty!r}")
+        body = raw[len("vector<") : -1]
+        parts = body.split("x")
+        dims: list[int] = []
+        i = 0
+        while i < len(parts) and parts[i].strip().isdigit():
+            d = int(parts[i])
+            if d <= 0:
+                raise ValueError(f"vector lanes must be > 0, got {d}")
+            dims.append(d)
+            i += 1
+        if i == 0 or i == len(parts):
+            raise ValueError(f"invalid vector type: {ty!r}")
+        return dims, "x".join(parts[i:])
+
+    @classmethod
+    def _from_vector_signal(cls, m: Module, sig: Signal, *, signs: list[bool]) -> "Vec":
+        """从底层向量 Signal 构造惰性 Vec（elems 为空，按需提取 lane）。"""
+        return cls([], _vector_module=m, _vector_sig=sig, _vector_signs=list(signs))
+
+    @staticmethod
+    def _wire_of(e: Union[Wire, Reg, "Vec"]) -> Wire:
+        """Reg → Reg.q, Wire → itself, Vec → pass through."""
+        if isinstance(e, Wire):
+            return e
+        if isinstance(e, Reg):
+            return e.q
+        return e  # Vec or other — pass through for recursive op dispatch
+
+    def _map1(self, fn: Callable[[Wire], Wire]) -> "Vec":
+        """逐元素一元运算。元素可以是 Wire/Reg/Vec（嵌套递归）。"""
+        return Vec([fn(e) for e in self])
+
+    def _map2(self, other: Any, fn: Callable[[Any, Any], Any]) -> "Vec":
+        """逐元素二元运算。fn 直接作用于元素，Python 运算符分发自动处理嵌套 Vec。"""
+        if isinstance(other, Vec):
+            if len(other) != len(self):
+                raise ValueError(f"Vec size mismatch: {len(self)} vs {len(other)}")
+            return Vec([fn(e1, e2) for e1, e2 in zip(self, other)])
+        if isinstance(other, (Wire, Reg, int)):
+            scalar = other if isinstance(other, Wire) else (other.q if isinstance(other, Reg) else other)
+            return Vec([fn(e, scalar) for e in self])
+        return NotImplemented
+
+    def _leaf_wires(self) -> list[Wire] | None:
+        """若为 1-D 叶子 Vec，返回所有 Wire 列表；含嵌套 Vec 或空则返回 None。"""
+        if self._vector_sig is not None:
+            return [self[i] for i in range(len(self))]
+        if not self.elems or any(isinstance(e, Vec) for e in self.elems):
+            return None
+        out = [self._wire_of(e) for e in self.elems]
+        if not out:
+            return None
+        m0, ty0 = out[0].m, out[0].ty
+        for w in out[1:]:
+            if w.m is not m0 or w.ty != ty0:
+                return None
+        return out
+    def _any_lane_signed(self) -> bool:
+        """判断是否存在任何 lane 为有符号类型。"""
+        if self._vector_signs is not None:
+            return any(self._vector_signs)
+        ws = self._leaf_wires()
+        if ws is not None:
+            return any(w.signed for w in ws)
+        return any(e._any_lane_signed() for e in self.elems if isinstance(e, Vec))
+
+    def _as_vector_signal(self) -> tuple[Module, Signal, list[bool]] | None:
+        """尝试将 Vec 提升为单一向量 Signal。
+        1) 已为 vector-backed → 直接返回；
+        2) 所有元素为同构子 Vec → v_create 合并成高维向量；
+        3) 叶子 Wire → v_create 构造 1-D 向量，或识别 v_get 链路反推原始向量。
+        提升失败返回 None，调用方回退到逐元素映射路径。
+        """
+        if self._vector_sig is not None:
+            assert self._vector_signs is not None
+            return self.m, self._vector_sig, list(self._vector_signs)
+        if self.elems and all(isinstance(e, Vec) for e in self.elems):
+            row_infos = [e._as_vector_signal() for e in self.elems]
+            if all(info is not None for info in row_infos):
+                infos = [info for info in row_infos if info is not None]
+                m, first_sig, _first_signs = infos[0]
+                if all(row_m is m and row_sig.ty == first_sig.ty for row_m, row_sig, _row_signs in infos):
+                    return (
+                        m,
+                        m.v_create([row_sig for _row_m, row_sig, _row_signs in infos]),
+                        [any(row_signs) for _row_m, _row_sig, row_signs in infos],
+                    )
+        ws = self._leaf_wires()
+        if ws is None:
+            return None
+        m = ws[0].m
+        vec_get_map = getattr(m, "_vec_get_map", None)
+        if isinstance(vec_get_map, dict):
+            lane_info: list[tuple[str, int]] = []
+            for w in ws:
+                info = vec_get_map.get(w.sig.ref)
+                if info is None:
+                    lane_info = []
+                    break
+                lane_info.append(info)
+            if lane_info:
+                src_ref = lane_info[0][0]
+                if all(ref == src_ref for ref, _idx in lane_info):
+                    idxs = [idx for _ref, idx in lane_info]
+                    if idxs == list(range(len(ws))):
+                        return m, Signal(ref=src_ref, ty=f"vector<{len(ws)}x{ws[0].ty}>"), [bool(w.signed) for w in ws]
+        return m, m.v_create([w.sig for w in ws]), [bool(w.signed) for w in ws]
+
+    def _vector_operand_info(
+        self,
+        value: Any,
+        *,
+        module: Module,
+        width: int,
+        shape: list[int],
+        lanes: int,
+        vector_ty: str,
+    ) -> tuple[Signal, list[bool]] | None:
+        """获取二元向量运算的右操作数信息。
+        若 value 为同模同型 Vec → 取其向量 Signal + signs；
+        若为标量 → 转 Wire 后广播为 lanes 份相同 signed 标记。
+        不匹配则返回 None，调用方回退到逐元素路径。
+        """
+        if isinstance(value, Vec):
+            info = value._as_vector_signal()
+            if info is None:
+                return None
+            value_m, value_sig, value_signs = info
+            value_shape, _value_elem_ty = self._vector_shape_elem_type(value_sig.ty)
+            if (
+                value_m is not module
+                or value_sig.ty != vector_ty
+                or value_shape != shape
+                or len(value_signs) != lanes
+            ):
+                return None
+            return value_sig, value_signs
+
+        try:
+            scalar = _scalar_to_wire(module, value, width=width)
+        except TypeError:
+            return None
+        if scalar.m is not module:
+            return None
+        return scalar.sig, [bool(scalar.signed) for _ in range(lanes)]
+
+    def _try_vector_unary(self, op: str) -> "Vec | None":
+        """尝试用原生向量指令做一元运算（目前仅支持 ``not``）。失败返回 None。"""
+        info = self._as_vector_signal()
+        if info is None:
+            return None
+        m, in_sig, signs = info
+        if op == "not":
+            out_sig = m.not_(in_sig)
+            return self._from_vector_signal(m, out_sig, signs=signs)
+        return None
+
+    def _try_vector_binary(self, other: Any, op: str, *, reverse: bool = False) -> "Vec | None":
+        """尝试用原生向量指令做二元运算（add/sub/mul/and/or/xor 等）。
+        成功返回新的惰性 Vec；失败返回 None，调用方回退到逐元素 ``_map2`` 路径。
+        """
+        lhs_info = self._as_vector_signal()
+        method_name = _VEC_BINARY_METHODS.get(op)
+        if lhs_info is None or method_name is None:
+            return None
+        m, lhs_sig, lhs_signs = lhs_info
+        shape, elem_ty = self._vector_shape_elem_type(lhs_sig.ty)
+        width = _int_width(elem_ty)
+
+        rhs_info = self._vector_operand_info(
+            other,
+            module=m,
+            width=width,
+            shape=shape,
+            lanes=len(lhs_signs),
+            vector_ty=lhs_sig.ty,
+        )
+        if rhs_info is None:
+            return None
+        rhs_sig, rhs_signs = rhs_info
+
+        a_sig, b_sig = (rhs_sig, lhs_sig) if reverse else (lhs_sig, rhs_sig)
+        builder = getattr(m, method_name, None)
+        if not callable(builder):
+            return None
+        out_sig = builder(a_sig, b_sig)
+        out_signs = [False for _ in lhs_signs] if op in _VEC_COMPARE_OPS else [ls or rs for ls, rs in zip(lhs_signs, rhs_signs)]
+        return self._from_vector_signal(m, out_sig, signs=out_signs)
+
+    def _try_vector_signed_binary(
+        self,
+        other: Any,
+        *,
+        unsigned_op: str,
+        signed_op: str,
+        reverse: bool = False,
+    ) -> "Vec | None":
+        """尝试用向量指令做需区分有无符号的二元运算（div/mod）。
+        根据两侧 signed 标记选择 signed_op 或 unsigned_op，然后委托给 _try_vector_binary。
+        """
+        lhs_info = self._as_vector_signal()
+        if lhs_info is None:
+            return None
+        _m, _lhs_sig, lhs_signs = lhs_info
+        if isinstance(other, Vec):
+            rhs_info = other._as_vector_signal()
+            if rhs_info is None:
+                return None
+            _rhs_m, _rhs_sig, rhs_signs = rhs_info
+            rhs_signed = any(rhs_signs)
+        else:
+            rhs_signed_opt = _scalar_signed(other)
+            if rhs_signed_opt is None:
+                return None
+            rhs_signed = rhs_signed_opt
+        op = signed_op if any(lhs_signs) or rhs_signed else unsigned_op
+        return self._try_vector_binary(other, op, reverse=reverse)
+
+    def _try_vector_lt(self, other: Any, *, reverse: bool = False) -> "Vec | None":
+        """尝试用向量指令做比较运算（根据 signed 选 slt 或 ult）。"""
+        return self._try_vector_signed_binary(other, unsigned_op="ult", signed_op="slt", reverse=reverse)
+
+    def _try_vector_select(self, a: Any, b: Any) -> "Vec | None":
+        """尝试用向量指令做 mux。
+
+        ``sel`` 必须为 i1 向量。a/b 可以是同模同型 Vec，也可以是
+        与另一侧 Vec leaf width 匹配的标量；标量 arm 会广播到 Vec shape。
+        """
+        sel_info = self._as_vector_signal()
+        if sel_info is None:
+            return None
+        m, sel_sig, _sel_signs = sel_info
+        sel_shape, sel_elem_ty = self._vector_shape_elem_type(sel_sig.ty)
+        if sel_elem_ty != "i1":
+            return None
+
+        a_vec_info = a._as_vector_signal() if isinstance(a, Vec) else None
+        b_vec_info = b._as_vector_signal() if isinstance(b, Vec) else None
+        if a_vec_info is None and b_vec_info is None:
+            return None
+
+        vec_info = a_vec_info if a_vec_info is not None else b_vec_info
+        assert vec_info is not None
+        vec_m, vec_sig, vec_signs = vec_info
+        if vec_m is not m:
+            return None
+        value_shape, value_elem_ty = self._vector_shape_elem_type(vec_sig.ty)
+        if value_shape != sel_shape:
+            return None
+
+        def arm_signal(value: Any, info: tuple[Module, Signal, list[bool]] | None) -> tuple[Signal, list[bool]] | None:
+            if info is not None:
+                arm_m, arm_sig, arm_signs = info
+                if arm_m is not m or arm_sig.ty != vec_sig.ty or len(arm_signs) != len(vec_signs):
+                    return None
+                return arm_sig, arm_signs
+            scalar = _scalar_to_wire(m, value, width=_int_width(value_elem_ty))
+            if scalar.m is not m:
+                return None
+            return self._broadcast_scalar_signal(m, scalar.sig, shape=value_shape), [
+                bool(scalar.signed) for _ in vec_signs
+            ]
+
+        a_arm = arm_signal(a, a_vec_info)
+        b_arm = arm_signal(b, b_vec_info)
+        if a_arm is None or b_arm is None:
+            return None
+        a_sig, a_signs = a_arm
+        b_sig, b_signs = b_arm
+        out_sig = m.mux(sel_sig, a_sig, b_sig)
+        return self._from_vector_signal(m, out_sig, signs=[as_ or bs for as_, bs in zip(a_signs, b_signs)])
+
+    @staticmethod
+    def _broadcast_scalar_signal(m: Module, scalar: Signal, *, shape: list[int]) -> Signal:
+        if not shape:
+            return scalar
+        if len(shape) == 1:
+            return m.v_broadcast(scalar, size=shape[0])
+        row = Vec._broadcast_scalar_signal(m, scalar, shape=shape[1:])
+        return m.v_create([row for _ in range(shape[0])])
+
+    def _try_vector_cast(self, op: str, *, width: int) -> "Vec | None":
+        """尝试用向量指令做宽度变换（trunc/zext/sext）。zext → 无符号，sext → 有符号。"""
+        info = self._as_vector_signal()
+        if info is None:
+            return None
+        m, in_sig, signs = info
+        builder = getattr(m, op, None)
+        if not callable(builder):
+            return None
+        out_sig = builder(in_sig, width=int(width))
+        if op == "zext":
+            out_signs = [False for _ in signs]
+        elif op == "sext":
+            out_signs = [True for _ in signs]
+        else:
+            out_signs = signs
+        return self._from_vector_signal(m, out_sig, signs=out_signs)
+
+    def _try_vector_shift(self, op: str, amount: Any) -> "Vec | None":
+        """尝试用向量指令做移位。立即数用 shli/lshri/ashri，动态移位量用 shl/lshr/ashr。
+        lshr 结果强制无符号。
+        """
+        info = self._as_vector_signal()
+        if info is None:
+            return None
+        m, in_sig, signs = info
+        if isinstance(amount, LiteralValue):
+            amount = int(amount.value)
+        if isinstance(amount, int):
+            if int(amount) < 0:
+                raise ValueError(f"{op} amount must be >= 0")
+            immediate_ops = {"shl": "shli", "lshr": "lshri", "ashr": "ashri"}
+            builder = getattr(m, immediate_ops[op], None)
+            if not callable(builder):
+                return None
+            out_sig = builder(in_sig, amount=int(amount))
+        else:
+            amount_wire = _shift_amount_wire(m, amount)
+            if amount_wire is None:
+                return None
+            builder = getattr(m, op, None)
+            if not callable(builder):
+                return None
+            out_sig = builder(in_sig, amount_wire.sig)
+        out_signs = [False for _ in signs] if op == "lshr" else signs
+        return self._from_vector_signal(m, out_sig, signs=out_signs)
+
+    @staticmethod
+    def _tree_reduce_wires_1d(ws: list[Wire], *, is_or: bool) -> Wire:
+        """1-D 树状归约：逐对 | (OR) 或 & (AND) 直到剩一个 Wire。"""
+        if not ws:
+            raise ValueError("reduce requires at least one element")
+        cur = list(ws)
+        while len(cur) > 1:
+            nxt: list[Wire] = []
+            i = 0
+            while i < len(cur):
+                if i + 1 < len(cur):
+                    nxt.append((cur[i] | cur[i + 1]) if is_or else (cur[i] & cur[i + 1]))
+                    i += 2
+                else:
+                    nxt.append(cur[i])
+                    i += 1
+            cur = nxt
+        return cur[0]
+
+    @staticmethod
+    def _sum_output_width(ws: list[Wire], reduce_len: int, width: int | None) -> int:
+        """从 Wire 列表和归约长度计算 sum 输出宽度。"""
+        if not ws:
+            raise ValueError("reduce_sum requires at least one element")
+        return Vec._sum_output_width_from_input_width(max(int(w.width) for w in ws), reduce_len, width)
+
+    @staticmethod
+    def _sum_output_width_from_input_width(input_width: int, reduce_len: int, width: int | None) -> int:
+        """从输入位宽和归约长度计算 sum 输出位宽：``width=None`` 时自动加进位位宽。"""
+        max_width = int(input_width)
+        if width is None:
+            carry_width = max(0, int(reduce_len) - 1).bit_length()
+            return max_width + carry_width
+        out_width = int(width)
+        if out_width < max_width:
+            raise ValueError(f"reduce_sum width {out_width} is smaller than input width {max_width}")
+        return out_width
+
+    @staticmethod
+    def _extend_sum_lane(w: Wire, *, width: int, signed: bool) -> Wire:
+        """将单个 sum lane 扩展到输出宽度（有符号用 sext，无符号用 zext）。"""
+        if int(w.width) < int(width):
+            return w.sext(width=width) if signed else w.zext(width=width)
+        return Wire(w.m, w.sig, signed=bool(signed))
+
+    @classmethod
+    def _tree_sum_wires_1d(cls, ws: list[Wire], *, width: int | None = None, signed: bool = False) -> Wire:
+        """1-D 树状求和：先扩展各 lane 防溢出，再逐对相加直到剩一个 Wire。"""
+        out_width = cls._sum_output_width(ws, len(ws), width)
+        cur = [cls._extend_sum_lane(w, width=out_width, signed=bool(signed)) for w in ws]
+        while len(cur) > 1:
+            nxt: list[Wire] = []
+            i = 0
+            while i < len(cur):
+                if i + 1 < len(cur):
+                    nxt.append(cur[i] + cur[i + 1])
+                    i += 2
+                else:
+                    nxt.append(cur[i])
+                    i += 1
+            cur = nxt
+        return cur[0]
+
+    def _is_leaf_1d(self) -> bool:
+        """判断是否为 1-D 叶子 Vec（所有元素为 Wire/Reg，无嵌套 Vec）。"""
+        if self._vector_sig is not None:
+            shape, _ = self._vector_shape_elem_type(self._vector_sig.ty)
+            return len(shape) == 1
+        return all(not isinstance(e, Vec) for e in self.elems)
+
+    @staticmethod
+    def _reduced_vector_signs(in_shape: list[int], in_signs: list[bool], *, dim: int) -> list[bool]:
+        """向量沿某轴归约后的符号标记。dim==0 → 保守取 any(in_signs)；否则尽量保留原标记。"""
+        out_shape = [d for i, d in enumerate(in_shape) if i != dim]
+        if not out_shape:
+            return []
+        # `_vector_signs` tracks the outer visible lane signs. After reducing
+        # away that axis, use a conservative sign for each new outer lane.
+        if dim == 0:
+            return [any(in_signs) for _ in range(out_shape[0])]
+        if len(in_signs) == out_shape[0]:
+            return list(in_signs)
+        return [any(in_signs) for _ in range(out_shape[0])]
+
+    def _reduce_vector_backed(self, dim: int | None, *, is_or: bool) -> Union[Wire, "Vec"] | None:
+        """用原生向量归约指令（v_or_reduce / v_and_reduce）。dim=None 归约到 Wire。"""
+        if self._vector_sig is None:
+            return None
+        assert self._vector_signs is not None
+        shape, _elem_ty = self._vector_shape_elem_type(self._vector_sig.ty)
+        if dim is None:
+            if len(shape) != 1:
+                raise ValueError("reduce(dim=None) requires a 1-D Vec (leaf elements are Wire/Reg)")
+            red_sig = self.m.v_or_reduce(self._vector_sig) if is_or else self.m.v_and_reduce(self._vector_sig)
+            return Wire(self.m, red_sig, signed=any(self._vector_signs))
+
+        reduce_dim = int(dim)
+        if reduce_dim < 0 or reduce_dim >= len(shape):
+            raise ValueError(f"reduce dim out of range: {reduce_dim} for Vec rank {len(shape)}")
+        red_sig = (
+            self.m.v_or_reduce(self._vector_sig, dim=reduce_dim)
+            if is_or
+            else self.m.v_and_reduce(self._vector_sig, dim=reduce_dim)
+        )
+        out_signs = self._reduced_vector_signs(shape, list(self._vector_signs), dim=reduce_dim)
+        if not out_signs:
+            return Wire(self.m, red_sig, signed=any(self._vector_signs))
+        return self._from_vector_signal(self.m, red_sig, signs=out_signs)
+
+    def _reduce_1d(self, *, is_or: bool) -> Wire:
+        """1-D 归约到单个 Wire。优先用向量指令，否则树状归约。"""
+        vector_reduced = self._reduce_vector_backed(None, is_or=is_or)
+        if vector_reduced is not None:
+            assert isinstance(vector_reduced, Wire)
+            return vector_reduced
+        if not self._is_leaf_1d():
+            raise ValueError("reduce(dim=None) requires a 1-D Vec (leaf elements are Wire/Reg)")
+        ws = [self._wire_of(e) for e in self]
+        return self._tree_reduce_wires_1d(ws, is_or=is_or)
+
+    def _sum_1d(self, *, width: int | None = None, signed: bool = False) -> Wire:
+        """1-D 求和归约到单个 Wire。优先用向量指令，否则树状求和。"""
+        vector_reduced = self._sum_vector_backed(None, width=width, signed=bool(signed))
+        if vector_reduced is not None:
+            assert isinstance(vector_reduced, Wire)
+            return vector_reduced
+        if not self._is_leaf_1d():
+            raise ValueError("reduce_sum(dim=None) requires a 1-D Vec (leaf elements are Wire/Reg)")
+        ws = [self._wire_of(e) for e in self]
+        return self._tree_sum_wires_1d(ws, width=width, signed=bool(signed))
+
+    def _sum_vector_backed(
+        self,
+        dim: int | None,
+        *,
+        width: int | None = None,
+        signed: bool = False,
+    ) -> Union[Wire, "Vec"] | None:
+        """用原生向量求和指令（v_add_reduce）。必要时先扩展位宽防溢出。"""
+        info = self._as_vector_signal()
+        if info is None:
+            return None
+        m, sig, signs = info
+        shape, elem_ty = self._vector_shape_elem_type(sig.ty)
+        reduce_dim = 0 if dim is None else int(dim)
+        if reduce_dim < 0 or reduce_dim >= len(shape):
+            raise ValueError(f"reduce_sum dim out of range: {reduce_dim} for Vec rank {len(shape)}")
+        if dim is None and len(shape) != 1:
+            raise ValueError("reduce_sum(dim=None) requires a 1-D Vec (leaf elements are Wire/Reg)")
+        elem_width = _int_width(elem_ty)
+        out_width = self._sum_output_width_from_input_width(elem_width, shape[reduce_dim], width)
+        if elem_width < out_width:
+            sig = m.sext(sig, width=out_width) if signed else m.zext(sig, width=out_width)
+        red_sig = m.v_add_reduce(sig, dim=None if dim is None else reduce_dim)
+        out_shape = [d for i, d in enumerate(shape) if i != reduce_dim]
+        if not out_shape:
+            return Wire(m, red_sig, signed=bool(signed))
+        out_signs = self._reduced_vector_signs(shape, [bool(signed) for _ in signs], dim=reduce_dim)
+        return self._from_vector_signal(m, red_sig, signs=out_signs)
+
+    def _as_children_vecs(self) -> list["Vec"]:
+        """将嵌套 Vec 的子 Vec 展开为列表，同时校验矩形维度（所有子 Vec 等长）。"""
+        if self._is_leaf_1d():
+            raise ValueError("reduce dim out of range for Vec shape")
+        out: list[Vec] = []
+        for e in self.elems:
+            if not isinstance(e, Vec):
+                raise ValueError("nested reduce requires a regular Vec (all elements at this level must be Vec)")
+            out.append(e)
+        if not out:
+            raise ValueError("reduce requires at least one element")
+        n = len(out[0])
+        for c in out[1:]:
+            if len(c) != n:
+                raise ValueError("nested reduce requires rectangular Vec dimensions")
+        return out
+
+    def _reduce_dim(self, dim: int, *, is_or: bool) -> Union[Wire, "Vec"]:
+        """沿指定轴做 AND/OR 归约。优先用向量指令，否则递归降维。
+        dim==0 且为 1-D 叶子时返回单元素 Vec（保持 rank 语义一致）。
+        """
+        if dim < 0:
+            raise ValueError("reduce dim must be >= 0")
+
+        vector_reduced = self._reduce_vector_backed(dim, is_or=is_or)
+        if vector_reduced is not None:
+            return vector_reduced
+
+        if dim == 0:
+            if self._is_leaf_1d():
+                # dim-specified reductions return Vec; reducing a leaf row gives a
+                # singleton Vec containing the reduced wire.
+                return Vec([self._reduce_1d(is_or=is_or)])
+
+            children = self._as_children_vecs()
+            infos = [child._as_vector_signal() for child in children]
+            if all(info is not None for info in infos):
+                row_infos = [info for info in infos if info is not None]
+                m, first_sig, first_signs = row_infos[0]
+                if all(
+                    row_m is m and row_sig.ty == first_sig.ty and len(row_signs) == len(first_signs)
+                    for row_m, row_sig, row_signs in row_infos
+                ):
+                    rank2_sig = m.v_create([row_sig for _row_m, row_sig, _row_signs in row_infos])
+                    red_sig = m.v_or_reduce(rank2_sig, dim=0) if is_or else m.v_and_reduce(rank2_sig, dim=0)
+                    out_signs = [
+                        any(row_signs[i] for _row_m, _row_sig, row_signs in row_infos)
+                        for i in range(len(first_signs))
+                    ]
+                    return self._from_vector_signal(m, red_sig, signs=out_signs)
+
+            width = len(children[0])
+            out: list[Union[Wire, Reg, Vec]] = []
+            for j in range(width):
+                col = Vec([child[j] for child in children])
+                # Reduce this column to a single wire so dim=0 lowers rank by one.
+                out.append(col._reduce_1d(is_or=is_or))
+            return Vec(out)
+
+        children = self._as_children_vecs()
+        if dim == 1:
+            infos = [child._as_vector_signal() for child in children]
+            if all(info is not None for info in infos):
+                row_infos = [info for info in infos if info is not None]
+                m, first_sig, first_signs = row_infos[0]
+                if all(
+                    row_m is m and row_sig.ty == first_sig.ty and len(row_signs) == len(first_signs)
+                    for row_m, row_sig, row_signs in row_infos
+                ):
+                    rank2_sig = m.v_create([row_sig for _row_m, row_sig, _row_signs in row_infos])
+                    red_sig = m.v_or_reduce(rank2_sig, dim=1) if is_or else m.v_and_reduce(rank2_sig, dim=1)
+                    return self._from_vector_signal(
+                        m,
+                        red_sig,
+                        signs=[any(row_signs) for _row_m, _row_sig, row_signs in row_infos],
+                    )
+        if dim == 1 and all(child._is_leaf_1d() for child in children):
+            return Vec([child._reduce_1d(is_or=is_or) for child in children])
+        return Vec([child._reduce_dim(dim - 1, is_or=is_or) for child in children])
+
+    def _sum_dim(self, dim: int, *, width: int | None = None, signed: bool = False) -> Union[Wire, "Vec"]:
+        """沿指定轴做求和归约。优先用向量指令，否则递归降维。
+        dim==0 且为 1-D 叶子时返回单元素 Vec。
+        """
+        if dim < 0:
+            raise ValueError("reduce_sum dim must be >= 0")
+
+        vector_reduced = self._sum_vector_backed(dim, width=width, signed=bool(signed))
+        if vector_reduced is not None:
+            return vector_reduced
+
+        if dim == 0:
+            if self._is_leaf_1d():
+                return Vec([self._sum_1d(width=width, signed=bool(signed))])
+
+            children = self._as_children_vecs()
+            # Try vector-backed path: promote children to rank-2 signal → v_add_reduce
+            infos = [child._as_vector_signal() for child in children]
+            if all(info is not None for info in infos):
+                row_infos = [info for info in infos if info is not None]
+                m, first_sig, first_signs = row_infos[0]
+                if all(
+                    row_m is m and row_sig.ty == first_sig.ty and len(row_signs) == len(first_signs)
+                    for row_m, row_sig, row_signs in row_infos
+                ):
+                    rank2_sig = m.v_create([row_sig for _row_m, row_sig, _row_signs in row_infos])
+                    outer_signs = [
+                        any(row_signs[i] for _row_m, _row_sig, row_signs in row_infos)
+                        for i in range(len(first_signs))
+                    ]
+                    tmp = Vec._from_vector_signal(m, rank2_sig, signs=outer_signs)
+                    reduced = tmp._sum_vector_backed(0, width=width, signed=bool(signed))
+                    if reduced is not None:
+                        return reduced
+
+            col_count = len(children[0])
+            return Vec([
+                Vec([child[j] for child in children])._sum_1d(width=width, signed=bool(signed))
+                for j in range(col_count)
+            ])
+
+        children = self._as_children_vecs()
+        if dim == 1 and all(child._is_leaf_1d() for child in children):
+            return Vec([child._sum_1d(width=width, signed=bool(signed)) for child in children])
+        return Vec([child._sum_dim(dim - 1, width=width, signed=bool(signed)) for child in children])
+
+    def or_reduce(self, dim: int | None = None) -> Union[Wire, "Vec"]:
+        """Bitwise OR reduction.
+
+        - dim=None: require 1-D Vec, return a single Wire (tree reduction).
+        - dim=int: reduce along that axis, return Vec.
+        """
+        if dim is None:
+            return self._reduce_1d(is_or=True)
+        return self._reduce_dim(int(dim), is_or=True)
+
+    def and_reduce(self, dim: int | None = None) -> Union[Wire, "Vec"]:
+        """Bitwise AND reduction.
+
+        - dim=None: require 1-D Vec, return a single Wire (tree reduction).
+        - dim=int: reduce along that axis, return Vec.
+        """
+        if dim is None:
+            return self._reduce_1d(is_or=False)
+        return self._reduce_dim(int(dim), is_or=False)
+
+    def reduce_sum(
+        self,
+        *,
+        width: int | None = None,
+        dim: int | None = None,
+        signed: bool = False,
+    ) -> Union[Wire, "Vec"]:
+        """Sum reduction.
+
+        - Unsigned mode (default) zero-extends each lane before summing.
+        - Signed mode sign-extends each lane before summing and returns signed wires.
+        - ``width=None`` chooses ``max_input_width + ceil_log2(reduce_len)``.
+        - ``dim=None`` requires a 1-D Vec and returns one Wire.
+        - ``dim=int`` reduces along that axis and returns the lowered-rank Vec.
+        """
+        if dim is None:
+            return self._sum_1d(width=width, signed=bool(signed))
+        return self._sum_dim(int(dim), width=width, signed=bool(signed))
+
+    # -- arithmetic -------------------------------------------------------------
+
+    def __add__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "add")
+        return v if v is not None else self._map2(other, lambda a, b: a + b)
+
+    def __radd__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "add", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b + a)
+
+    def __sub__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "sub")
+        return v if v is not None else self._map2(other, lambda a, b: a - b)
+
+    def __rsub__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "sub", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b - a)
+
+    def __mul__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "mul")
+        return v if v is not None else self._map2(other, lambda a, b: a * b)
+
+    def __rmul__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "mul", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b * a)
+    def __truediv__(self, other: Any) -> "Vec":
+        raise TypeError("Vec `/` division is not supported; use `//` for integer division")
+
+    def __rtruediv__(self, other: Any) -> "Vec":
+        raise TypeError("Vec `/` division is not supported; use `//` for integer division")
+
+    def __floordiv__(self, other: Any) -> "Vec":
+        v = self._try_vector_signed_binary(other, unsigned_op="udiv", signed_op="sdiv")
+        return v if v is not None else self._map2(other, lambda a, b: a // b)
+
+    def __rfloordiv__(self, other: Any) -> "Vec":
+        v = self._try_vector_signed_binary(other, unsigned_op="udiv", signed_op="sdiv", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b // a)
+
+    def __mod__(self, other: Any) -> "Vec":
+        v = self._try_vector_signed_binary(other, unsigned_op="urem", signed_op="srem")
+        return v if v is not None else self._map2(other, lambda a, b: a % b)
+
+    def __rmod__(self, other: Any) -> "Vec":
+        v = self._try_vector_signed_binary(other, unsigned_op="urem", signed_op="srem", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b % a)
+
+    # -- bitwise ----------------------------------------------------------------
+
+    def __and__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "and")
+        return v if v is not None else self._map2(other, lambda a, b: a & b)
+
+    def __rand__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "and", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b & a)
+
+    def __or__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "or")
+        return v if v is not None else self._map2(other, lambda a, b: a | b)
+
+    def __ror__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "or", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b | a)
+
+    def __xor__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "xor")
+        return v if v is not None else self._map2(other, lambda a, b: a ^ b)
+
+    def __rxor__(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "xor", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: b ^ a)
+
+    def __invert__(self) -> "Vec":
+        v = self._try_vector_unary("not")
+        return v if v is not None else self._map1(lambda a: ~a)
+
+    # -- shifts -----------------------------------------------------------------
+
+    def __lshift__(self, other: int) -> "Vec":
+        if not isinstance(other, int):
+            raise TypeError("<< only supports constant integer shift amounts")
+        v = self._try_vector_shift("shl", other)
+        return v if v is not None else self._map1(lambda a: a << other)
+
+    def __rshift__(self, other: int) -> "Vec":
+        if not isinstance(other, int):
+            raise TypeError(">> only supports constant integer shift amounts")
+        v = self._try_vector_shift("ashr" if self._any_lane_signed() else "lshr", other)
+        return v if v is not None else self._map1(lambda a: a >> other)
+
+    def lshr(self, *, amount: Union[int, Wire, Reg, Signal, LiteralValue]) -> "Vec":
+        v = self._try_vector_shift("lshr", amount)
+        return v if v is not None else self._map1(lambda a: a.lshr(amount=amount))
+
+    def ashr(self, *, amount: Union[int, Wire, Reg, Signal, LiteralValue]) -> "Vec":
+        v = self._try_vector_shift("ashr", amount)
+        return v if v is not None else self._map1(lambda a: a.ashr(amount=amount))
+
+    def shl(self, *, amount: Union[int, Wire, Reg, Signal, LiteralValue]) -> "Vec":
+        v = self._try_vector_shift("shl", amount)
+        return v if v is not None else self._map1(lambda a: a.shl(amount=amount))
+
+    # -- comparison -------------------------------------------------------------
+
+    def __eq__(self, other: object) -> "Vec":  # type: ignore[override]
+        if not isinstance(other, (Vec, Wire, Reg, Signal, LiteralValue, int)):
+            return NotImplemented
+        v = self._try_vector_binary(other, "eq")
+        return v if v is not None else self._map2(other, lambda a, b: a == b)
+
+    def __ne__(self, other: object) -> "Vec":  # type: ignore[override]
+        if not isinstance(other, (Vec, Wire, Reg, Signal, LiteralValue, int)):
+            return NotImplemented
+        return ~(self == other)
+
+    def __lt__(self, other: Any) -> "Vec":
+        v = self._try_vector_lt(other)
+        return v if v is not None else self._map2(other, lambda a, b: a < b)
+
+    def __gt__(self, other: Any) -> "Vec":
+        v = self._try_vector_lt(other, reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: a > b)
+
+    def __le__(self, other: Any) -> "Vec":
+        return ~(self > other)
+
+    def __ge__(self, other: Any) -> "Vec":
+        return ~(self < other)
+
+    def eq(self, other: Any) -> "Vec":            return self == other
+    def ne(self, other: Any) -> "Vec":            return self != other
+    def ult(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "ult")
+        return v if v is not None else self._map2(other, lambda a, b: a.ult(b))
+
+    def slt(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "slt")
+        return v if v is not None else self._map2(other, lambda a, b: a.slt(b))
+
+    def ugt(self, other: Any) -> "Vec":
+        v = self._try_vector_binary(other, "ult", reverse=True)
+        return v if v is not None else self._map2(other, lambda a, b: a.ugt(b))
+
+    def ule(self, other: Any) -> "Vec":
+        return ~self.ugt(other)
+
+    def uge(self, other: Any) -> "Vec":
+        return ~self.ult(other)
+
+    # -- mux --------------------------------------------------------------------
+
+    def select(self, a: Any, b: Any) -> "Vec":
+        """Element-wise mux. self is Vec[i1], a/b are Vec[T] or scalar."""
+        v = self._try_vector_select(a, b)
+        if v is not None:
+            return v
+        if isinstance(a, Vec) and isinstance(b, Vec):
+            if len(a) != len(self) or len(b) != len(self):
+                raise ValueError("Vec size mismatch in select")
+            return Vec([
+                self._wire_of(s).select(va, vb)
+                for s, va, vb in zip(self, a, b)
+            ])
+        return Vec([self._wire_of(e).select(a, b) for e in self])
+
+    def masked_or(self, vals: Any, *, zero: Any = 0) -> Wire:
+        """Select ``vals`` where this mask is true, then OR-reduce the lanes."""
+        values = vals if isinstance(vals, Vec) else Vec(list(vals))
+        return self.select(values, zero).or_reduce()
+
+    def onehot_mux(self, vals: Any, *, zero: Any = 0) -> Wire:
+        """One-hot mux implemented as masked OR over a Vec of candidate values."""
+        return self.masked_or(vals, zero=zero)
+
+    # -- width transforms -------------------------------------------------------
+
+    def trunc(self, *, width: int) -> "Vec":
+        v = self._try_vector_cast("trunc", width=width)
+        return v if v is not None else self._map1(lambda a: a.trunc(width=width))
+
+    def zext(self, *, width: int) -> "Vec":
+        v = self._try_vector_cast("zext", width=width)
+        return v if v is not None else self._map1(lambda a: a.zext(width=width))
+
+    def sext(self, *, width: int) -> "Vec":
+        v = self._try_vector_cast("sext", width=width)
+        return v if v is not None else self._map1(lambda a: a.sext(width=width))
+
+    def slice(self, *, lsb: int, width: int) -> "Vec":
+        return self._map1(lambda a: a.slice(lsb=lsb, width=width))
+
+    # -- existing methods -------------------------------------------------------
+
+    def out(self) -> "Vec":
+        """Return a Vec of wires by reading each leaf element.
+
+        - Reg leaf: use `.out()`
+        - Wire leaf: keep as-is
+        """
+        return self._map1(lambda a: a.out() if isinstance(a, Reg) else a)
+
     def wires(self) -> tuple[Wire, ...]:
         out: list[Wire] = []
-        for e in self.elems:
+        for e in self:
             out.append(e if isinstance(e, Wire) else e.q)
         return tuple(out)
 
@@ -2015,7 +3172,7 @@ class Vec:
         for w in reversed(ws):
             parts_rev.append(packed.slice(lsb=lsb, width=w.width))
             lsb += w.width
-        return Vec(tuple(reversed(parts_rev)))
+        return Vec(list(reversed(parts_rev)))
 
     def regs_domain(
         self,
@@ -2031,7 +3188,7 @@ class Vec:
         regs: list[Reg] = []
         for w in ws:
             regs.append(m.reg_domain(domain, en, w, init))
-        return Vec(tuple(regs))
+        return Vec(regs)
 
 
 @dataclass(frozen=True)
@@ -2218,7 +3375,7 @@ def cat(*elems: Union[Wire, Reg, int, LiteralValue]) -> Wire:
                 ws.append(Wire(owner, Module.const(owner, int(e), width=w), signed=(int(e) < 0)))
             continue
         raise TypeError(f"cat() element must be Wire/Reg/int/literal, got {type(e).__name__}")
-    return Vec(tuple(ws)).pack()
+    return Vec(ws).pack()
 
 
 

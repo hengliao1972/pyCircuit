@@ -1,5 +1,6 @@
 #include "pyc/Transforms/Passes.h"
 
+#include "pyc/Dialect/PYC/PYCDialect.h"
 #include "pyc/Dialect/PYC/PYCTypes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -12,7 +13,11 @@ namespace pyc {
 namespace {
 
 static bool isAllowedHardwareType(Type t) {
-  return isa<IntegerType, pyc::ClockType, pyc::ResetType>(t);
+  if (isa<IntegerType, pyc::ClockType, pyc::ResetType>(t))
+    return true;
+  if (auto vt = dyn_cast<VectorType>(t))
+    return isAllowedHardwareType(vt.getElementType());
+  return false;
 }
 
 struct CheckFlatTypesPass : public PassWrapper<CheckFlatTypesPass, OperationPass<func::FuncOp>> {
@@ -20,7 +25,7 @@ struct CheckFlatTypesPass : public PassWrapper<CheckFlatTypesPass, OperationPass
 
   StringRef getArgument() const override { return "pyc-check-flat-types"; }
   StringRef getDescription() const override {
-    return "Verify the PYC IR is fully lowered to flat integer wires (no aggregate/unsupported types remain)";
+    return "Verify the PYC IR uses emission-supported integer or vector-of-integer hardware types";
   }
 
   void runOnOperation() override {

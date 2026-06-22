@@ -656,4 +656,14 @@ constexpr bool slt(Wire<Width> a, Wire<Width> b) {
   return (a ^ sign) < (b ^ sign);
 }
 
+template <unsigned Width>
+constexpr Wire<1> eq(Wire<Width> a, Wire<Width> b) {
+  return Wire<1>((a == b) ? 1u : 0u);
+}
+
+template <unsigned Width>
+constexpr Wire<1> ult(Wire<Width> a, Wire<Width> b) {
+  return Wire<1>((a < b) ? 1u : 0u);
+}
+
 } // namespace pyc::cpp

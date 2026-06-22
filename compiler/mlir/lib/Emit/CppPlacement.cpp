@@ -42,6 +42,13 @@ static std::string cppTypeForWire(Type ty) {
     return "pyc::cpp::Wire<1>";
   if (auto intTy = dyn_cast<IntegerType>(ty))
     return "pyc::cpp::Wire<" + std::to_string(intTy.getWidth()) + ">";
+  if (auto vt = dyn_cast<VectorType>(ty)) {
+    std::string inner = cppTypeForWire(vt.getElementType());
+    auto shape = vt.getShape();
+    for (int i = static_cast<int>(shape.size()) - 1; i >= 0; --i)
+      inner = "pyc::cpp::Vec<" + inner + ", " + std::to_string(shape[i]) + ">";
+    return inner;
+  }
   return "pyc::cpp::Wire<1>";
 }
 

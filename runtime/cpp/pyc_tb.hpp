@@ -13,6 +13,7 @@
 #include "pyc_bits.hpp"
 #include "pyc_trace_bin.hpp"
 #include "pyc_vcd.hpp"
+#include "pyc_vec.hpp"
 
 namespace pyc::cpp {
 
@@ -124,6 +125,16 @@ public:
     if (!vcd_)
       return false;
     return vcd_->add(sig, name);
+  }
+
+  // Vector signals fan out to one VCD wire per leaf lane under indexed names
+  // (e.g. "a[0][1]"), matching the per-lane probe registration convention.
+  template <typename T, std::size_t N>
+  bool vcdTrace(Vec<T, N> &sig, const std::string &name) {
+    bool ok = true;
+    for (std::size_t i = 0; i < N; ++i)
+      ok = vcdTrace(sig[i], name + "[" + std::to_string(i) + "]") && ok;
+    return ok;
   }
 
   bool enableLog(const std::string &path) {

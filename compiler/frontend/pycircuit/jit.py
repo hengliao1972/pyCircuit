@@ -760,7 +760,7 @@ class _Compiler:
         if isinstance(node, ast.List):
             elts = [self.eval_expr(e) for e in node.elts]
             if elts and all(isinstance(e, (Wire, Reg)) for e in elts):
-                return Vec(tuple(elts))
+                return Vec(elts)
             return elts
         if isinstance(node, ast.ListComp):
             if len(node.generators) != 1:
@@ -816,12 +816,12 @@ class _Compiler:
             else:
                 self.env.pop(name, None)
             if out and all(isinstance(e, (Wire, Reg)) for e in out):
-                return Vec(tuple(out))
+                return Vec(out)
             return out
         if isinstance(node, ast.Tuple):
             elts = [self.eval_expr(e) for e in node.elts]
             if elts and all(isinstance(e, (Wire, Reg)) for e in elts):
-                return Vec(tuple(elts))
+                return Vec(elts)
             return tuple(elts)
         if isinstance(node, ast.Dict):
             out: dict[Any, Any] = {}
@@ -848,6 +848,18 @@ class _Compiler:
             base = self.eval_expr(node.value)
             sl = node.slice
             if isinstance(base, Vec):
+                if isinstance(sl, ast.Tuple):
+                    idx_parts: list[int | slice] = []
+                    for part in sl.elts:
+                        if isinstance(part, ast.Slice):
+                            if part.step is not None:
+                                raise JitError("Vec slicing does not support step (prototype)")
+                            lo = None if part.lower is None else self.eval_const(part.lower)
+                            hi = None if part.upper is None else self.eval_const(part.upper)
+                            idx_parts.append(slice(lo, hi, None))
+                        else:
+                            idx_parts.append(int(self.eval_const(part)))
+                    return base[tuple(idx_parts)]
                 if isinstance(sl, ast.Slice):
                     if sl.step is not None:
                         raise JitError("Vec slicing does not support step (prototype)")
@@ -929,6 +941,8 @@ class _Compiler:
                 return int(v)
 
             if isinstance(node.op, ast.Add):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs + rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return lhs + rhs
                 if isinstance(rhs, (Wire, Reg)):
@@ -937,22 +951,28 @@ class _Compiler:
                     return lhs + rhs
                 if isinstance(lhs, tuple) and isinstance(rhs, tuple):
                     return lhs + rhs
-                if isinstance(lhs, Vec) and isinstance(rhs, Vec):
-                    return Vec((*lhs.elems, *rhs.elems))
                 return _as_py_int(lhs) + _as_py_int(rhs)
             if isinstance(node.op, ast.Sub):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs - rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return _expect_wire(lhs, ctx="-") - rhs
                 if isinstance(rhs, (Wire, Reg)):
                     return _as_py_int(lhs) - _expect_wire(rhs, ctx="-")
                 return _as_py_int(lhs) - _as_py_int(rhs)
             if isinstance(node.op, ast.Mult):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs * rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return _expect_wire(lhs, ctx="*") * rhs
                 if isinstance(rhs, (Wire, Reg)):
                     return _expect_wire(rhs, ctx="*") * lhs
                 return _as_py_int(lhs) * _as_py_int(rhs)
-            if isinstance(node.op, ast.FloorDiv) or isinstance(node.op, ast.Div):
+            if isinstance(node.op, ast.Div):
+                raise JitError("hardware `/` division is not supported; use `//` for integer division")
+            if isinstance(node.op, ast.FloorDiv):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs // rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return _expect_wire(lhs, ctx="/") // rhs
                 if isinstance(rhs, (Wire, Reg)):
@@ -961,6 +981,8 @@ class _Compiler:
                     return lhs_w // w
                 return _as_py_int(lhs) // _as_py_int(rhs)
             if isinstance(node.op, ast.Mod):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs % rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return _expect_wire(lhs, ctx="%") % rhs
                 if isinstance(rhs, (Wire, Reg)):
@@ -969,24 +991,35 @@ class _Compiler:
                     return lhs_w % w
                 return _as_py_int(lhs) % _as_py_int(rhs)
             if isinstance(node.op, ast.BitAnd):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs & rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return lhs & rhs
                 if isinstance(rhs, (Wire, Reg)):
                     return rhs & lhs
                 return _as_py_int(lhs) & _as_py_int(rhs)
             if isinstance(node.op, ast.BitOr):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs | rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return lhs | rhs
                 if isinstance(rhs, (Wire, Reg)):
                     return rhs | lhs
                 return _as_py_int(lhs) | _as_py_int(rhs)
             if isinstance(node.op, ast.BitXor):
+                if isinstance(lhs, Vec) or isinstance(rhs, Vec):
+                    return lhs ^ rhs
                 if isinstance(lhs, (Wire, Reg)):
                     return lhs ^ rhs
                 if isinstance(rhs, (Wire, Reg)):
                     return rhs ^ lhs
                 return _as_py_int(lhs) ^ _as_py_int(rhs)
             if isinstance(node.op, ast.LShift):
+                if isinstance(lhs, Vec):
+                    amt = rhs.value if isinstance(rhs, LiteralValue) else rhs
+                    if not isinstance(amt, int):
+                        raise JitError("Vec << only supports constant shift amounts")
+                    return lhs << int(amt)
                 if isinstance(lhs, (Wire, Reg)):
                     w = _expect_wire(lhs, ctx="<<")
                     amt = rhs.value if isinstance(rhs, LiteralValue) else rhs
@@ -997,6 +1030,11 @@ class _Compiler:
                     raise JitError("<< requires a wire on the left side when using hardware values")
                 return _as_py_int(lhs) << _as_py_int(rhs)
             if isinstance(node.op, ast.RShift):
+                if isinstance(lhs, Vec):
+                    amt = rhs.value if isinstance(rhs, LiteralValue) else rhs
+                    if not isinstance(amt, int):
+                        raise JitError("Vec >> only supports constant shift amounts")
+                    return lhs >> int(amt)
                 if isinstance(lhs, (Wire, Reg)):
                     w = _expect_wire(lhs, ctx=">>")
                     amt = rhs.value if isinstance(rhs, LiteralValue) else rhs
@@ -1011,6 +1049,12 @@ class _Compiler:
             if isinstance(v, Connector):
                 v = v.read()
             if isinstance(node.op, ast.Invert):
+                if isinstance(v, Vec):
+                    return ~v
+                if isinstance(v, LiteralValue):
+                    return ~int(v.value)
+                if isinstance(v, (int, bool)):
+                    return ~int(v)
                 w = _expect_wire(v, ctx="~")
                 return ~w
             if isinstance(node.op, ast.Not):
@@ -1075,17 +1119,29 @@ class _Compiler:
                 if isinstance(op, ast.IsNot):
                     return lhs is not rhs
                 if isinstance(op, ast.Eq):
+                    if isinstance(lhs, Vec):
+                        return lhs == rhs
+                    if isinstance(rhs, Vec):
+                        return rhs == lhs
                     if not isinstance(lhs, (Wire, Reg)) and not isinstance(rhs, (Wire, Reg)):
                         return _py_cmp_value(lhs) == _py_cmp_value(rhs)
                     w = _expect_wire(lhs, ctx="==") if isinstance(lhs, (Wire, Reg)) else _expect_wire(rhs, ctx="==")
                     return w == (rhs if isinstance(lhs, (Wire, Reg)) else lhs)
                 if isinstance(op, ast.NotEq):
+                    if isinstance(lhs, Vec):
+                        return lhs != rhs
+                    if isinstance(rhs, Vec):
+                        return rhs != lhs
                     if not isinstance(lhs, (Wire, Reg)) and not isinstance(rhs, (Wire, Reg)):
                         return _py_cmp_value(lhs) != _py_cmp_value(rhs)
                     w = _expect_wire(lhs, ctx="!=") if isinstance(lhs, (Wire, Reg)) else _expect_wire(rhs, ctx="!=")
                     eq = w == (rhs if isinstance(lhs, (Wire, Reg)) else lhs)
                     return ~eq
                 if isinstance(op, ast.Lt):
+                    if isinstance(lhs, Vec):
+                        return lhs < rhs
+                    if isinstance(rhs, Vec):
+                        return rhs > lhs
                     if isinstance(lhs, (Wire, Reg)):
                         return _expect_wire(lhs, ctx="<") < rhs
                     if isinstance(rhs, (Wire, Reg)):
@@ -1095,6 +1151,10 @@ class _Compiler:
                     rhs_i = int(rhs.value) if isinstance(rhs, LiteralValue) else int(rhs)
                     return lhs_i < rhs_i
                 if isinstance(op, ast.LtE):
+                    if isinstance(lhs, Vec):
+                        return lhs <= rhs
+                    if isinstance(rhs, Vec):
+                        return rhs >= lhs
                     if isinstance(lhs, (Wire, Reg)):
                         return _expect_wire(lhs, ctx="<=") <= rhs
                     if isinstance(rhs, (Wire, Reg)):
@@ -1103,6 +1163,10 @@ class _Compiler:
                     rhs_i = int(rhs.value) if isinstance(rhs, LiteralValue) else int(rhs)
                     return lhs_i <= rhs_i
                 if isinstance(op, ast.Gt):
+                    if isinstance(lhs, Vec):
+                        return lhs > rhs
+                    if isinstance(rhs, Vec):
+                        return rhs < lhs
                     if isinstance(lhs, (Wire, Reg)):
                         return _expect_wire(lhs, ctx=">") > rhs
                     if isinstance(rhs, (Wire, Reg)):
@@ -1112,6 +1176,10 @@ class _Compiler:
                     rhs_i = int(rhs.value) if isinstance(rhs, LiteralValue) else int(rhs)
                     return lhs_i > rhs_i
                 if isinstance(op, ast.GtE):
+                    if isinstance(lhs, Vec):
+                        return lhs >= rhs
+                    if isinstance(rhs, Vec):
+                        return rhs <= lhs
                     if isinstance(lhs, (Wire, Reg)):
                         return _expect_wire(lhs, ctx=">=") >= rhs
                     if isinstance(rhs, (Wire, Reg)):
@@ -1132,8 +1200,12 @@ class _Compiler:
                 cmp_out = _eval_single_compare(op, lhs, rhs)
                 if chain_out is None:
                     chain_out = cmp_out
-                elif isinstance(chain_out, (Wire, Reg)) or isinstance(cmp_out, (Wire, Reg)):
-                    if isinstance(chain_out, (Wire, Reg)):
+                elif isinstance(chain_out, (Wire, Reg, Vec)) or isinstance(cmp_out, (Wire, Reg, Vec)):
+                    if isinstance(chain_out, Vec):
+                        chain_out = chain_out & cmp_out
+                    elif isinstance(cmp_out, Vec):
+                        chain_out = cmp_out & chain_out
+                    elif isinstance(chain_out, (Wire, Reg)):
                         chain_out = _expect_wire(chain_out, ctx="comparison chain") & cmp_out
                     else:
                         chain_out = _expect_wire(cmp_out, ctx="comparison chain") & chain_out

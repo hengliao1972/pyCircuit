@@ -1,4 +1,4 @@
-.PHONY: help configure tools smoke install package clean
+.PHONY: help configure tools smoke vec-smoke install package clean
 
 BUILD_DIR ?= .pycircuit_out/toolchain/build
 INSTALL_PREFIX ?= .pycircuit_out/toolchain/install
@@ -8,6 +8,7 @@ help:
 	@echo "  configure  Configure CMake (needs LLVM_DIR/MLIR_DIR or LLVM_CONFIG=llvm-config-19)"
 	@echo "  tools      Build pycc + pyc-opt + runtime"
 	@echo "  smoke      Run compiler + simulation smoke checks"
+	@echo "  vec-smoke  Run generated Vec operator pytest checks"
 	@echo "  install    Install toolchain into $(INSTALL_PREFIX)"
 	@echo "  package    Build a TGZ via CPack"
 	@echo "  clean      Remove $(BUILD_DIR), $(INSTALL_PREFIX), and dist/"
@@ -36,6 +37,9 @@ tools: configure
 smoke: tools
 	PYC_TOOLCHAIN_ROOT="$(INSTALL_PREFIX)" PYCC="$(INSTALL_PREFIX)/bin/pycc" bash flows/scripts/run_examples.sh
 	PYC_TOOLCHAIN_ROOT="$(INSTALL_PREFIX)" PYCC="$(INSTALL_PREFIX)/bin/pycc" bash flows/scripts/run_sims.sh
+
+vec-smoke:
+	PYC_TOOLCHAIN_ROOT="$(INSTALL_PREFIX)" PYCC="$(INSTALL_PREFIX)/bin/pycc" bash tests/vec/run_vec_ops.sh
 
 install: tools
 	cmake --install "$(BUILD_DIR)" --prefix "$(INSTALL_PREFIX)"

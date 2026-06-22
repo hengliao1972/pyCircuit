@@ -13,9 +13,24 @@ using namespace mlir;
 namespace pyc {
 namespace {
 
-static int64_t intWidth(Type ty) {
+static int64_t satMul(int64_t a, int64_t b) {
+  if (a <= 0 || b <= 0)
+    return 0;
+  __int128 v = static_cast<__int128>(a) * static_cast<__int128>(b);
+  if (v > std::numeric_limits<int64_t>::max())
+    return std::numeric_limits<int64_t>::max();
+  return static_cast<int64_t>(v);
+}
+
+static int64_t hardwareBitCount(Type ty) {
   if (auto i = dyn_cast<IntegerType>(ty))
     return static_cast<int64_t>(i.getWidth());
+  if (auto vt = dyn_cast<VectorType>(ty)) {
+    int64_t lanes = 1;
+    for (int64_t dim : vt.getShape())
+      lanes = satMul(lanes, dim);
+    return satMul(lanes, hardwareBitCount(vt.getElementType()));
+  }
   return 0;
 }
 
@@ -54,13 +69,13 @@ public:
     f.walk([&](Operation *op) {
       if (auto r = dyn_cast<pyc::RegOp>(op)) {
         regCount += 1;
-        regBits = satAddMul(regBits, intWidth(r.getQ().getType()), 1);
+        regBits = satAddMul(regBits, hardwareBitCount(r.getQ().getType()), 1);
         return;
       }
 
       auto addMem = [&](Type dataTy) {
         memCount += 1;
-        memBits = satAddMul(memBits, intWidth(dataTy), depthAttr(op));
+        memBits = satAddMul(memBits, hardwareBitCount(dataTy), depthAttr(op));
       };
 
       if (auto m = dyn_cast<pyc::ByteMemOp>(op)) {

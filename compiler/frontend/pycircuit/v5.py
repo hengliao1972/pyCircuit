@@ -16,7 +16,7 @@ import threading
 from typing import Any, Callable, Iterable, Iterator, Mapping, TypeVar, Union
 
 from .dsl import Signal
-from .hw import Circuit, ClockDomain, Reg, Wire
+from .hw import Circuit, ClockDomain, Reg, Vec, Wire
 from .literals import LiteralValue, infer_literal_width
 from .tb import Tb as _Tb
 
@@ -242,27 +242,51 @@ class CycleAwareDomain:
             elif port_sig.ty == "!pyc.reset":
                 input_sigs.append(self._cd.rst)
             elif port_name in input_map:
-                w = _to_wire(input_map[port_name])
-                if w.sig.ty != port_sig.ty and w.sig.ty.startswith("i") and port_sig.ty.startswith("i"):
-                    actual_w = int(w.sig.ty[1:])
+                actual = input_map[port_name]
+                if isinstance(actual, Vec):
+                    info = actual._as_vector_signal()
+                    if info is None:
+                        raise TypeError(f"input {port_name!r} Vec cannot be converted to a vector signal")
+                    _actual_m, actual_sig, _actual_signs = info
+                else:
+                    actual_sig = _to_wire(actual).sig
+
+                if actual_sig.ty != port_sig.ty and actual_sig.ty.startswith("i") and port_sig.ty.startswith("i"):
+                    actual_w = int(actual_sig.ty[1:])
                     expect_w = int(port_sig.ty[1:])
+                    w = Wire(self._m, actual_sig)
                     if actual_w < expect_w:
                         w = w._zext(width=expect_w)
                     else:
                         w = w._trunc(width=expect_w)
-                input_sigs.append(w.sig)
+                    actual_sig = w.sig
+                if actual_sig.ty != port_sig.ty:
+                    raise TypeError(f"input {port_name!r} type mismatch: actual {actual_sig.ty} != expected {port_sig.ty}")
+                input_sigs.append(actual_sig)
             else:
-                if port_sig.ty.startswith("i"):
+                if port_sig.ty.startswith("vector<"):
+                    shape, elem_ty = Vec._vector_shape_elem_type(port_sig.ty)
+                    width = int(elem_ty[1:])
+                elif port_sig.ty.startswith("i"):
+                    shape = None
                     width = int(port_sig.ty[1:])
                 else:
+                    shape = None
                     width = 1
                 if port_name.startswith(canonical_prefix + "_"):
                     suffix = port_name[len(canonical_prefix) + 1:]
                     parent_port_name = f"{prefix}_{suffix}"
                 else:
                     parent_port_name = f"{prefix}_{port_name}"
-                parent_wire = self._m.input(parent_port_name, width=width)
-                input_sigs.append(parent_wire.sig)
+                parent_value = self._m.input(parent_port_name, width=width, shape=shape)
+                if isinstance(parent_value, Vec):
+                    info = parent_value._as_vector_signal()
+                    if info is None:
+                        raise TypeError(f"input {port_name!r} parent Vec cannot be converted to a vector signal")
+                    _parent_m, parent_sig, _parent_signs = info
+                    input_sigs.append(parent_sig)
+                else:
+                    input_sigs.append(parent_value.sig)
 
         result_types = [sig.ty for _, sig in sub_m._results]
         out_sigs = self._m.instance_op(
@@ -272,8 +296,14 @@ class CycleAwareDomain:
             name=prefix,
         )
 
-        out_wires = [Wire(self._m, s) for s in out_sigs]
-        return _reconstruct_output_dict(out_entries, out_wires, self)
+        out_values: list[Any] = []
+        for sig in out_sigs:
+            if sig.ty.startswith("vector<"):
+                shape, _elem_ty = Vec._vector_shape_elem_type(sig.ty)
+                out_values.append(Vec._from_vector_signal(self._m, sig, signs=[False for _ in range(shape[0])]))
+            else:
+                out_values.append(Wire(self._m, sig))
+        return _reconstruct_output_dict(out_entries, out_values, self)
 
     def delay_to(self, w: Wire, *, from_cycle: int, to_cycle: int, width: int) -> Wire:
         """Insert (to_cycle - from_cycle) register stages for automatic cycle balancing."""
@@ -329,12 +359,23 @@ def _record_output_structure(
 
     entries: list[tuple[str, str, int, list[int], list[int]]] = []
     for key, val in outs_dict.items():
-        if isinstance(val, list):
+        if isinstance(val, Vec):
+            info = val._as_vector_signal()
+            if info is None:
+                raise TypeError(f"output {key!r} Vec cannot be converted to a vector signal")
+            _m, sig, _signs = info
+            idx = ref_to_idx.get(sig.ref, -1) if ref_to_idx else -1
+            entries.append((key, "vec", len(val), [0], [idx]))
+        elif isinstance(val, list):
             cycles: list[int] = []
             indices: list[int] = []
             for v in val:
                 if isinstance(v, (CycleAwareSignal, ForwardSignal, StateSignal)):
                     cycles.append(v.cycle)
+                    w = wire_of(v)
+                    indices.append(ref_to_idx.get(w.sig.ref, -1) if ref_to_idx else -1)
+                elif isinstance(v, (Wire, Reg)):
+                    cycles.append(0)
                     w = wire_of(v)
                     indices.append(ref_to_idx.get(w.sig.ref, -1) if ref_to_idx else -1)
                 else:
@@ -350,7 +391,7 @@ def _record_output_structure(
 
 def _reconstruct_output_dict(
     entries: list[tuple[str, str, int, list[int], list[int]]],
-    out_wires: list[Wire],
+    out_wires: list[Any],
     domain: CycleAwareDomain,
 ) -> dict[str, Any]:
     """Rebuild an output dict from ``pyc.instance`` result wires.
@@ -364,6 +405,10 @@ def _reconstruct_output_dict(
         if kind == "scalar":
             ri = indices[0] if indices and indices[0] >= 0 else seq_idx
             outs[key] = CycleAwareSignal(domain, out_wires[ri], cycles[0])
+            seq_idx += 1
+        elif kind == "vec":
+            ri = indices[0] if indices and indices[0] >= 0 else seq_idx
+            outs[key] = out_wires[ri]
             seq_idx += 1
         else:
             items: list[CycleAwareSignal] = []
