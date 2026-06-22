@@ -258,19 +258,35 @@ class Module:
         return self._emit_elementwise_binary("srem", a, b)
 
     def mux(self, sel: Signal, a: Signal, b: Signal) -> Signal:
-        self._require_same_ty(a, b, "mux")
+        # Allow one vector + one scalar arm (scalar implicitly broadcasts).
+        a_is_vec = a.ty.startswith("vector<")
+        b_is_vec = b.ty.startswith("vector<")
+        if a_is_vec and b_is_vec:
+            self._require_same_ty(a, b, "mux")
+        elif a_is_vec and not b_is_vec:
+            _av, _ae = _vector_shape_elem_type(a.ty)
+            if _ae != b.ty:
+                raise TypeError(f"mux scalar arm width must match vector element: {b.ty} vs {_ae}")
+        elif b_is_vec and not a_is_vec:
+            _bv, _be = _vector_shape_elem_type(b.ty)
+            if _be != a.ty:
+                raise TypeError(f"mux scalar arm width must match vector element: {a.ty} vs {_be}")
+        else:
+            self._require_same_ty(a, b, "mux")
         if sel.ty == "i1":
             pass
-        elif sel.ty.startswith("vector<") and a.ty.startswith("vector<"):
+        elif sel.ty.startswith("vector<") and (a_is_vec or b_is_vec):
             sel_shape, sel_elem_ty = _vector_shape_elem_type(sel.ty)
-            a_shape, _a_elem_ty = _vector_shape_elem_type(a.ty)
-            if sel_elem_ty != "i1" or sel_shape != a_shape:
-                raise TypeError(f"mux vector sel must be vector<...xi1> with a/b shape: {sel.ty} vs {a.ty}")
+            vec_ty = a.ty if a_is_vec else b.ty
+            vec_shape, _vec_elem_ty = _vector_shape_elem_type(vec_ty)
+            if sel_elem_ty != "i1" or sel_shape != vec_shape:
+                raise TypeError(f"mux vector sel must be vector<...xi1> with a/b shape: {sel.ty} vs {vec_ty}")
         else:
             raise TypeError("mux sel must be i1 or same-shape vector<...xi1>")
+        result_ty = a.ty if a_is_vec else b.ty
         tmp = self._tmp()
-        self._emit(f"{tmp} = pyc.mux {sel.ref}, {a.ref}, {b.ref} : {sel.ty}, {a.ty}")
-        return Signal(ref=tmp, ty=a.ty)
+        self._emit(f"{tmp} = pyc.mux {sel.ref}, {a.ref}, {b.ref} : {sel.ty}, {a.ty}, {b.ty} -> {result_ty}")
+        return Signal(ref=tmp, ty=result_ty)
 
     def and_(self, a: Signal, b: Signal) -> Signal:
         return self._emit_elementwise_binary("and", a, b)

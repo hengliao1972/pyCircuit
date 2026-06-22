@@ -730,17 +730,44 @@ LogicalResult MuxOp::verify() {
   auto aTy = getA().getType();
   auto bTy = getB().getType();
   auto rTy = getResult().getType();
-  if (aTy != bTy)
-    return emitOpError("requires a and b to have the same type");
-  if (rTy != aTy)
-    return emitOpError("result type must match a/b type");
+
+  // Determine the value type (the vector when mixing scalar+vector, or the
+  // common type when both arms are the same).
+  auto aVT = dyn_cast<VectorType>(aTy);
+  auto bVT = dyn_cast<VectorType>(bTy);
+  Type valueTy;
+  if (aTy == bTy) {
+    valueTy = aTy; // both same — scalar or vector, either is fine
+  } else if (aVT && !bVT) {
+    // a is vector, b is scalar — scalar implicitly broadcasts.
+    valueTy = aTy;
+    if (rTy != aTy)
+      return emitOpError("result type must match vector arm when mixing scalar+vector");
+    auto aElem = dyn_cast<IntegerType>(aVT.getElementType());
+    auto bInt = dyn_cast<IntegerType>(bTy);
+    if (!aElem || !bInt || aElem.getWidth() != bInt.getWidth())
+      return emitOpError("scalar arm width must match vector element width for mixed mux");
+  } else if (bVT && !aVT) {
+    // b is vector, a is scalar.
+    valueTy = bTy;
+    if (rTy != bTy)
+      return emitOpError("result type must match vector arm when mixing scalar+vector");
+    auto bElem = dyn_cast<IntegerType>(bVT.getElementType());
+    auto aInt = dyn_cast<IntegerType>(aTy);
+    if (!bElem || !aInt || bElem.getWidth() != aInt.getWidth())
+      return emitOpError("scalar arm width must match vector element width for mixed mux");
+  } else {
+    return emitOpError("requires a and b to have the same type, or one vector + one scalar");
+  }
+
+  // Select type check.
   if (auto selI1 = dyn_cast<IntegerType>(selTy)) {
     if (selI1.getWidth() != 1)
       return emitOpError("requires i1 select");
     return success();
   }
   auto selVT = dyn_cast<VectorType>(selTy);
-  auto valueVT = dyn_cast<VectorType>(aTy);
+  auto valueVT = dyn_cast<VectorType>(valueTy);
   if (!selVT || !valueVT)
     return emitOpError("requires i1 select or same-shape vector-of-i1 select for vector a/b");
   auto selElemTy = dyn_cast<IntegerType>(selVT.getElementType());

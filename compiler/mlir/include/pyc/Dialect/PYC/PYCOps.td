@@ -96,12 +96,12 @@ def PYC_SremOp : PYC_Op<"srem", [Pure]> {
   let hasFolder = 1;
 }
 
-def PYC_MuxOp : PYC_Op<"mux", [Pure, AllTypesMatch<["a", "b", "result"]>]> {
+def PYC_MuxOp : PYC_Op<"mux", [Pure]> {
   let summary = "2:1 mux (combinational)";
   let arguments = (ins AnyIntegerOrV:$sel, AnyIntegerOrV:$a, AnyIntegerOrV:$b);
   let results = (outs AnyIntegerOrV:$result);
   let hasVerifier = 1;
-  let assemblyFormat = "$sel `,` $a `,` $b attr-dict `:` type($sel) `,` type($result)";
+  let assemblyFormat = "$sel `,` $a `,` $b attr-dict `:` type($sel) `,` type($a) `,` type($b) `->` type($result)";
   let hasFolder = 1;
 }
 

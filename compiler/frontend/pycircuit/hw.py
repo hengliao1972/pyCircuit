@@ -2527,9 +2527,7 @@ class Vec:
             scalar = _scalar_to_wire(m, value, width=_int_width(value_elem_ty))
             if scalar.m is not m:
                 return None
-            return self._broadcast_scalar_signal(m, scalar.sig, shape=value_shape), [
-                bool(scalar.signed) for _ in vec_signs
-            ]
+            return scalar.sig, [bool(scalar.signed) for _ in vec_signs]
 
         a_arm = arm_signal(a, a_vec_info)
         b_arm = arm_signal(b, b_vec_info)

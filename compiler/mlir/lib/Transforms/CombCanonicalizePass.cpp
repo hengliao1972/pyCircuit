@@ -20,6 +20,15 @@ static std::optional<uint64_t> getConstUInt(Value v) {
     if (auto i = dyn_cast<IntegerAttr>(c.getValue()))
       return i.getValue().getZExtValue();
   }
+  // Vector constant: v_broadcast of a constant scalar.
+  if (auto vb = v.getDefiningOp<pyc::VBroadcastOp>()) {
+    if (auto c = vb.getScalar().getDefiningOp<pyc::ConstantOp>())
+      return c.getValueAttr().getValue().getZExtValue();
+    if (auto c = vb.getScalar().getDefiningOp<arith::ConstantOp>()) {
+      if (auto i = dyn_cast<IntegerAttr>(c.getValue()))
+        return i.getValue().getZExtValue();
+    }
+  }
   return std::nullopt;
 }
 
@@ -43,14 +52,37 @@ static bool andMatches(pyc::AndOp op, Value a, bool aNot, Value b, bool bNot) {
          (lBase == b && lNot == bNot && rBase == a && rNot == aNot);
 }
 
+// Create a constant value, broadcasting to a vector when needed.
 static Value constInt(PatternRewriter &rewriter, Location loc, Type ty, const llvm::APInt &v) {
-  auto intTy = dyn_cast<IntegerType>(ty);
-  if (!intTy)
-    return {};
-  llvm::APInt vv = v;
-  if (vv.getBitWidth() != intTy.getWidth())
-    vv = vv.zextOrTrunc(intTy.getWidth());
-  return rewriter.create<pyc::ConstantOp>(loc, intTy, IntegerAttr::get(intTy, vv));
+  // Scalar path.
+  if (auto intTy = dyn_cast<IntegerType>(ty)) {
+    llvm::APInt vv = v;
+    if (vv.getBitWidth() != intTy.getWidth())
+      vv = vv.zextOrTrunc(intTy.getWidth());
+    return rewriter.create<pyc::ConstantOp>(loc, intTy, IntegerAttr::get(intTy, vv));
+  }
+  // Vector path: constant + broadcast.
+  if (auto vt = dyn_cast<VectorType>(ty)) {
+    auto elemTy = dyn_cast<IntegerType>(vt.getElementType());
+    if (!elemTy)
+      return {};
+    llvm::APInt vv = v;
+    if (vv.getBitWidth() != elemTy.getWidth())
+      vv = vv.zextOrTrunc(elemTy.getWidth());
+    Value scalar = rewriter.create<pyc::ConstantOp>(loc, elemTy, IntegerAttr::get(elemTy, vv));
+    return rewriter.create<pyc::VBroadcastOp>(loc, vt, scalar, vt.getShape()[0]);
+  }
+  return {};
+}
+
+/// Return the element type for i1 checks: scalar i1 or vector<…xi1>.
+static bool isI1OrI1Vector(Type ty) {
+  if (auto intTy = dyn_cast<IntegerType>(ty))
+    return intTy.getWidth() == 1;
+  if (auto vt = dyn_cast<VectorType>(ty))
+    if (auto et = dyn_cast<IntegerType>(vt.getElementType()))
+      return et.getWidth() == 1;
+  return false;
 }
 
 struct MuxSameSelSimplify : public OpRewritePattern<pyc::MuxOp> {
@@ -89,8 +121,7 @@ struct MuxI1ToLogic : public OpRewritePattern<pyc::MuxOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(pyc::MuxOp op, PatternRewriter &rewriter) const override {
-    auto ty = dyn_cast<IntegerType>(op.getType());
-    if (!ty || ty.getWidth() != 1)
+    if (!isI1OrI1Vector(op.getType()))
       return failure();
 
     auto aConst = getConstUInt(op.getA());
@@ -187,10 +218,8 @@ struct OrBasicSimplify : public OpRewritePattern<pyc::OrOp> {
     auto [lb, ln] = stripNot(lhs);
     auto [rb, rn] = stripNot(rhs);
     if ((lb == rb) && (ln != rn)) {
-      auto intTy = dyn_cast<IntegerType>(op.getType());
-      if (!intTy)
-        return failure();
-      Value ones = constInt(rewriter, op.getLoc(), intTy, llvm::APInt::getAllOnes(intTy.getWidth()));
+      Value ones = constInt(rewriter, op.getLoc(), op.getType(), llvm::APInt::getAllOnes(
+          isa<IntegerType>(op.getType()) ? cast<IntegerType>(op.getType()).getWidth() : 1));
       if (!ones)
         return failure();
       rewriter.replaceOp(op, ones);

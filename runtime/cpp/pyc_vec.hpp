@@ -238,6 +238,39 @@ constexpr Vec<T, N> mux(const Vec<S, N> &sel, const Vec<T, N> &a, const Vec<T, N
   return out;
 }
 
+// Mixed scalar/vector arms: scalar implicitly broadcasts to every lane.
+template <unsigned W, typename T, std::size_t N>
+constexpr Vec<T, N> mux(Wire<1> sel, const Vec<T, N> &a, Wire<W> b) {
+  Vec<T, N> out{};
+  for (std::size_t i = 0; i < N; ++i)
+    out[i] = mux<W>(sel, a[i], b);
+  return out;
+}
+
+template <unsigned W, typename T, std::size_t N>
+constexpr Vec<T, N> mux(Wire<1> sel, Wire<W> a, const Vec<T, N> &b) {
+  Vec<T, N> out{};
+  for (std::size_t i = 0; i < N; ++i)
+    out[i] = mux<W>(sel, a, b[i]);
+  return out;
+}
+
+template <unsigned W, typename S, typename T, std::size_t N>
+constexpr Vec<T, N> mux(const Vec<S, N> &sel, const Vec<T, N> &a, Wire<W> b) {
+  Vec<T, N> out{};
+  for (std::size_t i = 0; i < N; ++i)
+    out[i] = mux<W>(sel[i], a[i], b);
+  return out;
+}
+
+template <unsigned W, typename S, typename T, std::size_t N>
+constexpr Vec<T, N> mux(const Vec<S, N> &sel, Wire<W> a, const Vec<T, N> &b) {
+  Vec<T, N> out{};
+  for (std::size_t i = 0; i < N; ++i)
+    out[i] = mux<W>(sel[i], a, b[i]);
+  return out;
+}
+
 template <typename T, std::size_t VecN, std::size_t PackedN>
 inline void appendPackedWireWords(std::array<std::uint64_t, PackedN> &dst, std::size_t &offset,
                                   const Vec<T, VecN> &v) {
