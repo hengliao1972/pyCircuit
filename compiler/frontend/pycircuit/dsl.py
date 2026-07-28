@@ -590,7 +590,16 @@ class Module:
             return
         self._emit(f"pyc.assert {cond.ref} {{msg = {json.dumps(s, ensure_ascii=False)}}}")
 
-    def reg(self, clk: Signal, rst: Signal, en: Signal, next_: Signal, init: Signal) -> Signal:
+    def reg(
+        self,
+        clk: Signal,
+        rst: Signal,
+        en: Signal,
+        next_: Signal,
+        init: Signal,
+        *,
+        stage: str | None = None,
+    ) -> Signal:
         if clk.ty != "!pyc.clock":
             raise TypeError("reg clk must be !pyc.clock")
         if rst.ty != "!pyc.reset":
@@ -599,7 +608,12 @@ class Module:
             raise TypeError("reg en must be i1")
         self._require_same_ty(next_, init, "reg")
         tmp = self._tmp()
-        self._emit(f"{tmp} = pyc.reg {clk.ref}, {rst.ref}, {en.ref}, {next_.ref}, {init.ref} : {next_.ty}")
+        # Optional pipeline-stage attribution key (discardable dialect attr,
+        # round-trips via attr-dict). Zero effect on hardware/semantics.
+        attr = ""
+        if stage:
+            attr = f" {{pyc.stage = {json.dumps(str(stage), ensure_ascii=False)}}}"
+        self._emit(f"{tmp} = pyc.reg {clk.ref}, {rst.ref}, {en.ref}, {next_.ref}, {init.ref}{attr} : {next_.ty}")
         return Signal(ref=tmp, ty=next_.ty)
 
     def fifo(

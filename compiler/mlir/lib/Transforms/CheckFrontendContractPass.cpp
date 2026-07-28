@@ -536,6 +536,120 @@ public:
           }
         }
       }
+
+      // Decision 0142 / TODO B1: validate the standardized commit/retire bundle
+      // interface when declared. Semantics are enforced here (gate-first): the
+      // frontend only records `pyc.commit_iface`; the MLIR verifier owns the
+      // required-field and validity-gating (Decision 0146) contract.
+      if (Attribute rawCommit = f->getAttr("pyc.commit_iface")) {
+        auto commitDict = dyn_cast<DictionaryAttr>(rawCommit);
+        if (!commitDict) {
+          f.emitError() << "[PYC1001] `pyc.commit_iface` must be a dictionary attribute";
+          ok = false;
+        } else {
+          auto schema = commitDict.getAs<StringAttr>("schema");
+          if (!schema || schema.getValue().empty()) {
+            f.emitError() << "[PYC1002] `pyc.commit_iface` missing non-empty string `schema`";
+            ok = false;
+          }
+          auto fieldsDict = commitDict.getAs<DictionaryAttr>("fields");
+          if (!fieldsDict || fieldsDict.empty()) {
+            f.emitError() << "[PYC1003] `pyc.commit_iface` missing non-empty `fields` dictionary";
+            ok = false;
+          } else {
+            llvm::StringSet<> resultSet;
+            if (resultNames) {
+              for (Attribute a : resultNames)
+                if (auto s = dyn_cast<StringAttr>(a))
+                  resultSet.insert(s.getValue());
+            }
+            llvm::StringSet<> seenPorts;
+            llvm::StringSet<> fieldNames;
+            for (const NamedAttribute &na : fieldsDict) {
+              llvm::StringRef fname = na.getName().getValue();
+              auto portAttr = dyn_cast<StringAttr>(na.getValue());
+              if (!portAttr) {
+                f.emitError() << "[PYC1005] `pyc.commit_iface` field `" << fname
+                              << "` must map to a string port name";
+                ok = false;
+                continue;
+              }
+              fieldNames.insert(fname);
+              if (!resultSet.contains(portAttr.getValue())) {
+                f.emitError() << "[PYC1005] `pyc.commit_iface` field `" << fname
+                              << "` maps to port `" << portAttr.getValue()
+                              << "` which is not a declared result port";
+                ok = false;
+              }
+              if (!seenPorts.insert(portAttr.getValue()).second) {
+                f.emitError() << "[PYC1007] `pyc.commit_iface` duplicate port path `"
+                              << portAttr.getValue() << "`";
+                ok = false;
+              }
+            }
+            // Data-driven required fields. The framework mandates none of its
+            // own: the required set is supplied by the declaring design/schema
+            // (e.g. a LinxCore profile), keeping PyCircuit schema-agnostic.
+            if (auto reqArr = commitDict.getAs<ArrayAttr>("required")) {
+              for (Attribute a : reqArr) {
+                auto rs = dyn_cast<StringAttr>(a);
+                if (!rs) {
+                  f.emitError() << "[PYC1008] `pyc.commit_iface.required` entries must be strings";
+                  ok = false;
+                  continue;
+                }
+                if (!fieldNames.contains(rs.getValue())) {
+                  f.emitError() << "[PYC1004] `pyc.commit_iface` missing required field `"
+                                << rs.getValue() << "`";
+                  ok = false;
+                }
+              }
+            }
+            // Data-driven validity gating (Decision 0146), executed by a generic
+            // engine: for each declared group, if any member data field is
+            // present its `valid` strobe must be present too. Group names and
+            // membership are caller data -- the framework knows no `wb`/`mem`.
+            if (auto grpDict = commitDict.getAs<DictionaryAttr>("groups")) {
+              for (const NamedAttribute &g : grpDict) {
+                llvm::StringRef gname = g.getName().getValue();
+                auto gspec = dyn_cast<DictionaryAttr>(g.getValue());
+                if (!gspec) {
+                  f.emitError() << "[PYC1009] `pyc.commit_iface` group `" << gname
+                                << "` must be a dictionary";
+                  ok = false;
+                  continue;
+                }
+                auto validName = gspec.getAs<StringAttr>("valid");
+                auto members = gspec.getAs<ArrayAttr>("members");
+                if (!validName || validName.getValue().empty() || !members) {
+                  f.emitError() << "[PYC1009] `pyc.commit_iface` group `" << gname
+                                << "` must provide string `valid` and array `members`";
+                  ok = false;
+                  continue;
+                }
+                bool anyMember = false;
+                for (Attribute mv : members) {
+                  auto ms = dyn_cast<StringAttr>(mv);
+                  if (!ms) {
+                    f.emitError() << "[PYC1009] `pyc.commit_iface` group `" << gname
+                                  << "` members must be strings";
+                    ok = false;
+                    continue;
+                  }
+                  if (fieldNames.contains(ms.getValue()))
+                    anyMember = true;
+                }
+                if (anyMember && !fieldNames.contains(validName.getValue())) {
+                  f.emitError() << "[PYC1006] `pyc.commit_iface` group `" << gname
+                                << "` has member fields but is missing its validity strobe `"
+                                << validName.getValue() << "` (Decision 0146 validity gating)";
+                  ok = false;
+                }
+              }
+            }
+          }
+        }
+      }
     });
 
     if (!ok)

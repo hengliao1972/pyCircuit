@@ -1024,13 +1024,16 @@ class Circuit(Module):
         en: Union[Wire, Signal, int, LiteralValue] = 1,
         shape: int | tuple[int, ...] | None = None,
         stage: str | None = None,
+        stage_attr: str | None = None,
         signed: bool | None = None,  # reserved for future type inference / lowering
     ) -> Union[Reg, "Vec"]:
         """Declare a named stateful variable (backedge register).
 
         This is a higher-level replacement for `backedge_reg(...)` that:
         - takes a stable logical name (for debug/name mangling),
-        - optionally tags the name with a pipeline stage prefix,
+        - optionally tags the name with a pipeline stage prefix (``stage``),
+        - optionally attaches a ``pyc.stage`` attribution attribute to the emitted
+          ``pyc.reg`` **without renaming** the signal (``stage_attr``),
         - declares a named backedge wire for `next`.
         """
         _ = signed  # unused for now (kept for API stability)
@@ -1061,6 +1064,7 @@ class Circuit(Module):
                         init=axis_init,
                         en=axis_en,
                         stage=stage,
+                        stage_attr=stage_attr,
                         signed=signed,
                     )
                 n = dims[axis]
@@ -1100,7 +1104,7 @@ class Circuit(Module):
         else:
             init_w = init
 
-        r = self.reg_wire(clk, rst, en_w, next_w, init_w)
+        r = self.reg_wire(clk, rst, en_w, next_w, init_w, stage_attr=stage_attr)
         # Name the observable value of the state variable.
         q_named = Wire(self, self.alias(r.q.sig, name=full), signed=r.q.signed)
         return Reg(q=q_named, clk=r.clk, rst=r.rst, en=r.en, next=r.next, init=r.init)
@@ -1112,6 +1116,8 @@ class Circuit(Module):
         en: Union[Wire, Signal],
         next_: Union[Wire, Signal],
         init: Union[Wire, Signal, int, LiteralValue],
+        *,
+        stage_attr: str | None = None,
     ) -> Reg:
         en_w = en if isinstance(en, Wire) else Wire(self, en)
         next_w = next_ if isinstance(next_, Wire) else Wire(self, next_)
@@ -1124,7 +1130,7 @@ class Circuit(Module):
             init_w = init if isinstance(init, Wire) else Wire(self, init)
 
         self._record_struct_state_alloc()
-        q_sig = self.reg(clk, rst, en_w.sig, next_w.sig, init_w.sig)
+        q_sig = self.reg(clk, rst, en_w.sig, next_w.sig, init_w.sig, stage=stage_attr)
         q_w = Wire(self, q_sig, signed=(next_w.signed or init_w.signed))
         return Reg(q=q_w, clk=clk, rst=rst, en=en_w, next=next_w, init=init_w)
 

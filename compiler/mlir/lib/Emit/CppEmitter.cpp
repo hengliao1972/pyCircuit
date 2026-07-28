@@ -875,6 +875,31 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
   std::string structName = sanitizeId(f.getSymName());
   os << "struct " << structName << " {\n";
 
+  // Agentic optimizer B1: auto-generate a commit/retire trace sensor directly
+  // from the schema-agnostic `pyc.commit_iface` contract so any design that
+  // declares a commit interface produces a commit stream during simulation
+  // with zero hand-written binding. The framework stays vocabulary-neutral:
+  // schema/stage/field->port mapping are consumed as data.
+  DictionaryAttr commitDict = f->getAttrOfType<DictionaryAttr>("pyc.commit_iface");
+  std::string commitSchema, commitStage;
+  llvm::SmallVector<std::pair<std::string, std::string>, 8> commitFields; // (field, portMember)
+  if (commitDict) {
+    if (auto s = commitDict.getAs<StringAttr>("schema"))
+      commitSchema = s.getValue().str();
+    if (auto s = commitDict.getAs<StringAttr>("stage"))
+      commitStage = s.getValue().str();
+    if (auto fieldsD = commitDict.getAs<DictionaryAttr>("fields")) {
+      for (auto na : fieldsD) {
+        auto portAttr = dyn_cast<StringAttr>(na.getValue());
+        if (!portAttr)
+          continue;
+        commitFields.push_back(
+            {na.getName().getValue().str(), sanitizeId(portAttr.getValue())});
+      }
+    }
+  }
+  const bool hasCommit = commitDict && !commitFields.empty();
+
   // Ports.
   std::vector<std::string> inNames;
   inNames.reserve(f.getNumArguments());
@@ -1466,6 +1491,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
   os << "    const char *path = std::getenv(\"PYC_SIM_STATS_PATH\");\n";
   os << "    if (path && *path)\n";
   os << "      _pyc_sim_stats_path = path;\n";
+  if (hasCommit) {
+    os << "    const char *ctpath = std::getenv(\"PYC_COMMIT_TRACE\");\n";
+    os << "    if (ctpath && *ctpath) { _pyc_commit_enabled = true; "
+          "_pyc_commit_path = ctpath; }\n";
+  }
   os << "  }\n\n";
   os << "  void reset_sim_stats() { _pyc_sim_stats = _pyc_sim_stats_t{}; }\n\n";
   os << "  void dump_sim_stats(std::ostream &os) const {\n";
@@ -1486,6 +1516,30 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
   os << "      return;\n";
   os << "    dump_sim_stats(ofs);\n";
   os << "  }\n\n";
+
+  // Agentic optimizer B1: commit/retire trace sensor (auto-generated).
+  if (hasCommit) {
+    os << "  pyc::cpp::PycCommitTraceWriter _pyc_commit_writer;\n";
+    os << "  std::uint64_t _pyc_commit_cycle = 0;\n";
+    os << "  bool _pyc_commit_enabled = false;\n";
+    os << "  bool _pyc_commit_bound = false;\n";
+    os << "  std::string _pyc_commit_path{};\n";
+    os << "  void _pyc_commit_bind() {\n";
+    os << "    if (_pyc_commit_bound) return;\n";
+    os << "    _pyc_commit_bound = true;\n";
+    if (!commitSchema.empty())
+      os << "    _pyc_commit_writer.setSchema(\"" << commitSchema << "\");\n";
+    if (!commitStage.empty())
+      os << "    _pyc_commit_writer.setStage(\"" << commitStage << "\");\n";
+    for (auto &fp : commitFields)
+      os << "    _pyc_commit_writer.bind(\"" << fp.first
+         << "\", [this]{ return (std::uint64_t)" << fp.second << ".value(); });\n";
+    os << "  }\n";
+    os << "  void pyc_commit_sample() { _pyc_commit_bind(); "
+          "_pyc_commit_writer.sample(_pyc_commit_cycle++); }\n";
+    os << "  bool pyc_commit_write_jsonl(const std::string &p) { "
+          "_pyc_commit_bind(); return _pyc_commit_writer.writeJsonl(p); }\n\n";
+  }
 
   os << "  void _pyc_validate_primitive_bindings() const {\n";
   for (auto r : regs)
@@ -1545,6 +1599,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
     unsigned w = bitWidth(r.getQ().getType());
     if (w == 0)
       return r.emitError("invalid reg width");
+    // Optional pipeline-stage attribution key (agentic optimizer §5.4). The C++
+    // model ignores stage functionally; carried as DFX metadata for by-stage
+    // aggregation of simulation statistics.
+    if (auto stAttr = r->getAttrOfType<StringAttr>("pyc.stage"))
+      os << "    // pyc_stage: " << stAttr.getValue() << "\n";
     os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pyc_reg<" << w << ">("
        << nt.get(r.getClk()) << ", " << nt.get(r.getRst()) << ", " << nt.get(r.getEn()) << ", " << nt.get(r.getNext())
        << ", " << nt.get(r.getInit()) << ", " << nt.get(r.getQ()) << ");\n";
@@ -1590,6 +1649,15 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
   os << "    eval();\n";
   os << "    #endif\n";
   os << "  }\n\n";
+
+  // Agentic optimizer B1: auto-flush the collected commit stream on teardown
+  // when PYC_COMMIT_TRACE points at an output path.
+  if (hasCommit) {
+    os << "  ~" << structName << "() {\n";
+    os << "    if (_pyc_commit_enabled && !_pyc_commit_path.empty())\n";
+    os << "      _pyc_commit_writer.writeJsonl(_pyc_commit_path);\n";
+    os << "  }\n\n";
+  }
 
   // Emit fused comb helpers.
   for (auto [i, comb] : llvm::enumerate(combs)) {
@@ -2703,6 +2771,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
 	  os << "    tick();\n";
 	  os << "    commit();\n";
 	  os << "    comb();\n";
+	  if (hasCommit)
+	    os << "    if (_pyc_commit_enabled) pyc_commit_sample();\n";
 	  os << "  }\n";
 
 	  os << "};\n\n";
@@ -2719,7 +2789,18 @@ LogicalResult emitCpp(ModuleOp module, llvm::raw_ostream &os, const CppEmitterOp
   os << "#include <iostream>\n";
   os << "#include <memory>\n";
   os << "#include <string>\n";
-  os << "#include <cpp/pyc_sim.hpp>\n\n";
+  os << "#include <cpp/pyc_sim.hpp>\n";
+  // Agentic optimizer B1: pull in the commit/retire trace sensor header only
+  // when some function in the module declares a `pyc.commit_iface` contract.
+  bool moduleHasCommit = false;
+  for (auto f : module.getOps<func::FuncOp>())
+    if (f->hasAttr("pyc.commit_iface")) {
+      moduleHasCommit = true;
+      break;
+    }
+  if (moduleHasCommit)
+    os << "#include <cpp/pyc_commit_trace.hpp>\n";
+  os << "\n";
   os << "namespace pyc::gen {\n\n";
 
   // Emit structs in dependency order so submodule types are defined before use.

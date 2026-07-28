@@ -1184,6 +1184,10 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         auto qTy = dyn_cast<IntegerType>(r.getQ().getType());
         if (!qTy)
           return r.emitError("verilog emitter only supports integer reg data type");
+        // Optional pipeline-stage attribution key (agentic optimizer §5.3/§5.4):
+        // carried as a synthesis attribute so STA/area reports can group by stage.
+        if (auto stAttr = r->getAttrOfType<StringAttr>("pyc.stage"))
+          os << "(* pyc_stage = \"" << stAttr.getValue() << "\" *)\n";
         os << "pyc_reg #(.WIDTH(" << qTy.getWidth() << ")) " << nt.get(r.getQ()) << "_inst (\n";
         os << "  .clk(" << nt.get(r.getClk()) << "),\n";
         os << "  .rst(" << nt.get(r.getRst()) << "),\n";

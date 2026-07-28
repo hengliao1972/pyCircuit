@@ -24,6 +24,45 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 _tls = threading.local()
 
+# Neutral, framework-level commit-trace schema id. PyCircuit stays
+# schema-agnostic: concrete commit-bundle vocabularies (field sets, validity
+# groups) belong to the consuming design/ecosystem, not the framework. E.g. the
+# LinxCore profile lives in contrib/linx and is passed in explicitly.
+COMMIT_SCHEMA_DEFAULT = "pyc-commit-v1"
+
+
+def _is_ident(s: str) -> bool:
+    """True if ``s`` is a plain [A-Za-z_][A-Za-z0-9_]* identifier."""
+    if not s:
+        return False
+    if not (s[0].isalpha() or s[0] == "_"):
+        return False
+    return all(c.isalnum() or c == "_" for c in s[1:])
+
+
+def _mlir_attr_literal(obj: Any) -> str:
+    """Render a JSON-ish Python value as a *native* MLIR attribute literal.
+
+    dict -> DictionaryAttr ``{k = v, ...}`` (keys must be bare identifiers, sorted
+    for determinism), list/tuple -> ArrayAttr ``[...]``, str -> string literal.
+    Used so ``pyc.commit_iface`` is a first-class structured attribute instead of
+    a JSON-in-string blob (no escaped quotes in the emitted IR).
+    """
+    import json as _json
+
+    if isinstance(obj, str):
+        return _json.dumps(obj, ensure_ascii=False)
+    if isinstance(obj, (list, tuple)):
+        return "[" + ", ".join(_mlir_attr_literal(x) for x in obj) + "]"
+    if isinstance(obj, dict):
+        items = []
+        for k in sorted(obj):
+            if not _is_ident(str(k)):
+                raise ValueError(f"MLIR dict attribute key is not a bare identifier: {k!r}")
+            items.append(f"{k} = {_mlir_attr_literal(obj[k])}")
+        return "{" + ", ".join(items) + "}"
+    raise ValueError(f"unsupported MLIR attribute value: {obj!r}")
+
 
 def _current_domain() -> "CycleAwareDomain | None":
     return getattr(_tls, "domain", None)
@@ -63,6 +102,96 @@ class CycleAwareCircuit(Circuit):
     def input_signal(self, name: str, width: int, domain: "CycleAwareDomain") -> Wire:
         return domain.create_signal(str(name), width=int(width))
 
+    def commit_interface(
+        self,
+        fields: "dict[str, Any]",
+        *,
+        schema: str = COMMIT_SCHEMA_DEFAULT,
+        stage: str | None = None,
+        required: "list[str] | None" = None,
+        groups: "dict[str, dict[str, Any]] | None" = None,
+    ) -> None:
+        """Declare a commit/retire trace interface (TODO B1; Decision 0142).
+
+        A first-class, **schema-agnostic** sensor for the optimization loop: each
+        ``field -> signal`` binding is exposed as a canonical observable output
+        port ``commit_<field>`` and recorded in the func attr ``pyc.commit_iface``.
+
+        The framework owns only the generic mechanism and the *structural*
+        contract. The concrete vocabulary of a commit bundle -- which fields are
+        mandatory (``required``) and which data fields are gated by a validity
+        strobe (``groups``) -- is data supplied by the caller and enforced by a
+        generic engine in the MLIR verifier (gate-first). This keeps PyCircuit
+        free of any specific CPU/ISA convention: e.g. a LinxCore design passes its
+        own profile via ``m.commit_interface(fields, **LC_COMMIT_BUNDLE_V2)``.
+
+        Args:
+            fields: ``{field_name: signal}`` bundle bindings.
+            schema: bundle schema id (for tool compatibility / versioning).
+            stage: optional pipeline-stage tag attached to every record.
+            required: field names that must be present (data-driven; empty means
+                the framework mandates none).
+            groups: validity-gating groups ``{group: {"valid": strobe,
+                "members": [data_field, ...]}}``. If any member field is declared,
+                its ``valid`` strobe must also be declared (Decision 0146).
+        """
+        if not isinstance(fields, dict) or not fields:
+            raise ValueError("commit_interface requires a non-empty {field: signal} mapping")
+        if not isinstance(schema, str) or not schema.strip():
+            raise ValueError("commit_interface: schema must be a non-empty string")
+        if stage is not None and (not isinstance(stage, str) or not stage.strip()):
+            raise ValueError("commit_interface: stage must be a non-empty string when provided")
+
+        port_map: dict[str, str] = {}
+        for fname, sig in fields.items():
+            if not isinstance(fname, str) or not _is_ident(fname):
+                raise ValueError(f"commit_interface: field name is not a valid identifier: {fname!r}")
+            port = f"commit_{fname}"
+            self.output(port, wire_of(sig))
+            port_map[fname] = port
+
+        req_list: list[str] = []
+        if required is not None:
+            if not isinstance(required, (list, tuple)):
+                raise ValueError("commit_interface: required must be a list of field names")
+            for r in required:
+                if not isinstance(r, str) or not _is_ident(r):
+                    raise ValueError(f"commit_interface: required entry is not a valid identifier: {r!r}")
+                req_list.append(r)
+
+        grp_map: dict[str, dict[str, Any]] = {}
+        if groups is not None:
+            if not isinstance(groups, dict):
+                raise ValueError("commit_interface: groups must be a mapping")
+            for gname, spec in groups.items():
+                if not isinstance(gname, str) or not _is_ident(gname):
+                    raise ValueError(f"commit_interface: group name is not a valid identifier: {gname!r}")
+                if not isinstance(spec, dict):
+                    raise ValueError(f"commit_interface: group {gname!r} spec must be a mapping")
+                valid = spec.get("valid")
+                members = spec.get("members")
+                if not isinstance(valid, str) or not _is_ident(valid):
+                    raise ValueError(f"commit_interface: group {gname!r} needs a valid-strobe field name")
+                if not isinstance(members, (list, tuple)) or not members:
+                    raise ValueError(f"commit_interface: group {gname!r} needs a non-empty members list")
+                mem_list: list[str] = []
+                for mm in members:
+                    if not isinstance(mm, str) or not _is_ident(mm):
+                        raise ValueError(f"commit_interface: group {gname!r} member is not an identifier: {mm!r}")
+                    mem_list.append(mm)
+                grp_map[gname] = {"valid": valid, "members": mem_list}
+
+        payload: dict[str, Any] = {"schema": str(schema), "fields": port_map}
+        if stage is not None:
+            payload["stage"] = str(stage)
+        if req_list:
+            payload["required"] = req_list
+        if grp_map:
+            payload["groups"] = grp_map
+        # Emit as a native MLIR dictionary attribute (structured, no escaped
+        # JSON-in-string), consumed by the frontend-contract verifier.
+        self.set_func_attr_literal("pyc.commit_iface", _mlir_attr_literal(payload))
+
 
 class CycleAwareDomain:
     """Clock domain with logical occurrence index (tutorial: next/prev/push/pop/cycle)."""
@@ -75,6 +204,9 @@ class CycleAwareDomain:
         self._stack: list[int] = []
         self._delay_serial = 0
         self._reg_serial = 0
+        # Optional pipeline-stage names, keyed by absolute logical cycle index.
+        # Purely metadata (attribution key); has no effect on emitted hardware.
+        self._stage_names: dict[int, str] = {}
         # Hierarchical compilation state (set by compile_cycle_aware)
         self._hierarchical: bool = False
         self._design: Any | None = None
@@ -101,8 +233,45 @@ class CycleAwareDomain:
         _ = name
         return self._m.const(int(value), width=int(width))
 
-    def next(self) -> None:
+    def next(self, stage: str | None = None) -> None:
+        """Advance to the next logical cycle (a pipeline-stage boundary).
+
+        Pass ``stage="decode"`` to name the stage being *entered*; the name is
+        recorded against the new cycle index and becomes an attribution key
+        (``sig.stage_name``, module attr ``pyc.stage_names``). Naming is optional
+        and has zero effect on the emitted hardware.
+        """
         self._occurrence += 1
+        if stage is not None:
+            self.name_stage(stage)
+
+    def name_stage(self, name: str) -> None:
+        """Name the *current* logical cycle as a pipeline stage.
+
+        Use before the first ``next()`` to name the initial stage (e.g. fetch),
+        or standalone to label the current cycle. Re-naming the same cycle with a
+        different name is a conflict and raises.
+        """
+        nm = str(name).strip()
+        if not nm:
+            raise ValueError("stage name must be a non-empty string")
+        cur = self._occurrence
+        prev = self._stage_names.get(cur)
+        if prev is not None and prev != nm:
+            raise ValueError(
+                f"conflicting stage names for cycle {cur}: {prev!r} vs {nm!r} "
+                "(each logical cycle may carry at most one stage name)"
+            )
+        self._stage_names[cur] = nm
+
+    def stage_name_of(self, cycle: int) -> str | None:
+        """Return the stage name assigned to ``cycle``, or ``None`` if unnamed."""
+        return self._stage_names.get(int(cycle))
+
+    @property
+    def stage_names(self) -> dict[int, str]:
+        """Read-only snapshot of the cycle-index → stage-name mapping."""
+        return dict(self._stage_names)
 
     def prev(self) -> None:
         self._occurrence -= 1
@@ -132,7 +301,8 @@ class CycleAwareDomain:
         reg_name = str(name).strip() or f"_v5_reg_{self._reg_serial}"
         self._reg_serial += 1
         full = self._m.scoped_name(reg_name)
-        r = self._m.out(full, domain=self._cd, width=width, init=init)
+        r = self._m.out(full, domain=self._cd, width=width, init=init,
+                        stage_attr=self.stage_name_of(self._occurrence))
         r.set(w)
         return r.q
 
@@ -147,7 +317,8 @@ class CycleAwareDomain:
         reg_name = str(name).strip() or f"_v5_reg_{self._reg_serial}"
         self._reg_serial += 1
         full = self._m.scoped_name(reg_name)
-        reg = self._m.out(full, domain=self._cd, width=int(width), init=int(reset_value))
+        reg = self._m.out(full, domain=self._cd, width=int(width), init=int(reset_value),
+                          stage_attr=self.stage_name_of(self._occurrence))
         return StateSignal(self, reg, self._occurrence)
 
     def signal(
@@ -311,10 +482,13 @@ class CycleAwareDomain:
             return w
         d = to_cycle - from_cycle
         cur: Wire = w
-        for _ in range(d):
+        for k in range(1, d + 1):
             self._delay_serial += 1
             nm = f"_v5_bal_{self._delay_serial}"
-            r = self._m.out(self._m.scoped_name(nm), domain=self._cd, width=width, init=0)
+            # Each balance reg's Q lives at cycle (from_cycle + k); tag it with
+            # that cycle's stage name (if any) so STA/attribution can group by stage.
+            r = self._m.out(self._m.scoped_name(nm), domain=self._cd, width=width, init=0,
+                            stage_attr=self.stage_name_of(from_cycle + k))
             r.set(cur)
             cur = r.q
         return cur
@@ -420,7 +594,35 @@ def _reconstruct_output_dict(
     return outs
 
 
-def _make_compiled_module(fn: Any, circuit: CycleAwareCircuit, sym_name: str) -> Any:
+def _eager_params_json(params: Mapping[str, Any]) -> str:
+    """Serialize eager-mode ``jit_params`` to the canonical ``pyc.params`` JSON string.
+
+    Mirrors the JIT path (``design.canonical_params_json``) so that eager
+    specializations (e.g. ``cut_after_decode=True``) are recorded as a decision
+    record.  Non-JSON-safe kwargs (e.g. ``inputs`` dicts carrying CAS values) are
+    dropped best-effort rather than crashing compilation.
+    """
+    if not params:
+        return "{}"
+    from .design import canonical_params_json
+    try:
+        return canonical_params_json(params, path="params")
+    except Exception:
+        import json as _json
+        safe: dict[str, Any] = {}
+        for k, v in params.items():
+            if v is None or isinstance(v, (bool, int, float, str)):
+                safe[str(k)] = v
+        return _json.dumps(safe, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _make_compiled_module(
+    fn: Any,
+    circuit: CycleAwareCircuit,
+    sym_name: str,
+    *,
+    params_json: str = "{}",
+) -> Any:
     """Create a :class:`~pycircuit.design.CompiledModule` from an eagerly-compiled circuit."""
     from .design import CompiledModule, _kind_of, _inline_of, _base_name
     import json as _json
@@ -445,7 +647,7 @@ def _make_compiled_module(fn: Any, circuit: CycleAwareCircuit, sym_name: str) ->
 
     circuit.set_func_attr("pyc.kind", kind)
     circuit.set_func_attr("pyc.inline", inline)
-    circuit.set_func_attr("pyc.params", "{}")
+    circuit.set_func_attr("pyc.params", params_json)
     circuit.set_func_attr("pyc.base", base)
     circuit.set_func_attr("pyc.struct.metrics", struct_metrics)
     circuit.set_func_attr("pyc.struct.collections", struct_collections)
@@ -454,7 +656,7 @@ def _make_compiled_module(fn: Any, circuit: CycleAwareCircuit, sym_name: str) ->
 
     return CompiledModule(
         fn=fn,
-        params_json="{}",
+        params_json=params_json,
         sym_name=str(sym_name),
         mod=circuit,
         arg_names=arg_names,
@@ -631,6 +833,10 @@ class ForwardSignal:
         return self._state.cycle
 
     @property
+    def stage_name(self) -> str | None:
+        return self._state.domain.stage_name_of(self._state.cycle)
+
+    @property
     def domain(self) -> "CycleAwareDomain":
         return self._state.domain
 
@@ -800,6 +1006,11 @@ class CycleAwareSignal:
     @property
     def cycle(self) -> int:
         return self._cycle
+
+    @property
+    def stage_name(self) -> str | None:
+        """Pipeline-stage name of this signal's cycle, or ``None`` if unnamed."""
+        return self._domain.stage_name_of(self._cycle)
 
     @property
     def domain(self) -> CycleAwareDomain:
@@ -1166,10 +1377,27 @@ def compile_cycle_aware(
         if out is not None:
             _register_implicit_outputs(m, out)
 
+        params_json = _eager_params_json(jit_params)
+
         if hierarchical:
-            cm = _make_compiled_module(fn, m, str(circuit_name))
+            cm = _make_compiled_module(fn, m, str(circuit_name), params_json=params_json)
             design.add(cm)
             m._v5_design = design
+        elif params_json != "{}":
+            # Flat eager mode does not build a CompiledModule, but still record the
+            # specialization vector so it survives into emitted MLIR as a decision record.
+            m.set_func_attr("pyc.params", params_json)
+
+        # Emit optional pipeline-stage names as an attribution key table. Keyed by
+        # cycle index (string keys for stable JSON), string attr like pyc.params.
+        if dom._stage_names:
+            import json as _json
+            stage_json = _json.dumps(
+                {str(k): dom._stage_names[k] for k in sorted(dom._stage_names)},
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            m.set_func_attr("pyc.stage_names", stage_json)
 
         return m
 
