@@ -65,3 +65,39 @@ Module-level cleanup pass that prunes unused `func.func` arguments and updates
 `func.call` sites. This changes the externally visible interface, so it is
 **not** run by default in `pycc`, but can be useful for internal
 refactors or design-space exploration flows.
+
+## Per-pass IR dump (diagnostics)
+
+`pycc` and `pyc-opt` can write the IR before and/or after every pass to a
+directory so the effect of any single pass is directly diffable. This is a
+diagnostics-only feature: it never modifies the IR and is disabled by default
+(zero overhead when not requested).
+
+```bash
+pycc foo.pyc --emit=none --dump-pass-ir=/tmp/pir
+ls /tmp/pir
+# 0000_before_0001_check-frontend-contract__L0.mlir
+# 0001_after_0001_check-frontend-contract__L0.mlir
+# 0002_before_0002_inline-functions__L0.mlir
+# ...
+
+# Diff the IR across a specific pass:
+diff /tmp/pir/0046_before_*eliminate-wires* /tmp/pir/0047_after_*eliminate-wires*
+```
+
+File names are `NNNN_<before|after>_<NN>_<pass>__L<level>[_FAILED].mlir`, so
+lexical order matches execution order, before/after of one pass share the same
+`<NN>`, `__L0` is a module-level pass and `__L1` is func-nested, and a failed
+pass gets an `__FAILED` suffix (the file begins with `// PASS FAILED`).
+
+Flags:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--dump-pass-ir=<dir>` | (empty = off) | Output directory. `auto` means `<--out-dir>/pass_ir` so dumps travel with profile/gate artifacts. |
+| `--dump-pass-ir-phase=before\|after\|both` | `both` | Which phase(s) to record. |
+| `--dump-pass-ir-filter=<regex>` | (empty = all) | ECMAScript-style regex on the pass short name (e.g. `eliminate-wires|fuse-comb`). |
+| `--dump-pass-ir-max-lines=<N>` | `0` (unlimited) | Truncate each file after N lines (appends `// truncated at N lines`). |
+
+The instrumentation coexists with `--profile-pass-timing` / `--profile-json`; the
+two instrumentations are independent and can be enabled together.

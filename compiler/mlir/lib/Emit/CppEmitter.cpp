@@ -5,6 +5,8 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Types.h"
 #include "llvm/ADT/DenseMap.h"
@@ -22,12 +24,33 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 using namespace mlir;
 
 namespace pyc {
 namespace {
+
+// ---------------------------------------------------------------------------
+// placement attribute readers (used internally by the emitter)
+// ---------------------------------------------------------------------------
+
+static CppEmitterOptions effectiveEmitOpts(ModuleOp module, const CppEmitterOptions &opts) {
+  CppEmitterOptions out = opts;
+  if (auto chunk = getModuleCombChunkNodes(module)) {
+    out.combChunkNodes = *chunk;
+    out.evalTopoChunkNodes = *chunk;
+  }
+  return out;
+}
+
+static LogicalResult requireCombChunkConfig(ModuleOp module) {
+  if (getModuleCombChunkNodes(module))
+    return success();
+  return module.emitError(
+      "missing pyc.cpp.comb_chunk_nodes; run pyc-cpp-placement before C++ emit");
+}
 
 static std::string sanitizeId(llvm::StringRef s) {
   std::string out;
@@ -381,82 +404,120 @@ static bool functionHasSequentialState(func::FuncOp f,
   return hasSeq;
 }
 
-// Simplified assignExpr without placement support — writes a direct assignment.
 static void assignExpr(Value result, Type ty, llvm::raw_ostream &os, NameTable &nt,
-                       llvm::function_ref<void(llvm::raw_ostream &)> buildExpr) {
+                       llvm::function_ref<void(llvm::raw_ostream &)> buildExpr,
+                       CppEmitterPlacementState *ps) {
   std::string expr;
   llvm::raw_string_ostream ess(expr);
   buildExpr(ess);
-  os << "    " << nt.get(result) << " = " << ess.str() << ";\n";
+  if (ps)
+    ps->emitValueAssign(result, ty, nt.get(result), ess.str(), os);
+  else
+    os << "    " << nt.get(result) << " = " << ess.str() << ";\n";
 }
 
-static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTable &nt) {
+static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTable &nt,
+                                    CppEmitterPlacementState *ps = nullptr) {
+  if (ps) {
+    for (Value v : op.getOperands())
+      (void)ps->emitLocalDeclIfNeeded(v, v.getType(), nt.get(v), os);
+  }
   if (auto c = dyn_cast<pyc::ConstantOp>(op)) {
     unsigned w = bitWidth(c.getType());
     if (w == 0)
       return c.emitError("invalid constant width");
     auto v = c.getValueAttr().getValue();
     unsigned words = (w + 63u) / 64u;
-    os << "    " << nt.get(c.getResult()) << " = pyc::cpp::Wire<" << w << ">({";
-    for (unsigned i = 0; i < words; i++) {
-      if (i)
-        os << ", ";
-      std::uint64_t word = v.getRawData()[i];
-      os << "0x" << llvm::utohexstr(word) << "ull";
-    }
-    os << "});\n";
+    assignExpr(c.getResult(), c.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::Wire<" << w << ">({";
+                 for (unsigned i = 0; i < words; i++) {
+                   if (i)
+                     e << ", ";
+                   std::uint64_t word = v.getRawData()[i];
+                   e << "0x" << llvm::utohexstr(word) << "ull";
+                 }
+                 e << "})";
+               },
+               ps);
     return success();
   }
   if (auto a = dyn_cast<pyc::AliasOp>(op)) {
-    os << "    " << nt.get(a.getResult()) << " = " << nt.get(a.getIn()) << ";\n";
+    assignExpr(a.getResult(), a.getType(), os, nt,
+               [&](llvm::raw_ostream &e) { e << nt.get(a.getIn()); }, ps);
     return success();
   }
   if (auto ra = dyn_cast<pyc::ResetActiveOp>(op)) {
-    os << "    " << nt.get(ra.getActive()) << " = " << nt.get(ra.getRst()) << ";\n";
+    assignExpr(ra.getActive(), ra.getActive().getType(), os, nt,
+               [&](llvm::raw_ostream &e) { e << nt.get(ra.getRst()); }, ps);
     return success();
   }
   if (auto a = dyn_cast<pyc::AddOp>(op)) {
-    os << "    " << nt.get(a.getResult()) << " = (" << nt.get(a.getLhs()) << " + " << nt.get(a.getRhs()) << ");\n";
+    assignExpr(a.getResult(), a.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "(" << nt.get(a.getLhs()) << " + " << nt.get(a.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto s = dyn_cast<pyc::SubOp>(op)) {
-    os << "    " << nt.get(s.getResult()) << " = (" << nt.get(s.getLhs()) << " - " << nt.get(s.getRhs()) << ");\n";
+    assignExpr(s.getResult(), s.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "(" << nt.get(s.getLhs()) << " - " << nt.get(s.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto m = dyn_cast<pyc::MulOp>(op)) {
-    os << "    " << nt.get(m.getResult()) << " = (" << nt.get(m.getLhs()) << " * " << nt.get(m.getRhs()) << ");\n";
+    assignExpr(m.getResult(), m.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "(" << nt.get(m.getLhs()) << " * " << nt.get(m.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto d = dyn_cast<pyc::UdivOp>(op)) {
     unsigned w = bitWidth(d.getResult().getType());
     if (w == 0)
       return d.emitError("invalid udiv width");
-    os << "    " << nt.get(d.getResult()) << " = pyc::cpp::udiv<" << w << ">(" << nt.get(d.getLhs()) << ", "
-       << nt.get(d.getRhs()) << ");\n";
+    assignExpr(d.getResult(), d.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::udiv<" << w << ">(" << nt.get(d.getLhs()) << ", " << nt.get(d.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto r = dyn_cast<pyc::UremOp>(op)) {
     unsigned w = bitWidth(r.getResult().getType());
     if (w == 0)
       return r.emitError("invalid urem width");
-    os << "    " << nt.get(r.getResult()) << " = pyc::cpp::urem<" << w << ">(" << nt.get(r.getLhs()) << ", "
-       << nt.get(r.getRhs()) << ");\n";
+    assignExpr(r.getResult(), r.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::urem<" << w << ">(" << nt.get(r.getLhs()) << ", " << nt.get(r.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto d = dyn_cast<pyc::SdivOp>(op)) {
     unsigned w = bitWidth(d.getResult().getType());
     if (w == 0)
       return d.emitError("invalid sdiv width");
-    os << "    " << nt.get(d.getResult()) << " = pyc::cpp::sdiv<" << w << ">(" << nt.get(d.getLhs()) << ", "
-       << nt.get(d.getRhs()) << ");\n";
+    assignExpr(d.getResult(), d.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::sdiv<" << w << ">(" << nt.get(d.getLhs()) << ", " << nt.get(d.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto r = dyn_cast<pyc::SremOp>(op)) {
     unsigned w = bitWidth(r.getResult().getType());
     if (w == 0)
       return r.emitError("invalid srem width");
-    os << "    " << nt.get(r.getResult()) << " = pyc::cpp::srem<" << w << ">(" << nt.get(r.getLhs()) << ", "
-       << nt.get(r.getRhs()) << ");\n";
+    assignExpr(r.getResult(), r.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::srem<" << w << ">(" << nt.get(r.getLhs()) << ", " << nt.get(r.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto m = dyn_cast<pyc::MuxOp>(op)) {
@@ -472,30 +533,48 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                  else
                    e << "pyc::cpp::mux<" << w << ">(" << nt.get(m.getSel()) << ", " << nt.get(m.getA()) << ", "
                      << nt.get(m.getB()) << ")";
-               });
+               },
+               ps);
     return success();
   }
   if (auto s = dyn_cast<arith::SelectOp>(op)) {
     if (!s.getCondition().getType().isInteger(1))
       return s.emitError("C++ emitter only supports arith.select with i1 condition");
-    os << "    " << nt.get(s.getResult()) << " = (" << nt.get(s.getCondition()) << ".toBool() ? " << nt.get(s.getTrueValue())
-       << " : " << nt.get(s.getFalseValue()) << ");\n";
+    assignExpr(s.getResult(), s.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "(" << nt.get(s.getCondition()) << ".toBool() ? " << nt.get(s.getTrueValue()) << " : "
+                   << nt.get(s.getFalseValue()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto a = dyn_cast<pyc::AndOp>(op)) {
-    os << "    " << nt.get(a.getResult()) << " = (" << nt.get(a.getLhs()) << " & " << nt.get(a.getRhs()) << ");\n";
+    assignExpr(a.getResult(), a.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "(" << nt.get(a.getLhs()) << " & " << nt.get(a.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto o = dyn_cast<pyc::OrOp>(op)) {
-    os << "    " << nt.get(o.getResult()) << " = (" << nt.get(o.getLhs()) << " | " << nt.get(o.getRhs()) << ");\n";
+    assignExpr(o.getResult(), o.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "(" << nt.get(o.getLhs()) << " | " << nt.get(o.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto x = dyn_cast<pyc::XorOp>(op)) {
-    os << "    " << nt.get(x.getResult()) << " = (" << nt.get(x.getLhs()) << " ^ " << nt.get(x.getRhs()) << ");\n";
+    assignExpr(x.getResult(), x.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "(" << nt.get(x.getLhs()) << " ^ " << nt.get(x.getRhs()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto n = dyn_cast<pyc::NotOp>(op)) {
-    os << "    " << nt.get(n.getResult()) << " = (~" << nt.get(n.getIn()) << ");\n";
+    assignExpr(n.getResult(), n.getType(), os, nt,
+               [&](llvm::raw_ostream &e) { e << "(~" << nt.get(n.getIn()) << ")"; }, ps);
     return success();
   }
   if (auto e = dyn_cast<pyc::EqOp>(op)) {
@@ -505,7 +584,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     assignExpr(e.getResult(), e.getType(), os, nt,
                [&](llvm::raw_ostream &eout) {
                  eout << "pyc::cpp::eq<" << w << ">(" << nt.get(e.getLhs()) << ", " << nt.get(e.getRhs()) << ")";
-               });
+               },
+               ps);
     return success();
   }
   if (auto u = dyn_cast<pyc::UltOp>(op)) {
@@ -515,7 +595,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     assignExpr(u.getResult(), u.getType(), os, nt,
                [&](llvm::raw_ostream &eout) {
                  eout << "pyc::cpp::ult<" << w << ">(" << nt.get(u.getLhs()) << ", " << nt.get(u.getRhs()) << ")";
-               });
+               },
+               ps);
     return success();
   }
   if (auto s = dyn_cast<pyc::SltOp>(op)) {
@@ -523,9 +604,11 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     if (w == 0)
       return s.emitError("invalid slt width");
     assignExpr(s.getResult(), s.getType(), os, nt,
-               [&](llvm::raw_ostream &eout) {
-                 eout << "pyc::cpp::slt<" << w << ">(" << nt.get(s.getLhs()) << ", " << nt.get(s.getRhs()) << ")";
-               });
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::Wire<1>((pyc::cpp::slt<" << w << ">(" << nt.get(s.getLhs()) << ", "
+                   << nt.get(s.getRhs()) << ")) ? 1u : 0u)";
+               },
+               ps);
     return success();
   }
   if (auto t = dyn_cast<pyc::TruncOp>(op)) {
@@ -533,12 +616,11 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     unsigned ow = bitWidth(t.getResult().getType());
     if (iw == 0 || ow == 0)
       return t.emitError("invalid trunc width");
-    bool inIsVec = isa<VectorType>(t.getIn().getType());
     assignExpr(t.getResult(), t.getType(), os, nt,
                [&](llvm::raw_ostream &e) {
-                 e << "pyc::cpp::" << (inIsVec ? "trunc_vec<" : "trunc<")
-                   << ow << ", " << iw << ">(" << nt.get(t.getIn()) << ")";
-               });
+                 e << "pyc::cpp::trunc<" << ow << ", " << iw << ">(" << nt.get(t.getIn()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto z = dyn_cast<pyc::ZextOp>(op)) {
@@ -546,12 +628,11 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     unsigned ow = bitWidth(z.getResult().getType());
     if (iw == 0 || ow == 0)
       return z.emitError("invalid zext width");
-    bool inIsVec = isa<VectorType>(z.getIn().getType());
     assignExpr(z.getResult(), z.getType(), os, nt,
                [&](llvm::raw_ostream &e) {
-                 e << "pyc::cpp::" << (inIsVec ? "zext_vec<" : "zext<")
-                   << ow << ", " << iw << ">(" << nt.get(z.getIn()) << ")";
-               });
+                 e << "pyc::cpp::zext<" << ow << ", " << iw << ">(" << nt.get(z.getIn()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto s = dyn_cast<pyc::SextOp>(op)) {
@@ -559,12 +640,11 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     unsigned ow = bitWidth(s.getResult().getType());
     if (iw == 0 || ow == 0)
       return s.emitError("invalid sext width");
-    bool inIsVec = isa<VectorType>(s.getIn().getType());
     assignExpr(s.getResult(), s.getType(), os, nt,
                [&](llvm::raw_ostream &e) {
-                 e << "pyc::cpp::" << (inIsVec ? "sext_vec<" : "sext<")
-                   << ow << ", " << iw << ">(" << nt.get(s.getIn()) << ")";
-               });
+                 e << "pyc::cpp::sext<" << ow << ", " << iw << ">(" << nt.get(s.getIn()) << ")";
+               },
+               ps);
     return success();
   }
   if (auto ex = dyn_cast<pyc::ExtractOp>(op)) {
@@ -572,74 +652,101 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     unsigned ow = bitWidth(ex.getResult().getType());
     if (iw == 0 || ow == 0)
       return ex.emitError("invalid extract width");
-    bool inIsVec = isa<VectorType>(ex.getIn().getType());
     assignExpr(ex.getResult(), ex.getType(), os, nt,
                [&](llvm::raw_ostream &e) {
-                 e << "pyc::cpp::" << (inIsVec ? "extract_vec<" : "extract<")
-                   << ow << ", " << iw << ">(" << nt.get(ex.getIn()) << ", "
+                 e << "pyc::cpp::extract<" << ow << ", " << iw << ">(" << nt.get(ex.getIn()) << ", "
                    << ex.getLsbAttr().getInt() << "u)";
-               });
+               },
+               ps);
     return success();
   }
   if (auto sh = dyn_cast<pyc::ShliOp>(op)) {
     unsigned w = bitWidth(sh.getResult().getType());
     if (w == 0)
       return sh.emitError("invalid shli width");
-    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::shl<" << w << ">(" << nt.get(sh.getIn()) << ", "
-       << sh.getAmountAttr().getInt() << "u);\n";
+    assignExpr(sh.getResult(), sh.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::shl<" << w << ">(" << nt.get(sh.getIn()) << ", " << sh.getAmountAttr().getInt()
+                   << "u)";
+               },
+               ps);
     return success();
   }
   if (auto sh = dyn_cast<pyc::LshriOp>(op)) {
     unsigned w = bitWidth(sh.getResult().getType());
     if (w == 0)
       return sh.emitError("invalid lshri width");
-    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::lshr<" << w << ">(" << nt.get(sh.getIn()) << ", "
-       << sh.getAmountAttr().getInt() << "u);\n";
+    assignExpr(sh.getResult(), sh.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::lshr<" << w << ">(" << nt.get(sh.getIn()) << ", " << sh.getAmountAttr().getInt()
+                   << "u)";
+               },
+               ps);
     return success();
   }
   if (auto sh = dyn_cast<pyc::AshriOp>(op)) {
     unsigned w = bitWidth(sh.getResult().getType());
     if (w == 0)
       return sh.emitError("invalid ashri width");
-    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::ashr<" << w << ">(" << nt.get(sh.getIn()) << ", "
-       << sh.getAmountAttr().getInt() << "u);\n";
+    assignExpr(sh.getResult(), sh.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::ashr<" << w << ">(" << nt.get(sh.getIn()) << ", " << sh.getAmountAttr().getInt()
+                   << "u)";
+               },
+               ps);
     return success();
   }
   if (auto sh = dyn_cast<pyc::ShlOp>(op)) {
     unsigned w = bitWidth(sh.getResult().getType());
     if (w == 0)
       return sh.emitError("invalid shl width");
-    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::shl<" << w << ">(" << nt.get(sh.getIn())
-       << ", static_cast<unsigned>(" << nt.get(sh.getAmount()) << ".value()));\n";
+    assignExpr(sh.getResult(), sh.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::shl<" << w << ">(" << nt.get(sh.getIn()) << ", static_cast<unsigned>("
+                   << nt.get(sh.getAmount()) << ".value()))";
+               },
+               ps);
     return success();
   }
   if (auto sh = dyn_cast<pyc::LshrOp>(op)) {
     unsigned w = bitWidth(sh.getResult().getType());
     if (w == 0)
       return sh.emitError("invalid lshr width");
-    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::lshr<" << w << ">(" << nt.get(sh.getIn())
-       << ", static_cast<unsigned>(" << nt.get(sh.getAmount()) << ".value()));\n";
+    assignExpr(sh.getResult(), sh.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::lshr<" << w << ">(" << nt.get(sh.getIn()) << ", static_cast<unsigned>("
+                   << nt.get(sh.getAmount()) << ".value()))";
+               },
+               ps);
     return success();
   }
   if (auto sh = dyn_cast<pyc::AshrOp>(op)) {
     unsigned w = bitWidth(sh.getResult().getType());
     if (w == 0)
       return sh.emitError("invalid ashr width");
-    os << "    " << nt.get(sh.getResult()) << " = pyc::cpp::ashr<" << w << ">(" << nt.get(sh.getIn())
-       << ", static_cast<unsigned>(" << nt.get(sh.getAmount()) << ".value()));\n";
+    assignExpr(sh.getResult(), sh.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::ashr<" << w << ">(" << nt.get(sh.getIn()) << ", static_cast<unsigned>("
+                   << nt.get(sh.getAmount()) << ".value()))";
+               },
+               ps);
     return success();
   }
   if (auto c = dyn_cast<pyc::ConcatOp>(op)) {
     unsigned w = bitWidth(c.getResult().getType());
     if (w == 0)
       return c.emitError("invalid concat width");
-    os << "    " << nt.get(c.getResult()) << " = pyc::cpp::concat(";
-    for (auto [i, v] : llvm::enumerate(c.getInputs())) {
-      if (i)
-        os << ", ";
-      os << nt.get(v);
-    }
-    os << ");\n";
+    assignExpr(c.getResult(), c.getType(), os, nt,
+               [&](llvm::raw_ostream &e) {
+                 e << "pyc::cpp::concat(";
+                 for (auto [i, v] : llvm::enumerate(c.getInputs())) {
+                   if (i)
+                     e << ", ";
+                   e << nt.get(v);
+                 }
+                 e << ")";
+               },
+               ps);
     return success();
   }
   if (auto vg = dyn_cast<pyc::VGetOp>(op)) {
@@ -650,7 +757,7 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     if (idx < 0 || idx >= vecTy.getDimSize(0))
       return vg.emitError("pyc.v_get index out of range for C++ emission");
     assignExpr(vg.getResult(), vg.getType(), os, nt,
-               [&](llvm::raw_ostream &e) { e << nt.get(vg.getVec()) << "[" << idx << "]"; });
+               [&](llvm::raw_ostream &e) { e << nt.get(vg.getVec()) << "[" << idx << "]"; }, ps);
     return success();
   }
   if (auto vc = dyn_cast<pyc::VCreateOp>(op)) {
@@ -663,8 +770,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                    e << nt.get(v);
                  }
                  e << "}}";
-               }
-               );
+               },
+               ps);
     return success();
   }
   if (auto vb = dyn_cast<pyc::VBroadcastOp>(op)) {
@@ -680,8 +787,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                    e << nt.get(vb.getScalar());
                  }
                  e << "}}";
-               }
-               );
+               },
+               ps);
     return success();
   }
   if (auto vbd = dyn_cast<pyc::VBroadcastDimOp>(op)) {
@@ -718,7 +825,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                  std::vector<int64_t> idx;
                  walk(0, idx);
                  e << "}}";
-               });
+               },
+               ps);
     return success();
   }
   auto emitVectorReduce = [&](auto vr, const char *opName, const char *opToken) -> LogicalResult {
@@ -749,7 +857,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                                          std::to_string(static_cast<long long>(j)) + "]");
                    }
                    e << (useTree ? treeReduceExpr(terms, opToken) : chainReduceExpr(terms, opToken));
-                 });
+                 },
+                 ps);
       return success();
     }
 
@@ -767,8 +876,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                                      std::to_string(static_cast<long long>(i)) + "]");
                    }
                    e << (useTree ? treeReduceExpr(terms, opToken) : chainReduceExpr(terms, opToken));
-                 }
-                 );
+                 },
+                 ps);
       return success();
     }
 
@@ -798,8 +907,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                    e << (useTree ? treeReduceExpr(terms, opToken) : chainReduceExpr(terms, opToken));
                  }
                  e << "}}";
-               }
-               );
+               },
+               ps);
     return success();
   };
   if (auto vr = dyn_cast<pyc::VOrReduceOp>(op)) {
@@ -838,17 +947,29 @@ static LogicalResult emitCombMethod(pyc::CombOp comb,
     combOps.push_back(&op);
   }
 
+  CppEmitterPlacementState placement;
   unsigned combChunkNodes = std::max(1u, opts.combChunkNodes);
   if (combOps.size() > combChunkNodes) {
+    // Placement is always-on: part ownership comes from pyc.cpp.method attrs.
+    std::vector<std::pair<std::string, llvm::SmallVector<Operation *>>> parts;
+    for (Operation *op : combOps) {
+      auto method = op->getAttrOfType<StringAttr>(kCppMethodAttr);
+      if (!method)
+        return op->emitError("missing pyc.cpp.method; run pyc-cpp-placement before C++ emit");
+      if (parts.empty() || parts.back().first != method.getValue())
+        parts.emplace_back(method.getValue().str(), llvm::SmallVector<Operation *>());
+      parts.back().second.push_back(op);
+    }
+
     std::vector<std::string> partMethods;
-    partMethods.reserve((combOps.size() + combChunkNodes - 1) / combChunkNodes);
-    for (unsigned begin = 0, partIdx = 0; begin < combOps.size(); begin += combChunkNodes, ++partIdx) {
-      unsigned end = std::min<unsigned>(static_cast<unsigned>(combOps.size()), begin + combChunkNodes);
-      std::string partName = "eval_comb_" + std::to_string(idx) + "_part_" + std::to_string(partIdx);
+    partMethods.reserve(parts.size());
+    for (auto &part : parts) {
+      const std::string &partName = part.first;
       partMethods.push_back(partName);
       os << "  inline void " << partName << "() {\n";
-      for (unsigned i = begin; i < end; ++i) {
-        if (failed(emitCombAssign(*combOps[i], os, nt)))
+      placement.beginMethod(partName);
+      for (Operation *op : part.second) {
+        if (failed(emitCombAssign(*op, os, nt, &placement)))
           return failure();
       }
       os << "  }\n\n";
@@ -864,15 +985,21 @@ static LogicalResult emitCombMethod(pyc::CombOp comb,
     if (y.getNumOperands() != comb.getNumResults())
       return comb.emitError("pyc.yield operand count must match pyc.comb results");
 
-    for (auto [i, v] : llvm::enumerate(y.getOperands()))
-      os << "    " << nt.get(comb.getResult(i)) << " = " << nt.get(v) << ";\n";
+    placement.beginMethod("eval_comb_" + std::to_string(idx));
+    for (auto [i, v] : llvm::enumerate(y.getOperands())) {
+      (void)placement.emitLocalDeclIfNeeded(v, v.getType(), nt.get(v), os);
+      placement.emitValueAssign(comb.getResult(i), comb.getResult(i).getType(), nt.get(comb.getResult(i)),
+                                nt.get(v), os);
+    }
     os << "  }\n\n";
     return success();
   }
 
-  os << "  inline void eval_comb_" << idx << "() {\n";
+  std::string methodName = "eval_comb_" + std::to_string(idx);
+  os << "  inline void " << methodName << "() {\n";
+  placement.beginMethod(methodName);
   for (Operation *op : combOps) {
-    if (failed(emitCombAssign(*op, os, nt)))
+    if (failed(emitCombAssign(*op, os, nt, &placement)))
       return failure();
   }
 
@@ -882,14 +1009,21 @@ static LogicalResult emitCombMethod(pyc::CombOp comb,
   if (y.getNumOperands() != comb.getNumResults())
     return comb.emitError("pyc.yield operand count must match pyc.comb results");
 
-  for (auto [i, v] : llvm::enumerate(y.getOperands()))
-    os << "    " << nt.get(comb.getResult(i)) << " = " << nt.get(v) << ";\n";
+  for (auto [i, v] : llvm::enumerate(y.getOperands())) {
+    (void)placement.emitLocalDeclIfNeeded(v, v.getType(), nt.get(v), os);
+    placement.emitValueAssign(comb.getResult(i), comb.getResult(i).getType(), nt.get(comb.getResult(i)),
+                              nt.get(v), os);
+  }
   os << "  }\n\n";
   return success();
 }
 
 static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEmitterOptions &opts) {
   NameTable nt;
+
+  if (!f.isDeclaration() && !getFuncPlacementSummary(f))
+      return f.emitError(
+          "C++ member placement missing; run pyc-cpp-placement before emit");
 
   if (!llvm::hasSingleElement(f.getBody()))
     return f.emitError("C++ emitter currently supports single-block functions only");
@@ -932,6 +1066,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
   decls.reserve(256);
   f.walk([&](Operation *op) {
     for (Value r : op->getResults()) {
+      if (getValueCppStorage(r) == CppStorageKind::Local)
+        continue;
       decls.push_back(Decl{nt.get(r), r.getType()});
     }
   });
@@ -999,9 +1135,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
   std::sort(syncMemDPs.begin(), syncMemDPs.end(), [&](pyc::SyncMemDPOp a, pyc::SyncMemDPOp b) { return syncMemDPKey(a) < syncMemDPKey(b); });
   std::sort(asyncFifos.begin(), asyncFifos.end(), [&](pyc::AsyncFifoOp a, pyc::AsyncFifoOp b) { return asyncFifoKey(a) < asyncFifoKey(b); });
   std::sort(cdcSyncs.begin(), cdcSyncs.end(), [&](pyc::CdcSyncOp a, pyc::CdcSyncOp b) { return cdcKey(a) < cdcKey(b); });
-  auto combKey = [&](pyc::CombOp c) { return nt.get(c.getResult(0)); };
-  std::sort(combs.begin(), combs.end(), [&](pyc::CombOp a, pyc::CombOp b) { return combKey(a) < combKey(b); });
-
   auto instKey = [&](pyc::InstanceOp i) -> std::string {
     if (auto nameAttr = i->getAttrOfType<StringAttr>("name"))
       return sanitizeId(nameAttr.getValue());
@@ -1197,6 +1330,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
         if (!nameAttr || op->getNumResults() != 1)
           return;
         Value value = op->getResult(0);
+        if (getValueCppStorage(value) == CppStorageKind::Local)
+          return;
         unsigned width = bitWidth(value.getType());
         if (width == 0)
           return;
@@ -1622,7 +1757,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
   os << "    #endif\n";
   os << "  }\n\n";
 
-  // Emit fused comb helpers.
+  // Emit fused comb helpers. Indices match body order (same as placement).
   for (auto [i, comb] : llvm::enumerate(combs)) {
     if (failed(emitCombMethod(comb, os, nt, static_cast<unsigned>(i), opts)))
       return failure();
@@ -2742,7 +2877,110 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os, const CppEm
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+// placement attribute readers (used by emit + profile consumers)
+// ---------------------------------------------------------------------------
+
+std::optional<unsigned> getModuleCombChunkNodes(ModuleOp module) {
+  auto attr = module->getAttrOfType<IntegerAttr>(kCppCombChunkNodesAttr);
+  if (!attr)
+    return std::nullopt;
+  return static_cast<unsigned>(attr.getValue().getZExtValue());
+}
+
+static std::optional<uint64_t> readSummaryField(func::FuncOp f, StringRef key) {
+  auto dict = f->getAttrOfType<DictionaryAttr>(kCppPlacementSummaryAttr);
+  if (!dict)
+    return std::nullopt;
+  auto attr = dict.get(key);
+  if (!attr)
+    return std::nullopt;
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr))
+    return intAttr.getValue().getZExtValue();
+  return std::nullopt;
+}
+
+std::optional<CppPlacementSummary> getFuncPlacementSummary(func::FuncOp f) {
+  auto structMembers = readSummaryField(f, "struct_members");
+  if (!structMembers)
+    return std::nullopt;
+  CppPlacementSummary summary;
+  summary.structMembers = static_cast<unsigned>(*structMembers);
+  if (auto v = readSummaryField(f, "local_in_method"))
+    summary.localInMethod = static_cast<unsigned>(*v);
+  if (auto v = readSummaryField(f, "probe_pinned_struct"))
+    summary.probePinnedStruct = static_cast<unsigned>(*v);
+  if (auto v = readSummaryField(f, "cross_part_promoted"))
+    summary.crossPartPromoted = static_cast<unsigned>(*v);
+  if (auto v = readSummaryField(f, "scheduled_cross_method"))
+    summary.scheduledCrossMethod = static_cast<unsigned>(*v);
+  if (auto v = readSummaryField(f, "scheduled_cut_weight"))
+    summary.scheduledCutWeight = *v;
+  return summary;
+}
+
+CppStorageKind getValueCppStorage(Value v) {
+  Operation *op = v.getDefiningOp();
+  if (!op)
+    return CppStorageKind::Struct;
+  if (auto a = op->getAttrOfType<StringAttr>(kCppStorageAttr)) {
+    if (a.getValue() == "local")
+      return CppStorageKind::Local;
+  }
+  return CppStorageKind::Struct;
+}
+
+StringRef getValueCppOwner(Value v) {
+  Operation *op = v.getDefiningOp();
+  if (!op)
+    return {};
+  if (auto a = op->getAttrOfType<StringAttr>(kCppOwnerAttr))
+    return a.getValue();
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// CppEmitterPlacementState (per-emission helpers used by emit code)
+// ---------------------------------------------------------------------------
+
+bool CppEmitterPlacementState::emitLocalDeclIfNeeded(Value v, Type ty, StringRef name,
+                                                     llvm::raw_ostream &os, unsigned indentSpaces) {
+  if (getValueCppStorage(v) != CppStorageKind::Local)
+    return false;
+  StringRef owner = getValueCppOwner(v);
+  if (!owner.empty() && owner != currentMethod)
+    return false;
+  if (!declaredLocals.insert(v).second)
+    return false;
+  for (unsigned i = 0; i < indentSpaces; ++i)
+    os << ' ';
+  os << cppType(ty) << " " << name << "{};\n";
+  return true;
+}
+
+void CppEmitterPlacementState::emitValueAssign(Value result, Type ty, StringRef name, StringRef expr,
+                                               llvm::raw_ostream &os, unsigned indentSpaces) {
+  for (unsigned i = 0; i < indentSpaces; ++i)
+    os << ' ';
+
+  // Struct members: plain assignment.
+  if (getValueCppStorage(result) != CppStorageKind::Local) {
+    os << name << " = " << expr << ";\n";
+    return;
+  }
+
+  // Method-local Wire<>: declare-with-init on first assignment, plain assign on reuse.
+  if (declaredLocals.insert(result).second)
+    os << cppType(ty) << " " << name << " = " << expr << ";\n";
+  else
+    os << name << " = " << expr << ";\n";
+}
+
 LogicalResult emitCpp(ModuleOp module, llvm::raw_ostream &os, const CppEmitterOptions &opts) {
+  if (failed(requireCombChunkConfig(module)))
+    return failure();
+  const CppEmitterOptions effectiveOpts = effectiveEmitOpts(module, opts);
+
   os << "// pyCircuit C++ emission (prototype)\n";
   os << "#include <cstdlib>\n";
   os << "#include <cstdint>\n";
@@ -2809,7 +3047,7 @@ LogicalResult emitCpp(ModuleOp module, llvm::raw_ostream &os, const CppEmitterOp
     return module.emitError("C++ emitter: module instance graph has a cycle");
 
   for (unsigned idx : order) {
-    if (failed(emitFunc(funcs[idx], os, opts)))
+    if (failed(emitFunc(funcs[idx], os, effectiveOpts)))
       return failure();
   }
 
@@ -2818,8 +3056,9 @@ LogicalResult emitCpp(ModuleOp module, llvm::raw_ostream &os, const CppEmitterOp
 }
 
 LogicalResult emitCppFunc(ModuleOp module, func::FuncOp f, llvm::raw_ostream &os, const CppEmitterOptions &opts) {
-  (void)module;
-  return emitFunc(f, os, opts);
+  if (failed(requireCombChunkConfig(module)))
+    return failure();
+  return emitFunc(f, os, effectiveEmitOpts(module, opts));
 }
 
 } // namespace pyc

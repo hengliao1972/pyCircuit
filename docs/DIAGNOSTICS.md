@@ -49,3 +49,17 @@ python3 -m pycircuit.cli emit "$REPO/designs/examples/counter/counter.py" -o /tm
 export PYC_TOOLCHAIN_ROOT="$REPO/.pycircuit_out/toolchain/install"
 "$PYC_TOOLCHAIN_ROOT/bin/pycc" /tmp/counter.pyc --emit=cpp --out-dir /tmp/counter_cpp
 ```
+
+Dump per-pass IR (debug failing gates, localize IR regressions):
+
+```bash
+# Write IR before/after every pass to a directory; diff any pass pair.
+"$PYC_TOOLCHAIN_ROOT/bin/pycc" /tmp/counter.pyc --emit=none \
+  --dump-pass-ir=/tmp/pir
+diff /tmp/pir/*_before_*eliminate-wires*.mlir \
+     /tmp/pir/*_after_*eliminate-wires*.mlir
+```
+
+See [mlir_pass_ir_dump.md](mlir_pass_ir_dump.md) for the full flag set
+(`--dump-pass-ir-phase`, `--dump-pass-ir-filter`, `--dump-pass-ir-max-lines`,
+`--dump-pass-ir=auto`).

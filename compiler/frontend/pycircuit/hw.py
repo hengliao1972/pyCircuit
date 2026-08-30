@@ -1412,9 +1412,22 @@ class Circuit(Module):
         
         return self.reg(clk, rst, en_w, next_w, init_w)
 
-    def vec(self, *elems: Union[Wire[DT], Reg[DT], Sequence[Union[Wire[DT], Reg[DT]]]]) -> Wire[Vector[DT]]:
-        """Build a vector Wire from scalar wires/regs (via ``pyc.v_create``).
-        Accepts both ``m.vec(w1, w2, w3)`` and ``m.vec([w1, w2, w3])``.
+    def vec(self, *elems: Union[Wire[DT], Reg[DT], Sequence[Union[Wire[DT], Reg[DT]]], int, LiteralValue]) -> Wire[Vector[DT]]:
+        """Build a vector Wire from scalar lanes (via ``pyc.v_create``).
+
+        Accepts ``m.vec(w1, w2, w3)`` and ``m.vec([w1, w2, w3])``. Each lane
+        may be a ``Wire``/``Reg`` or a hardware literal (``LiteralValue`` via
+        ``u()``/``S()``/``s()``) or a plain Python ``int``.
+
+        Width resolution mirrors ``cat``/``+``:
+          - If any lane is a Wire/Reg, all Wires must already share an identical
+            leaf type (existing strict behavior), and literals are aligned to
+            that width/signedness.
+          - If every lane is a literal/int, the widest explicit width wins
+            (``u(8,1)`` dominates ``u(4,2)``); bare ints are inferred per
+            ``infer_literal_width`` and the max across lanes is used so
+            ``m.vec(1,2,3)`` resolves to ``vector<3xi2>``.
+        Lanes must share uniform signedness.
         """
         if len(elems) == 1 and isinstance(elems[0], list):
             elems = tuple(elems[0])
@@ -1424,13 +1437,63 @@ class Circuit(Module):
             raise TypeError("vec() expects list[Wire] as its sole sequence argument")
         if not elems:
             raise ValueError("vec() requires at least one element")
-        flat_elems = cast(tuple[Union[Wire, Reg], ...], elems)
-        sigs: list[Signal] = [Signal.as_sig(e) for e in flat_elems]
+
+        from .literals import infer_literal_width
+
+        # Pass 1: resolve the target lane width/signedness.
+        wire_width: int | None = None
+        wire_signed: bool | None = None
+        lit_width: int | None = None
+        lit_signed: bool | None = None
+        for e in elems:
+            if isinstance(e, (Wire, Reg)):
+                w = e.q if isinstance(e, Reg) else e
+                if wire_width is None:
+                    wire_width = w.width
+                    wire_signed = w.signed
+                elif w.width != wire_width or w.signed != wire_signed:
+                    raise TypeError(
+                        f"vec() wire lanes must share identical width/signedness, "
+                        f"got {w.width}/{w.signed} vs {wire_width}/{wire_signed}"
+                    )
+            elif isinstance(e, LiteralValue):
+                lw = e.width if e.width is not None else infer_literal_width(int(e.value), signed=bool(e.signed))
+                ls = bool(e.signed)
+                if lit_width is None or lw > lit_width:
+                    lit_width = lw
+                if lit_signed is None:
+                    lit_signed = ls
+            elif isinstance(e, int):
+                lw = infer_literal_width(int(e), signed=int(e) < 0)
+                ls = int(e) < 0
+                if lit_width is None or lw > lit_width:
+                    lit_width = lw
+                if lit_signed is None:
+                    lit_signed = ls
+            else:
+                raise TypeError(f"vec() lane must be Wire/Reg/int/LiteralValue, got {type(e).__name__}")
+
+        if wire_width is not None:
+            resolved_width, resolved_signed = wire_width, wire_signed
+        else:
+            resolved_width, resolved_signed = lit_width, lit_signed
+
+        # Pass 2: build lane wires, aligning literals/ints to the resolved width.
+        wires: list[Wire] = []
+        for e in elems:
+            if isinstance(e, (Wire, Reg)):
+                wires.append(e.q if isinstance(e, Reg) else e)
+            elif isinstance(e, LiteralValue):
+                wires.append(Wire.as_wire(e, width=resolved_width, signed=resolved_signed, m=self))
+            else:  # int
+                wires.append(Wire.as_wire(int(e), width=resolved_width, signed=resolved_signed, m=self))
+
+        sigs: list[Signal] = [w.sig for w in wires]
         for sig in sigs:
             if not sig.ty == sigs[0].ty:
                 raise TypeError(f"assert all types are same, but got {sig.ty} and {sigs[0].ty}")
-        
-        signed_lanes = [(e.q if isinstance(e, Reg) else e).signed for e in flat_elems]
+
+        signed_lanes = [w.signed for w in wires]
         if any(signed != signed_lanes[0] for signed in signed_lanes[1:]):
             raise TypeError("vec() requires uniform lane signedness")
         return Wire(self, self.v_create(sigs), signed=signed_lanes[0])

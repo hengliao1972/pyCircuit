@@ -35,6 +35,25 @@ Default backend hierarchy policy:
 - `--inline-policy=off` for hierarchy-preserving module builds
 - strict mode fails compilation if frontend module symbol set changes after lowering passes
 
+### Per-pass IR dump (diagnostics)
+
+Write the MLIR IR before and/or after every pass to a directory so the effect
+of any single pass is directly diffable. Diagnostics only; disabled by
+default (zero overhead when not requested). Works on both `pycc` and
+`pyc-opt`.
+
+```bash
+pycc foo.pyc --emit=none --dump-pass-ir=/tmp/pir
+diff /tmp/pir/*_before_*eliminate-wires*.mlir /tmp/pir/*_after_*eliminate-wires*.mlir
+```
+
+Related flags: `--dump-pass-ir-phase=before|after|both`,
+`--dump-pass-ir-filter=<regex>`, `--dump-pass-ir-max-lines=<N>`, and
+`--dump-pass-ir=auto` (resolves to `<--out-dir>/pass_ir`). Coexists with
+`--profile-pass-timing` / `--profile-json`.
+
+See [mlir_pass_ir_dump.md](mlir_pass_ir_dump.md) for full details.
+
 ## CLI entrypoints
 
 Emit a single `.pyc`:
