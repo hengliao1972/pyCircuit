@@ -416,32 +416,86 @@ class CycleAwareDomain:
 
     def vec(
         self,
-        *values: CycleAwareSignal[VT] | StateSignal[VT] | ForwardSignal[VT] | Wire[VT] | Reg[VT] | list[CycleAwareSignal[VT] | StateSignal[VT] | ForwardSignal[VT] | Wire[VT] | Reg[VT]],
+        *values: CycleAwareSignal[VT] | StateSignal[VT] | ForwardSignal[VT] | Wire[VT] | Reg[VT] | int | LiteralValue | list[CycleAwareSignal[VT] | StateSignal[VT] | ForwardSignal[VT] | Wire[VT] | Reg[VT] | int | LiteralValue],
     ) -> CycleAwareSignal[Vector[VT]]:
-        """Build a Vector and align every lane to the latest logical cycle."""
+        """Build a Vector and align every lane to the latest logical cycle.
+
+        Lanes may be any cycle-aware signal flavor, a plain Wire/Reg, or a
+        hardware literal (``LiteralValue`` / ``int``). Width resolution matches
+        ``Circuit.vec``: explicit-width literals and Wires are authoritative;
+        width-less literals (``U(1)``) and bare ints adopt the widest context
+        width. Every lane is then delayed to the latest cycle so the resulting
+        vector is cycle-consistent.
+        """
         if len(values) == 1 and isinstance(values[0], list):
             values = tuple(values[0])
         if not values:
             raise ValueError("CycleAwareDomain.vec requires at least one value")
-        lanes: list[tuple[Wire, int]] = []
+
+        # Pass 1: collect (raw, cycle) and resolve the target lane width/signed.
+        raw_lanes: list[tuple[object, int]] = []
+        wire_width: int | None = None
+        wire_signed: bool | None = None
+        lit_width: int | None = None
+        lit_signed: bool | None = None
         for value in values:
             if isinstance(value, (CycleAwareSignal, StateSignal, ForwardSignal)):
                 if value.domain is not self:
                     raise ValueError("CycleAwareDomain.vec values must share this domain")
-                lanes.append((_to_wire(value), value.cycle))
+                w = _to_wire(value)
+                cyc = value.cycle
+                if wire_width is None:
+                    wire_width = w.width
+                    wire_signed = w.signed
+                raw_lanes.append((value, cyc))
             elif isinstance(value, Reg):
-                lanes.append((value.q, self.cycle_index))
+                if wire_width is None:
+                    wire_width = value.q.width
+                    wire_signed = value.q.signed
+                raw_lanes.append((value, self.cycle_index))
             elif isinstance(value, Wire):
                 if value.m is not self._m:
                     raise ValueError("CycleAwareDomain.vec values must share this circuit")
-                lanes.append((value, self.cycle_index))
+                if wire_width is None:
+                    wire_width = value.width
+                    wire_signed = value.signed
+                raw_lanes.append((value, self.cycle_index))
+            elif isinstance(value, LiteralValue):
+                lw = value.width if value.width is not None else infer_literal_width(int(value.value), signed=bool(value.signed))
+                if lit_width is None or lw > lit_width:
+                    lit_width = lw
+                if lit_signed is None:
+                    lit_signed = bool(value.signed)
+                raw_lanes.append((value, self.cycle_index))
+            elif isinstance(value, int):
+                lw = infer_literal_width(int(value), signed=value < 0)
+                if lit_width is None or lw > lit_width:
+                    lit_width = lw
+                if lit_signed is None:
+                    lit_signed = value < 0
+                raw_lanes.append((value, self.cycle_index))
             else:
-                raise TypeError(f"CycleAwareDomain.vec expects signal lanes, got {type(value).__name__}")
-        cycle = max(c for _, c in lanes)
-        aligned = [
-            self.delay_to(w, from_cycle=c, to_cycle=cycle)
-            for w, c in lanes
-        ]
+                raise TypeError(f"CycleAwareDomain.vec expects signal lanes or literals, got {type(value).__name__}")
+
+        if wire_width is not None:
+            resolved_width, resolved_signed = wire_width, wire_signed
+        else:
+            resolved_width, resolved_signed = lit_width, lit_signed
+
+        # Pass 2: materialize each lane into a Wire at the resolved width,
+        # then delay to the common cycle.
+        cycle = max(cyc for _, cyc in raw_lanes)
+        aligned: list[Wire] = []
+        for value, cyc in raw_lanes:
+            if isinstance(value, (CycleAwareSignal, StateSignal, ForwardSignal, Reg, Wire)):
+                w = _to_wire(value) if not isinstance(value, Wire) else value
+                if isinstance(value, Reg):
+                    w = value.q
+            elif isinstance(value, LiteralValue):
+                w = Wire.as_wire(value, width=resolved_width, signed=resolved_signed, m=self._m)
+            else:  # int
+                w = Wire.as_wire(int(value), width=resolved_width, signed=resolved_signed, m=self._m)
+            aligned.append(self.delay_to(w, from_cycle=cyc, to_cycle=cycle))
         return CycleAwareSignal(self, self._m.vec(aligned), cycle)
 
     def cat(

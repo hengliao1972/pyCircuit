@@ -287,8 +287,15 @@ class Module:
     def trunc(self, a: Signal, *, width: int) -> Signal:
         if not isinstance(a.ty, (Bits, Vector)):
             raise TypeError("trunc requires an integer or vector-of-integer input")
-        if width >= a.width:
-            raise ValueError(f"trunc width must be < input width, got {width} >= {a.width}")
+        # Align with the MLIR trunc verifier (PYCOps.cpp verifyIntCast): it only
+        # rejects out > in; out == in is a legal identity cast. Short-circuit the
+        # equal-width case here so parameterized code that computes width from
+        # runtime values does not need to special-case the no-op, and downstream
+        # IR stays free of redundant pyc.trunc nodes.
+        if width == a.width:
+            return a
+        if width > a.width:
+            raise ValueError(f"trunc width must be <= input width, got {width} > {a.width}")
         out_ty = Vector.from_shape(a.ty.shape(), Bits(width)) if isinstance(a.ty, Vector) else Bits(width)
         tmp = self._get_next_temp_var()
         self._emit(f"{tmp} = pyc.trunc {a.ref} : {a.ty} -> {out_ty}")
