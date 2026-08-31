@@ -158,6 +158,12 @@ static llvm::cl::opt<bool> includePrims("include-primitives",
                                         llvm::cl::desc("Emit `include` for PYC Verilog primitives"),
                                         llvm::cl::init(true));
 
+static llvm::cl::opt<bool>
+    allowMultiDriven("allow-multidriven",
+                     llvm::cl::desc("Emit Verilog nets that have more than one continuous driver instead of "
+                                    "failing (undefined Verilog; reproduces the historical broken output)"),
+                     llvm::cl::init(false));
+
 static llvm::cl::opt<std::string>
     outDir("out-dir", llvm::cl::desc("Output directory (split per module; emits manifest.json)"), llvm::cl::init(""));
 
@@ -2464,6 +2470,7 @@ int main(int argc, char **argv) {
       pyc::VerilogEmitterOptions opts;
       opts.includePrimitives = false; // out-dir mode uses pyc_primitives.v (or expects external primitives)
       opts.targetFpga = targetFpga;
+      opts.allowMultiDriven = allowMultiDriven;
 
       for (auto f : module->getOps<func::FuncOp>()) {
         if (f.isDeclaration())
@@ -2854,6 +2861,7 @@ int main(int argc, char **argv) {
     }
     pyc::VerilogEmitterOptions opts;
     opts.includePrimitives = includePrims;
+    opts.allowMultiDriven = allowMultiDriven;
     if (targetKind == "fpga")
       opts.targetFpga = true;
     else if (targetKind != "default") {

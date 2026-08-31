@@ -833,7 +833,9 @@ class Reg(Generic[DT]):
         next_w = Wire.as_wire(value, m=m, width=self.width)
 
         if isinstance(when, int) and int(when) == 1:
-            m.assign(self.next, next_w)
+            # Unconditional write: overrides every earlier write to this register in
+            # this cycle (plain last-write-wins), so it *becomes* the running value.
+            self._pyc_drive(m, next_w)
             return
         
         cond = Wire.as_wire(when, m=m, width=1)
@@ -841,7 +843,71 @@ class Reg(Generic[DT]):
             raise TypeError("when width must be 1")
         when_w = Wire.as_wire(when, m=m)
 
-        m.assign(self.next, when_w._select_internal(value, self.q))
+        # Guarded write. The else-branch must be the value accumulated by the writes
+        # that came before it — NOT `self.q`. See _pyc_drive for why.
+        prev = self._pyc_running_value(m)
+        self._pyc_drive(m, when_w._select_internal(value, prev))
+
+    # ── one register, one driver (F13) ──────────────────────────────────────
+    #
+    # `set(v, when=c)` used to emit, per call, an independent
+    #     pyc.assign next, mux(c, v, q)
+    # so N guarded writes to one register produced N assigns, each defaulting to the
+    # register's *current* value rather than to the running next-state value. That is
+    # wrong in two separate ways:
+    #
+    #   * Semantically. The DSL contract is that later writes override earlier ones and
+    #     an unguarded register holds. Because every mux fell back to `q`, the last
+    #     assign unconditionally decided the outcome: with writes (c0,v0)…(cN,vN), the
+    #     result was `cN ? vN : q`, discarding c0…cN-1 entirely. DavinciOO's free list
+    #     (srcs/core/common/free_list.py) issues exactly this pattern once per enqueue
+    #     port, so only the last port's enqueue could ever take effect.
+    #   * Structurally. N assigns to one wire is N continuous drivers in Verilog, which
+    #     is undefined and which yosys/verilator resolve arbitrarily (report F13:
+    #     2 470 conflicting driver bits across 321 nets in davinci_top).
+    #
+    # Both follow from the same root cause, so both are fixed here rather than in the
+    # emitters: chain the muxes into a single priority expression (later guard wins,
+    # `q` as the base case) and keep exactly ONE `pyc.assign` per register, by superseding
+    # the assign already emitted rather than adding a second one (see `_pyc_drive`). With
+    # one correct driver the C++ and Verilog backends agree by construction and neither
+    # emitter needs to change.
+    #
+    # State lives on the Module (keyed by the next-wire ref) because Reg is a frozen
+    # dataclass; it is per-Module and therefore per-elaboration, which is the right
+    # lifetime.
+
+    _PYC_DRIVE_ATTR = "_pyc_reg_next_drive"
+
+    def _pyc_drive_table(self, m: "Module") -> dict:
+        table = getattr(m, Reg._PYC_DRIVE_ATTR, None)
+        if table is None:
+            table = {}
+            setattr(m, Reg._PYC_DRIVE_ATTR, table)
+        return table
+
+    def _pyc_running_value(self, m: "Module") -> "Wire":
+        """The value accumulated so far for this register's next-state, else `q`."""
+        entry = self._pyc_drive_table(m).get(self.next.ref)
+        return entry[0] if entry is not None else self.q
+
+    def _pyc_drive(self, m: "Module", value: "Wire") -> None:
+        """Assign `value` to this register's next wire, replacing any prior assign.
+
+        The replacement must be *appended*, not written back over the old line: `value`
+        is a freshly built mux whose SSA definition comes after the previous assign's
+        position, so patching the old slot in place would emit a use before its def and
+        break MLIR's dominance rule. Instead blank the superseded line — which keeps
+        every other register's recorded index valid, unlike deleting it — and emit the
+        new assign at the end, where all its operands are in scope.
+        """
+        table = self._pyc_drive_table(m)
+        entry = table.get(self.next.ref)
+        if entry is not None:
+            _, idx = entry
+            m._lines[idx] = ""
+        m.assign(self.next, value)
+        table[self.next.ref] = (value, len(m._lines) - 1)
 
 class Circuit(Module):
     """High-level wrapper over `Module` that returns `Wire`/`Reg` objects."""
