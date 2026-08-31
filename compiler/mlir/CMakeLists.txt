@@ -89,6 +89,7 @@ add_library(pyc_transforms
   lib/Transforms/LowerSCFToPYCStaticPass.cpp
   lib/Transforms/PrunePortsPass.cpp
   lib/Transforms/SLPPackWiresPass.cpp
+  lib/Support/PassIRDumper.cpp
   lib/Transforms/VectorUnrollPass.cpp
 )
 llvm_update_compile_flags(pyc_transforms)
@@ -102,6 +103,7 @@ target_link_libraries(pyc_transforms PUBLIC
   MLIRFuncDialect
   MLIRPass
   MLIRSCFDialect
+  LLVMSupport
 )
 
 # pyc-opt requires MLIRRegisterAllPasses; Homebrew LLVM may not export it.

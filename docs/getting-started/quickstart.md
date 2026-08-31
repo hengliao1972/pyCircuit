@@ -64,3 +64,17 @@ python3 -m pycircuit.cli build \
 
 For more end-to-end commands (including direct `emit` and `pycc --emit=cpp`),
 see `docs/QUICKSTART.md`.
+
+## 5) Debugging compiler passes
+
+When a backend gate fails (e.g. `pyc-check-comb-cycles`,
+`pyc-check-logic-depth`, `pyc-check-flat-types`) or you need to see which pass
+changed the IR, dump per-pass IR to a directory and diff any pass pair:
+
+```bash
+pycc /tmp/counter.pyc --emit=none --dump-pass-ir=/tmp/pir
+diff /tmp/pir/*_before_*eliminate-wires*.mlir /tmp/pir/*_after_*eliminate-wires*.mlir
+```
+
+See `docs/mlir_pass_ir_dump.md` for the full flag set and
+`docs/DIAGNOSTICS.md` for the general diagnostic model.

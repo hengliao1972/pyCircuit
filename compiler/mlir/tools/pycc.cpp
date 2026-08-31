@@ -2,6 +2,7 @@
 #include "pyc/Dialect/PYC/PYCOps.h"
 #include "pyc/Emit/CppEmitter.h"
 #include "pyc/Emit/VerilogEmitter.h"
+#include "pyc/Support/PassIRDumper.h"
 #include "pyc/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -213,6 +214,25 @@ static llvm::cl::opt<bool> profilePassTiming(
     "profile-pass-timing",
     llvm::cl::desc("Collect pass-level timing and memory stats (included in --profile-json)"),
     llvm::cl::init(false));
+
+// --- Per-pass IR dump (diagnostics only; never modifies IR) ---
+static llvm::cl::opt<std::string> dumpPassIrDir(
+    "dump-pass-ir",
+    llvm::cl::desc("Dump IR before/after each pass to this directory "
+                   "(use 'auto' for <out-dir>/pass_ir)"),
+    llvm::cl::init(""));
+static llvm::cl::opt<std::string> dumpPassIrPhase(
+    "dump-pass-ir-phase",
+    llvm::cl::desc("Which phase to dump: before | after | both"),
+    llvm::cl::init("both"));
+static llvm::cl::opt<std::string> dumpPassIrFilter(
+    "dump-pass-ir-filter",
+    llvm::cl::desc("Regex filtering pass short names (e.g. 'eliminate-wires|fuse-comb')"),
+    llvm::cl::init(""));
+static llvm::cl::opt<unsigned> dumpPassIrMaxLines(
+    "dump-pass-ir-max-lines",
+    llvm::cl::desc("Truncate each IR dump file after N lines (0 = unlimited)"),
+    llvm::cl::init(0));
 
 static llvm::cl::opt<std::string> emitStructuralMode(
     "emit-structural",
@@ -2252,6 +2272,31 @@ int main(int argc, char **argv) {
     passTimingStorage = std::make_unique<PassTimingCollector>();
     passTimingCollector = passTimingStorage.get();
     pm.addInstrumentation(std::move(passTimingStorage));
+  }
+  // Per-pass IR dump (diagnostics). 'auto' resolves to <out-dir>/pass_ir so the
+  // dump travels with profile/gate artifacts. Disabled entirely if no flag given.
+  std::unique_ptr<pyc::PassIRDumper> passIRDumperStorage;
+  if (!dumpPassIrDir.empty()) {
+    pyc::PassIRDumperOptions dumperOpts;
+    if (dumpPassIrDir == "auto") {
+      if (outDir.empty()) {
+        llvm::errs() << "error: --dump-pass-ir=auto requires --out-dir\n";
+        return 1;
+      }
+      llvm::SmallString<256> p(outDir);
+      llvm::sys::path::append(p, "pass_ir");
+      dumperOpts.dir = p.str().str();
+    } else {
+      dumperOpts.dir = dumpPassIrDir;
+    }
+    dumperOpts.phase = dumpPassIrPhase;
+    dumperOpts.filterRegex = dumpPassIrFilter;
+    dumperOpts.maxLines = static_cast<uint64_t>(dumpPassIrMaxLines);
+    passIRDumperStorage = std::make_unique<pyc::PassIRDumper>(std::move(dumperOpts));
+    // addInstrumentation takes ownership; passIRDumperStorage is released here.
+    // The PassManager keeps the instrumentation alive until `pm` is destroyed,
+    // which happens at end of scope (after pm.run() and any post-run use).
+    pm.addInstrumentation(std::move(passIRDumperStorage));
   }
   pm.addPass(pyc::createCheckFrontendContractPass());
   pm.addPass(pyc::createInlineFunctionsPass());
