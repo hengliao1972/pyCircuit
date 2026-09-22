@@ -86,6 +86,7 @@ add_library(pyc_transforms
   lib/Transforms/InlineFunctionsPass.cpp
   lib/Transforms/PackI1RegsPass.cpp
   lib/Transforms/FuseCombPass.cpp
+  lib/Transforms/CppPlacementPass.cpp
   lib/Transforms/LowerSCFToPYCStaticPass.cpp
   lib/Transforms/PrunePortsPass.cpp
   lib/Transforms/SLPPackWiresPass.cpp

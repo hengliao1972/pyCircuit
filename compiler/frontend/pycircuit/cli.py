@@ -2035,6 +2035,13 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+def _backend_build_flag_hashes(build_flags: dict[str, Any], *, cpp_pch: bool) -> tuple[str, str]:
+    """Return shared-backend and C++-specific cache keys."""
+    shared_hash = _canonical_hash(build_flags)
+    cpp_hash = _canonical_hash({**build_flags, "cpp_pch": bool(cpp_pch)})
+    return shared_hash, cpp_hash
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -2275,8 +2282,12 @@ def _cmd_build(args: argparse.Namespace) -> int:
         "tb_schedule_mode": str(args.tb_schedule_mode),
         "frontend_contract": FRONTEND_CONTRACT,
     }
-    build_flags_hash = _canonical_hash(build_flags)
+    cpp_build_flags = {**build_flags, "cpp_pch": bool(args.cpp_pch)}
+    build_flags_hash, cpp_build_flags_hash = _backend_build_flag_hashes(
+        build_flags, cpp_pch=bool(args.cpp_pch)
+    )
     same_flags = str(cache.get("build_flags_hash", "")) == build_flags_hash
+    cpp_same_flags = str(cache.get("cpp_build_flags_hash", "")) == cpp_build_flags_hash
 
     design_key = "__design_pyc"
     old_hashes = dict(cache.get("module_hashes", {}))
@@ -2362,26 +2373,35 @@ def _cmd_build(args: argparse.Namespace) -> int:
         h = _module_hash(mp)
         module_hashes[sym] = h
         unchanged = same_flags and old_hashes.get(sym) == h
+        cpp_unchanged = cpp_same_flags and old_hashes.get(sym) == h
 
         cpp_out_dir = device_cpp_root / sym
-        cpp_ready = cpp_out_dir.is_dir() and any(cpp_out_dir.glob("*.cpp")) and any(cpp_out_dir.glob("*.hpp"))
-        if do_cpp and not (unchanged and cpp_ready):
+        cpp_ready = (
+            cpp_out_dir.is_dir()
+            and any(cpp_out_dir.glob("*.cpp"))
+            and any(cpp_out_dir.glob("*.hpp"))
+            and (cpp_out_dir / "cpp_compile_manifest.json").is_file()
+        )
+        if do_cpp and not (cpp_unchanged and cpp_ready):
             cpp_out_dir.mkdir(parents=True, exist_ok=True)
+            cpp_args = [
+                str(pycc),
+                str(mp),
+                "--emit=cpp",
+                *pycc_hard_hierarchy_flags,
+                "--out-dir",
+                str(cpp_out_dir),
+                "--cpp-split=module",
+                "--probe-plan",
+                str(probe_plan_path),
+                f"--logic-depth={logic_depth}",
+            ]
+            if args.cpp_pch:
+                cpp_args.append("--cpp-pch")
             pycc_jobs.append(
                 (
                     f"cpp:{sym}",
-                    [
-                        str(pycc),
-                        str(mp),
-                        "--emit=cpp",
-                        *pycc_hard_hierarchy_flags,
-                        "--out-dir",
-                        str(cpp_out_dir),
-                        "--cpp-split=module",
-                        "--probe-plan",
-                        str(probe_plan_path),
-                        f"--logic-depth={logic_depth}",
-                    ],
+                    cpp_args,
                 )
             )
 
@@ -2465,6 +2485,27 @@ def _cmd_build(args: argparse.Namespace) -> int:
             "cxx_standard": "c++17",
             "profile": str(args.profile),
         }
+        if args.cpp_pch:
+            # Collect device hpp headers flagged for PCH across all module manifests.
+            seen: set[str] = set()
+            pch_headers: list[str] = []
+            for manifest_path in sorted(device_cpp_root.rglob("cpp_compile_manifest.json")):
+                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                profile = data.get("profile_summary") or {}
+                if not profile.get("cpp_pch"):
+                    continue
+                for header in data.get("precompile_headers") or []:
+                    if header not in seen:
+                        seen.add(header)
+                        pch_headers.append(header)
+            pch_headers.sort()
+            if not pch_headers:
+                pch_script = _tool_script("cpp_pch_headers.py")
+                pch_mod = _load_py_file(pch_script)
+                pch_headers = pch_mod.select_device_hpp_headers(build_manifest["headers"])
+            if pch_headers:
+                build_manifest["precompile_headers"] = pch_headers
+                build_manifest["precompile_headers_mode"] = "device_hpp"
         cpp_manifest = out_dir / "cpp_project_manifest.json"
         _save_json(cpp_manifest, build_manifest)
 
@@ -2600,6 +2641,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
             "pycc": str(pycc),
             "build_flags": build_flags,
             "build_flags_hash": build_flags_hash,
+            "cpp_build_flags": cpp_build_flags,
+            "cpp_build_flags_hash": cpp_build_flags_hash,
             "jit_cache_key": jit_key,
             "jit_cache_inputs": jit_inputs,
             "last_pycc_jobs": int(len(pycc_jobs)),
@@ -2721,6 +2764,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Backend targets to generate/build",
     )
     build.add_argument("--logic-depth", type=int, default=32, help="Max combinational logic depth for pycc")
+    build.add_argument(
+        "--cpp-pch",
+        action="store_true",
+        help="Precompile device module hpp headers in generated CMake build",
+    )
     build.add_argument(
         "--trace-config",
         default=None,

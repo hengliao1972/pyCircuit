@@ -89,6 +89,11 @@ jobs:
       - name: Run API hygiene gate
         run: python flows/tools/check_api_hygiene.py compiler/frontend/pycircuit designs/examples docs README.md
 
+      - name: Test C++ PCH header selection
+        run: |
+          python flows/tools/test_cpp_pch_headers.py
+          python flows/tools/test_cpp_pch_cache.py
+
   build-linux:
     name: "G0: Build Toolchain (Linux)"
     runs-on: ubuntu-latest
@@ -170,6 +175,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y iverilog
+          python -m pip install pytest
 
       - name: Setup Verilator
         uses: ./.github/actions/setup-verilator
@@ -207,6 +213,17 @@ jobs:
           unset PYC_SKIP_SEMANTIC_REGRESSIONS || true
           unset PYCC || true
           bash flows/scripts/run_examples.sh
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+            PYC_GATE_SKIP_BUILD=1 \
+            PYC_GATE_RUN_ID="${PYC_GATE_RUN_ID}/cpp-placement" \
+            bash flows/scripts/run_cpp_member_placement_gate.sh
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            PYC_GATE_SKIP_BUILD=1 \
+            PYC_GATE_RUN_ID="${PYC_GATE_RUN_ID}/cpp-pch" \
+            bash flows/scripts/run_cpp_device_pch_gate.sh
+          python -m pytest -q tests/vec/test_vec_ops.py \
+            -k 'slt_vv or slt_vs or slt_sv'
 
       - name: Write gate summary
         if: always()
