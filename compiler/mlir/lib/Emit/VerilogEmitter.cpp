@@ -10,6 +10,7 @@
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringMap.h"
@@ -806,6 +807,77 @@ static std::string opSortKey(Operation *op, NameTable &nt) {
   return "";
 }
 
+// A `pyc.assign` lowers to a continuous `assign`, which is a DRIVER, not a
+// statement: two of them on one net are two drivers fighting, and Verilog
+// leaves the result undefined. The C++ emitter lowers the same op to `dst =
+// src;`, a statement with last-write-wins semantics, so a design that assigns
+// one net twice means two different things in the two backends — and the
+// Verilog one means nothing in particular.
+//
+// topoSortCombOps() has always detected this (its wireAssignCount guard) but
+// signals it with the same `false` it uses for a genuine combinational cycle,
+// and emitFunc's response to that `false` is to fall back to a name-order sort
+// and emit every assign regardless. So the condition was recognised by name,
+// discarded, and the broken netlist written out silently. Downstream tools do
+// not save you: yosys warns but proceeds, and verilator 5.044 accepts such a
+// netlist with no diagnostic at all, even under -Wall.
+//
+// Refuse instead, and name the nets. Order is deterministic (MapVector) so the
+// diagnostic is diffable.
+static LogicalResult checkSingleDriver(func::FuncOp f, ArrayRef<Operation *> ops, NameTable &nt,
+                                       bool allowMultiDriven) {
+  llvm::MapVector<Value, unsigned> assignCount;
+  for (Operation *op : ops)
+    if (auto a = dyn_cast<pyc::AssignOp>(op))
+      assignCount[a.getDst()]++;
+
+  llvm::SmallVector<std::pair<std::string, unsigned>> offenders;
+  unsigned extraDrivers = 0;
+  for (auto &kv : assignCount)
+    if (kv.second > 1) {
+      offenders.emplace_back(nt.get(kv.first), kv.second);
+      extraDrivers += kv.second - 1;
+    }
+
+  if (offenders.empty())
+    return success();
+
+  const unsigned kMaxListed = 10;
+  std::string detail;
+  {
+    llvm::raw_string_ostream d(detail);
+    d << offenders.size() << " net(s) in module '" << f.getSymName() << "' have more than one continuous driver ("
+      << extraDrivers << " redundant assign(s)):";
+    for (auto [i, o] : llvm::enumerate(offenders)) {
+      if (i >= kMaxListed) {
+        d << "\n    ... and " << (offenders.size() - kMaxListed) << " more";
+        break;
+      }
+      d << "\n    " << o.first << " <- " << o.second << " drivers";
+    }
+  }
+
+  if (allowMultiDriven) {
+    // Deliberately llvm::errs() and not f.emitWarning(): pycc registers no
+    // MLIR diagnostic handler, and DiagnosticEngine's fallback prints errors
+    // only — a warning would be dropped on the floor. Silently emitting a
+    // netlist known to be undefined is the exact failure this check exists to
+    // end, so the escape hatch has to be audible.
+    llvm::errs() << "warning: " << detail
+                 << "\n  emitting anyway (--allow-multidriven): the result is undefined Verilog"
+                    " and does not implement the design\n";
+    return success();
+  }
+
+  f.emitError() << detail
+                << "\n  a continuous `assign` is a driver, not a statement, so this is undefined Verilog."
+                   "\n  The usual cause is a register written through several guarded writes: each write must"
+                   "\n  chain onto the running next-state value, leaving ONE assign per net, rather than emit"
+                   "\n  its own assign defaulting to the register's current value."
+                   "\n  Pass --allow-multidriven to emit it anyway (reproduces the historical, broken output).";
+  return failure();
+}
+
 static bool topoSortCombOps(ArrayRef<Operation *> ops, NameTable &nt, llvm::SmallVectorImpl<Operation *> &ordered) {
   ordered.clear();
   if (ops.empty())
@@ -1065,6 +1137,15 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
   auto cmp = [&](Operation *a, Operation *b) { return opSortKey(a, nt) < opSortKey(b, nt); };
   std::sort(instOps.begin(), instOps.end(), cmp);
   std::sort(seqInstOps.begin(), seqInstOps.end(), cmp);
+
+  // Before sorting: refuse multi-driver nets. This has to happen here rather
+  // than inside topoSortCombOps, because by the time that function's `false`
+  // reaches the fallback below, the name-order sort has already destroyed the
+  // program order that says which assign was meant to win — so there is no
+  // longer enough information to report, let alone repair, the conflict.
+  if (failed(checkSingleDriver(f, combAssignOps, nt, opts.allowMultiDriven)))
+    return failure();
+
   llvm::SmallVector<Operation *> orderedComb;
   if (!topoSortCombOps(combAssignOps, nt, orderedComb))
     std::sort(combAssignOps.begin(), combAssignOps.end(), cmp);
