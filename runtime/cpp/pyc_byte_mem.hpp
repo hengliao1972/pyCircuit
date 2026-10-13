@@ -152,7 +152,10 @@ public:
     }
   }
 
-  void tick_commit() {
+  // Preserves write/watch/eval side effects and reports only a visible rdata change.
+  bool tick_commit() {
+    const bool hadPendingWrite = pendingWrite;
+    const Wire<DataWidth> oldRdata = rdata;
     if (pendingWrite) {
       std::size_t base = latchedAddr;
       for (unsigned i = 0; i < StrbWidth; i++) {
@@ -191,6 +194,7 @@ public:
     }
     pendingWrite = false;
     eval();
+    return hadPendingWrite && oldRdata != rdata;
   }
 
   // Convenience for testbenches.

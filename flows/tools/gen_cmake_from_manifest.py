@@ -54,6 +54,11 @@ def main() -> int:
     runtime_cfg_exists = bool(runtime_cfg) and (Path(runtime_cfg) / "pycircuitConfig.cmake").is_file()
     runtime_toolchain_root = str(runtime.get("toolchain_root_hint", ""))
     std = str(data.get("cxx_standard", "c++17"))
+    pch_headers = [
+        Path(s).resolve()
+        for s in data.get("precompile_headers", [])
+        if isinstance(s, str) and s
+    ]
 
     if not srcs:
         raise SystemExit("manifest missing `sources`")
@@ -109,6 +114,14 @@ def main() -> int:
                 lines.append(f"  \"{_rel(i, out_dir)}\"\n")
             lines.append(")\n")
         lines.append("target_link_libraries(pyc_tb PRIVATE pyc4_runtime)\n")
+    if pch_headers:
+        for h in pch_headers:
+            if not h.is_file():
+                raise SystemExit(f"missing precompile header: {h}")
+        lines.append("target_precompile_headers(pyc_tb PRIVATE\n")
+        for h in pch_headers:
+            lines.append(f"  \"{_cmake_str(_rel(h, out_dir))}\"\n")
+        lines.append(")\n")
     lines.append("\n")
 
     out = out_dir / "CMakeLists.txt"

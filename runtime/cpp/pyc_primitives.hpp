@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "pyc_bits.hpp"
 #include "pyc_clock.hpp"
 
@@ -98,11 +100,15 @@ public:
     pending = false;
   }
 
-  inline void tick_commit() {
+  // Applies a pending edge and reports whether the visible register output changed.
+  inline bool tick_commit() {
     if (__builtin_expect(pending, 0)) {
+      const bool changed = q != qNext;
       q = qNext;
       pending = false;
+      return changed;
     }
+    return false;
   }
 
 private:
@@ -157,11 +163,15 @@ public:
     pending = false;
   }
 
-  inline void tick_commit() {
+  // Applies a pending edge and reports whether the visible vector output changed.
+  inline bool tick_commit() {
     if (__builtin_expect(pending, 0)) {
+      const bool changed = q != qNext;
       q = qNext;
       pending = false;
+      return changed;
     }
+    return false;
   }
 
 private:
@@ -190,6 +200,11 @@ public:
 template <unsigned Width, unsigned Depth>
 class pyc_fifo {
 public:
+  using change_mask_t = std::uint8_t;
+  static constexpr change_mask_t kInReadyChanged = change_mask_t{1} << 0;
+  static constexpr change_mask_t kOutValidChanged = change_mask_t{1} << 1;
+  static constexpr change_mask_t kOutDataChanged = change_mask_t{1} << 2;
+
   pyc_fifo(Wire<1> &clk,
            Wire<1> &rst,
            Wire<1> &in_valid,
@@ -273,15 +288,34 @@ public:
     }
   }
 
-  void tick_commit() {
+  // The mask describes state-driven changes to the three visible FIFO outputs.
+  // Output wires remain updated by eval(), preserving the existing phase split.
+  change_mask_t tick_commit() {
     if (!pending)
-      return;
+      return 0;
+
+    const bool oldOutValid = count_ != 0;
+    const bool oldInReady = (count_ < Depth) || (oldOutValid && out_ready.toBool());
+    const Wire<Width> oldOutData = oldOutValid ? storage_[rd_] : Wire<Width>(0);
+
     rd_ = rdNext_;
     wr_ = wrNext_;
     count_ = countNext_;
     for (unsigned i = 0; i < Depth; ++i)
       storage_[i] = storageNext_[i];
     pending = false;
+
+    const bool newOutValid = count_ != 0;
+    const bool newInReady = (count_ < Depth) || (newOutValid && out_ready.toBool());
+    const Wire<Width> newOutData = newOutValid ? storage_[rd_] : Wire<Width>(0);
+    change_mask_t changed = 0;
+    if (oldInReady != newInReady)
+      changed |= kInReadyChanged;
+    if (oldOutValid != newOutValid)
+      changed |= kOutValidChanged;
+    if (oldOutData != newOutData)
+      changed |= kOutDataChanged;
+    return changed;
   }
 
 private:
