@@ -239,18 +239,30 @@ private:
       }
       return Wire<DataWidth>(out);
     }
+    // Word-level lane masks: build one 64-bit mask per destination word from
+    // the strobe bits that map into it, then a single AND/OR merge per word.
+    // O(kWords) instead of the previous O(StrbWidth * 8 * kWords) bit loop.
     Wire<DataWidth> v = oldV;
-    for (unsigned i = 0; i < StrbWidth; i++) {
-      if (!strb.bit(i))
-        continue;
-      unsigned bitsInLane = (i == StrbWidth - 1) ? lastLaneBits() : 8u;
-      for (unsigned b = 0; b < bitsInLane; ++b) {
-        unsigned bitIdx = 8u * i + b;
-        if (newV.bit(bitIdx))
-          v = v | shl<DataWidth>(Wire<DataWidth>(1), bitIdx);
-        else
-          v = v & ~shl<DataWidth>(Wire<DataWidth>(1), bitIdx);
+    constexpr unsigned kLanesPerWord = 64u / 8u;
+    constexpr unsigned kWords = Wire<DataWidth>::kWords;
+    for (unsigned w = 0; w < kWords; ++w) {
+      unsigned laneLo = w * kLanesPerWord;
+      if (laneLo >= StrbWidth)
+        break;
+      unsigned laneHi = laneLo + kLanesPerWord;
+      if (laneHi > StrbWidth)
+        laneHi = StrbWidth;
+      std::uint64_t m = 0;
+      for (unsigned i = laneLo; i < laneHi; ++i) {
+        if (!strb.bit(i))
+          continue;
+        unsigned bitsInLane = (i == StrbWidth - 1) ? lastLaneBits() : 8u;
+        std::uint64_t laneMask =
+            (bitsInLane >= 64) ? ~std::uint64_t{0} : ((1ull << bitsInLane) - 1ull);
+        m |= laneMask << (8u * (i - laneLo));
       }
+      if (m != 0)
+        v.setWord(w, (v.word(w) & ~m) | (newV.word(w) & m));
     }
     return v;
   }
@@ -513,18 +525,30 @@ private:
       }
       return Wire<DataWidth>(out);
     }
+    // Word-level lane masks: build one 64-bit mask per destination word from
+    // the strobe bits that map into it, then a single AND/OR merge per word.
+    // O(kWords) instead of the previous O(StrbWidth * 8 * kWords) bit loop.
     Wire<DataWidth> v = oldV;
-    for (unsigned i = 0; i < StrbWidth; i++) {
-      if (!strb.bit(i))
-        continue;
-      unsigned bitsInLane = (i == StrbWidth - 1) ? lastLaneBits() : 8u;
-      for (unsigned b = 0; b < bitsInLane; ++b) {
-        unsigned bitIdx = 8u * i + b;
-        if (newV.bit(bitIdx))
-          v = v | shl<DataWidth>(Wire<DataWidth>(1), bitIdx);
-        else
-          v = v & ~shl<DataWidth>(Wire<DataWidth>(1), bitIdx);
+    constexpr unsigned kLanesPerWord = 64u / 8u;
+    constexpr unsigned kWords = Wire<DataWidth>::kWords;
+    for (unsigned w = 0; w < kWords; ++w) {
+      unsigned laneLo = w * kLanesPerWord;
+      if (laneLo >= StrbWidth)
+        break;
+      unsigned laneHi = laneLo + kLanesPerWord;
+      if (laneHi > StrbWidth)
+        laneHi = StrbWidth;
+      std::uint64_t m = 0;
+      for (unsigned i = laneLo; i < laneHi; ++i) {
+        if (!strb.bit(i))
+          continue;
+        unsigned bitsInLane = (i == StrbWidth - 1) ? lastLaneBits() : 8u;
+        std::uint64_t laneMask =
+            (bitsInLane >= 64) ? ~std::uint64_t{0} : ((1ull << bitsInLane) - 1ull);
+        m |= laneMask << (8u * (i - laneLo));
       }
+      if (m != 0)
+        v.setWord(w, (v.word(w) & ~m) | (newV.word(w) & m));
     }
     return v;
   }
