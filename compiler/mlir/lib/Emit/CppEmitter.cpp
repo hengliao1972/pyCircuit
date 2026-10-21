@@ -13,6 +13,7 @@
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Visitors.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -1469,10 +1470,85 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "  " << cppType(tap.getTap().getType()) << " " << nt.get(tap.getTap())
        << "_qNext{};\n";
 
+  // Tick-fuse (compute/commit merge) classification. A reg is direct-write-safe
+  // iff its d/rst/en do not depend, through the value graph, on any state
+  // output of this module (reg/delay q and tap, mem/fifo/cdc outputs,
+  // instance results): those only change at their own commit, so reading them
+  // in another element's single-phase update is an ordering hazard. Comb
+  // results, top ports and pure ops over them are stable snapshots for this
+  // edge. Only enabled when every reg/delay shares one clock (fast edge).
+  llvm::DenseSet<Value> stateOutputs;
+  for (auto r : regs)
+    stateOutputs.insert(r.getQ());
+  for (auto delay : delayLines)
+    stateOutputs.insert(delay.getQ());
+  for (auto tap : delayTaps)
+    stateOutputs.insert(tap.getTap());
+  for (auto fifo : fifos) {
+    stateOutputs.insert(fifo.getInReady());
+    stateOutputs.insert(fifo.getOutValid());
+    stateOutputs.insert(fifo.getOutData());
+  }
+  for (auto mem : byteMems)
+    stateOutputs.insert(mem.getRdata());
+  for (auto mem : syncMems)
+    stateOutputs.insert(mem.getRdata());
+  for (auto mem : syncMemDPs) {
+    stateOutputs.insert(mem.getRdata0());
+    stateOutputs.insert(mem.getRdata1());
+  }
+  for (auto fifo : asyncFifos) {
+    stateOutputs.insert(fifo.getInReady());
+    stateOutputs.insert(fifo.getOutValid());
+    stateOutputs.insert(fifo.getOutData());
+  }
+  for (auto sync : cdcSyncs)
+    stateOutputs.insert(sync.getOut());
+  for (auto inst : instances)
+    for (Value out : inst.getResults())
+      stateOutputs.insert(out);
+  auto dependsOnState = [&](Value root) -> bool {
+    llvm::SmallSet<Operation *, 32> visited;
+    llvm::SmallVector<Value> work{root};
+    while (!work.empty()) {
+      Value v = work.pop_back_val();
+      if (stateOutputs.count(v))
+        return true;
+      Operation *def = v.getDefiningOp();
+      if (!def || isa<pyc::CombOp>(def))
+        continue; // top port, or comb boundary evaluated before the edge
+      if (!visited.insert(def).second)
+        continue;
+      for (Value operand : def->getOperands())
+        work.push_back(operand);
+    }
+    return false;
+  };
+  bool tickFuseSingleClock = true;
+  std::string tickFuseClk;
+  auto noteTickFuseClk = [&](Value clk) {
+    std::string name = nt.get(clk);
+    if (tickFuseClk.empty())
+      tickFuseClk = std::move(name);
+    else if (tickFuseClk != name)
+      tickFuseSingleClock = false;
+  };
+  for (auto r : regs)
+    noteTickFuseClk(r.getClk());
+  for (auto delay : delayLines)
+    noteTickFuseClk(delay.getClk());
+  llvm::DenseSet<Operation *> fusedRegOps;
+  if (tickFuseSingleClock && !tickFuseClk.empty())
+    for (auto r : regs)
+      if (!dependsOnState(r.getNext()) && !dependsOnState(r.getRst()) &&
+          !dependsOnState(r.getEn()))
+        fusedRegOps.insert(r.getOperation());
+
   // RegLoop grouping: scalar regs carrying pyc.loop_id lower into
   // per-loop pyc::cpp::RegLoop<W> members; everything else keeps the
   // per-reg expansion. Map: loop id -> (width, regs in IR order).
   llvm::DenseMap<int64_t, unsigned> regLoopWidth;
+  llvm::DenseSet<int64_t> fusedRegLoops; // loops whose lanes are all fused
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::RegOp>> regLoopRegs;
   llvm::SmallVector<pyc::RegOp> unloopedRegs;
   for (pyc::RegOp r : regs) {
@@ -1486,7 +1562,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     // Regs rewritten by earlier passes (retiming/packing) may carry a width
     // different from the partition-time majority; split into a per-width
     // sub-loop keyed (id, width) so RegLoop<W>'s single template width holds.
-    const int64_t key = id * 4096 + static_cast<int64_t>(w);
+    // Fused (single-phase) and phased lanes live in separate loops.
+    const bool fused = fusedRegOps.count(r.getOperation());
+    const int64_t key = (id * 4096 + static_cast<int64_t>(w)) * 2 + fused;
+    if (fused)
+      fusedRegLoops.insert(key);
     regLoopWidth.try_emplace(key, w);
     regLoopRegs[key].push_back(r);
     r->setAttr("pyc.loop_id",
@@ -1496,6 +1576,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   for (auto &kv : regLoopRegs)
     regLoopIds.push_back(kv.first);
   std::sort(regLoopIds.begin(), regLoopIds.end());
+  // Loops that keep the two-phase compute/commit protocol.
+  llvm::SmallVector<int64_t> phasedRegLoopIds;
+  llvm::SmallVector<int64_t> fusedRegLoopIds;
+  for (int64_t loopId : regLoopIds)
+    (fusedRegLoops.count(loopId) ? fusedRegLoopIds : phasedRegLoopIds)
+        .push_back(loopId);
   // Rewrite the reg list so the per-reg paths skip looped regs.
   regs.clear();
   for (pyc::RegOp r : unloopedRegs)
@@ -2339,6 +2425,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     for (pyc::RegOp r : regLoopRegs[loopId])
       noteFastClk(r.getClk());
   const bool fastEdge = fastClkUnique && !fastClkName.empty();
+  if (!fastEdge && !fusedRegLoopIds.empty())
+    return f.emitError("tick-fuse loops require a single-clock fast edge");
   if (fastEdge) {
     os << "  bool _pyc_clk_prev = false;\n";
     os << "  bool _pyc_seq_armed = false;\n";
@@ -4077,13 +4165,17 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   if (fastEdge) {
     // One edge check for every register on this clock. A falling edge after
     // commit only keeps clkPrev; it does not sample next-state again.
+    if (!fusedRegLoopIds.empty())
+      os << "    bool _pyc_fused_rise = false;\n";
     os << "    {\n";
     os << "      bool _pyc_now = " << fastClkName << ".toBool();\n";
     os << "      bool _pyc_rise = !_pyc_clk_prev && _pyc_now;\n";
     os << "      bool _pyc_fall = _pyc_clk_prev && !_pyc_now;\n";
     os << "      _pyc_clk_prev = _pyc_now;\n";
     os << "      if (_pyc_rise) {\n";
-    for (int64_t loopId : regLoopIds) {
+    if (!fusedRegLoopIds.empty())
+      os << "        _pyc_fused_rise = true;\n";
+    for (int64_t loopId : phasedRegLoopIds) {
       os << "        reg_loop_" << loopId << ".compute_rise();\n";
     }
     for (int64_t dbk : delayLoopIds)
@@ -4094,7 +4186,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "        _pyc_seq_armed = true;\n";
     os << "      } else if (_pyc_fall) {\n";
     os << "        if (_pyc_seq_armed) {\n";
-    for (int64_t loopId : regLoopIds) {
+    for (int64_t loopId : phasedRegLoopIds) {
       os << "          reg_loop_" << loopId << ".negedge();\n";
     }
     for (int64_t dbk : delayLoopIds)
@@ -4105,7 +4197,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "      } else {\n";
-    for (int64_t loopId : regLoopIds) {
+    for (int64_t loopId : phasedRegLoopIds) {
       os << "        reg_loop_" << loopId << ".compute_generic(_pyc_now);\n";
     }
     for (int64_t dbk : delayLoopIds)
@@ -4183,6 +4275,30 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                            os << indent << key << ".tick_compute();\n";
                          });
   }
+  if (!fusedRegLoopIds.empty()) {
+    // Single-phase update for fused lanes: runs after every other element
+    // sampled its inputs, so no compute stage can observe a fused q early.
+    os << "    if (_pyc_fused_rise) {\n";
+    for (int64_t loopId : fusedRegLoopIds) {
+      std::string loop = "reg_loop_" + std::to_string(loopId);
+      os << "      const auto &_pyc_loop_dirty_" << loopId << " = " << loop
+         << ".direct_commit();\n";
+      unsigned lane = 0;
+      for (pyc::RegOp r : regLoopRegs[loopId]) {
+        std::string changed =
+            "_pyc_commit_changed_" + nt.get(r.getQ()) + "_inst";
+        os << "      const bool " << changed << " = ((_pyc_loop_dirty_"
+           << loopId << "[" << (lane >> 6) << "u] >> " << (lane & 63)
+           << "u) & 1u);\n";
+        os << "      if (" << changed << ") {\n";
+        emitMetadataCombFanout(r.getQ(), os, *schedule, combIndex, nt,
+                               "        ");
+        os << "      }\n";
+        ++lane;
+      }
+    }
+    os << "    }\n";
+  }
   os << "  }\n\n";
 
   os << "  void tick_commit() {\n";
@@ -4251,7 +4367,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   }
   // RegLoop commit: per-lane dirty bitmap keeps the change-driven wake as
   // precise as the per-reg path.
-  for (int64_t loopId : regLoopIds) {
+  for (int64_t loopId : phasedRegLoopIds) {
     std::string loop = "reg_loop_" + std::to_string(loopId);
     os << "    const auto &_pyc_loop_dirty_" << loopId << " = " << loop
        << ".commit();\n";
