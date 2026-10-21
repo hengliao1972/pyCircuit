@@ -4365,6 +4365,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (lane)
       os << "    }\n";
   }
+  // Fused loops already published q in tick_compute; only retire pending.
+  for (int64_t loopId : fusedRegLoopIds)
+    os << "    reg_loop_" << loopId << ".retire();\n";
   // RegLoop commit: per-lane dirty bitmap keeps the change-driven wake as
   // precise as the per-reg path.
   for (int64_t loopId : phasedRegLoopIds) {

@@ -92,8 +92,20 @@ int main() {
     const std::vector<std::uint64_t> fusedDirty =
         rise ? fusedLoop.direct_commit() : std::vector<std::uint64_t>(3, 0);
 
+    for (unsigned i = 0; i < kRegLanes; ++i) {
+      const bool pend = *regLoop.lane_pending(i);
+      if (pend != *fusedLoop.lane_pending(i) ||
+          (pend && regLoop.lane_qnext(i)->value() !=
+                       fusedLoop.lane_qnext(i)->value())) {
+        std::fprintf(stderr, "FUSED WRITE-INTENT MISMATCH cycle %u lane %u\n",
+                     c, i);
+        return 1;
+      }
+    }
+
     // Wake precision: per-lane bitmaps equal the per-object commit results.
     const auto &regDirty = regLoop.commit();
+    fusedLoop.retire();
     const auto delayRes = delayLoop.commit();
     for (unsigned i = 0; i < kRegLanes; ++i) {
       const bool changed = regRef[i].tick_commit();

@@ -106,6 +106,8 @@ public:
   // returning the per-lane dirty bitmap. Only valid for lanes whose rst/en/d
   // are pre-edge snapshots (no dependency on any state output) and only right
   // after a rising edge; such a loop never uses compute_rise()/commit().
+  // pending/qNext are still recorded so write-intent probes see the update;
+  // retire() clears pending at the point where commit() would have.
   const std::vector<std::uint64_t> &direct_commit() {
     const std::size_t n = lanes_.size();
     clkPrev_ = true;
@@ -113,9 +115,12 @@ public:
     for (std::size_t i = 0; i < n; ++i) {
       const Lane &lane = lanes_[i];
       const bool r = lane.rst->toBool();
-      if (!(r | lane.en->toBool()))
+      const bool go = r | lane.en->toBool();
+      pending_[i] = static_cast<char>(go);
+      if (!go)
         continue;
       const Wire<Width> &nxt = r ? *lane.init : *lane.d;
+      qNext_[i] = nxt;
       Wire<Width> &q = *lane.q;
       if (q != nxt) {
         q = nxt;
@@ -124,6 +129,9 @@ public:
     }
     return dirty_;
   }
+
+  // Fused loops: the commit() counterpart for pending bookkeeping only.
+  void retire() { clear_pending(); }
 
   // Probe/trace write-intent bindings: stable addresses for lane i's pending
   // flag and sampled next value (mirror pyc_reg::pending/qNext). pending_
