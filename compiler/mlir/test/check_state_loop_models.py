@@ -39,6 +39,11 @@ def main() -> None:
                 looped = "RegLoop<" in text or "DelayLoop<" in text
                 if looped != (mode == "loop"):
                     raise AssertionError(f"{source} {mode}: loop lowering={looped}")
+                i = text.find("direct_commit()")
+                if mode == "loop" and i >= 0 and \
+                        "if (_pyc_loop_dirty_" not in text[i:i + 80]:
+                    raise AssertionError(
+                        f"{source}: fused dirty walk missing a word skip")
                 binary = temp / f"{source}.{mode}.bin"
                 compile_cpp(args.cxx, header, binary, HERE / driver)
                 outputs[mode] = result([str(binary)])

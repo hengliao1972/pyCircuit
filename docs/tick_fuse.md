@@ -10,6 +10,7 @@
   `compute_rise/negedge/compute_generic/commit`。
 - 时机：`direct_commit()` 在 `tick_compute` 末尾、所有其他元件（mem/fifo/实例/phased loop）都采样完之后，
   且只在本次调用见到上升沿时执行；返回逐 lane 脏位图，沿用同一套 `emitMetadataCombFanout` 唤醒。
+  脏位图按 64-lane 字先判断，全 0 的字跳过该字全部 per-lane 唤醒（与 `tick_commit` 的 `openLaneWord` 相同）。
 - 写意图探针：`direct_commit()` 仍写 `pending_/qNext_`，`tick_commit` 里 `retire()` 清 pending，
   `lane_pending/lane_qnext` 的语义与两相一致（`tick()` 之后、`commit()` 之前可见）。
 - 相对 `ldz/feat/tick-fuse` 原实现的取舍：原版按单个 reg 的 `direct_commit` 直写，且只检查 `next`；这里

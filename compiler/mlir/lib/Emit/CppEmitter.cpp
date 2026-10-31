@@ -4285,6 +4285,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
          << ".direct_commit();\n";
       unsigned lane = 0;
       for (pyc::RegOp r : regLoopRegs[loopId]) {
+        if (!(lane & 63)) {
+          if (lane)
+            os << "      }\n";
+          os << "      if (_pyc_loop_dirty_" << loopId << "[" << (lane >> 6)
+             << "u]) {\n";
+        }
         std::string changed =
             "_pyc_commit_changed_" + nt.get(r.getQ()) + "_inst";
         os << "      const bool " << changed << " = ((_pyc_loop_dirty_"
@@ -4296,6 +4302,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         os << "      }\n";
         ++lane;
       }
+      if (lane)
+        os << "      }\n";
     }
     os << "    }\n";
   }
