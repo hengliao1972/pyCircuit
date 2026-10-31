@@ -1162,10 +1162,13 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
   return op.emitError("unsupported combinational op for C++ emission");
 }
 
-static void emitMetadataCombFanout(
-    Value value, llvm::raw_ostream &os, const EmissionSchedule &schedule,
-    const llvm::DenseMap<Operation *, unsigned> &combIndices, NameTable &nt,
-    llvm::StringRef indent = "      ") {
+// Fanout wake of `value` as sorted (comb dirty word, OR mask) pairs, merged
+// per word: up to 64 combs sharing a dirty word collapse to one store.
+// Appends to `out` without merging across prior entries.
+static void collectFanoutWordMasks(
+    Value value, const EmissionSchedule &schedule,
+    const llvm::DenseMap<Operation *, unsigned> &combIndices,
+    llvm::SmallVectorImpl<std::pair<unsigned, uint64_t>> &out) {
   auto sourceIt = schedule.valueToNode.find(value);
   if (sourceIt == schedule.valueToNode.end())
     return;
@@ -1182,19 +1185,25 @@ static void emitMetadataCombFanout(
   llvm::SmallVector<unsigned> fanouts(uniqueFanouts.begin(),
                                       uniqueFanouts.end());
   llvm::sort(fanouts);
-  if (fanouts.empty())
-    return;
-  // Emit fanout wake as per-word OR masks instead of a mark loop: each group
-  // of up to 64 combs sharing a dirty word collapses to one store.
-  llvm::SmallVector<std::pair<unsigned, uint64_t>> wordMasks;
+  const std::size_t start = out.size();
   for (unsigned fanout : fanouts) {
     unsigned word = fanout / 64;
     uint64_t mask = uint64_t{1} << (fanout % 64);
-    if (!wordMasks.empty() && wordMasks.back().first == word)
-      wordMasks.back().second |= mask;
+    if (out.size() > start && out.back().first == word)
+      out.back().second |= mask;
     else
-      wordMasks.emplace_back(word, mask);
+      out.emplace_back(word, mask);
   }
+}
+
+static void emitMetadataCombFanout(
+    Value value, llvm::raw_ostream &os, const EmissionSchedule &schedule,
+    const llvm::DenseMap<Operation *, unsigned> &combIndices, NameTable &nt,
+    llvm::StringRef indent = "      ") {
+  llvm::SmallVector<std::pair<unsigned, uint64_t>> wordMasks;
+  collectFanoutWordMasks(value, schedule, combIndices, wordMasks);
+  if (wordMasks.empty())
+    return;
   std::string fanoutName = "_pyc_direct_fanout_" + sanitizeId(nt.get(value));
   os << indent << "static constexpr std::array<std::pair<unsigned, std::uint64_t>, "
      << wordMasks.size() << "> " << fanoutName << "{{";
@@ -4278,32 +4287,39 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   if (!fusedRegLoopIds.empty()) {
     // Single-phase update for fused lanes: runs after every other element
     // sampled its inputs, so no compute stage can observe a fused q early.
+    // The wake is table-driven: direct_commit()'s per-lane dirty bitmap is
+    // walked by FusedLaneWake::apply (set-bit iteration per 64-lane word),
+    // replacing one emitted branch per lane with a shared tiny loop; the
+    // per-lane fanout (comb word, OR mask) pairs live in constexpr rodata.
     os << "    if (_pyc_fused_rise) {\n";
     for (int64_t loopId : fusedRegLoopIds) {
       std::string loop = "reg_loop_" + std::to_string(loopId);
-      os << "      const auto &_pyc_loop_dirty_" << loopId << " = " << loop
-         << ".direct_commit();\n";
-      unsigned lane = 0;
+      llvm::SmallVector<unsigned> wakeOffsets;
+      llvm::SmallVector<std::pair<unsigned, uint64_t>> wakeEntries;
       for (pyc::RegOp r : regLoopRegs[loopId]) {
-        if (!(lane & 63)) {
-          if (lane)
-            os << "      }\n";
-          os << "      if (_pyc_loop_dirty_" << loopId << "[" << (lane >> 6)
-             << "u]) {\n";
-        }
-        std::string changed =
-            "_pyc_commit_changed_" + nt.get(r.getQ()) + "_inst";
-        os << "      const bool " << changed << " = ((_pyc_loop_dirty_"
-           << loopId << "[" << (lane >> 6) << "u] >> " << (lane & 63)
-           << "u) & 1u);\n";
-        os << "      if (" << changed << ") {\n";
-        emitMetadataCombFanout(r.getQ(), os, *schedule, combIndex, nt,
-                               "        ");
-        os << "      }\n";
-        ++lane;
+        wakeOffsets.push_back(wakeEntries.size());
+        collectFanoutWordMasks(r.getQ(), *schedule, combIndex, wakeEntries);
       }
-      if (lane)
-        os << "      }\n";
+      wakeOffsets.push_back(wakeEntries.size());
+      std::string wake = "_pyc_fused_wake_" + loop;
+      os << "      static constexpr pyc::cpp::FusedLaneWake<"
+         << wakeOffsets.size() - 1 << ", " << wakeEntries.size() << "> "
+         << wake << "{{{";
+      llvm::interleaveComma(wakeOffsets, os,
+                            [&](unsigned o) { os << o << "u"; });
+      if (wakeEntries.empty()) {
+        // std::array<T, 0> initializes from {} — no element braces.
+        os << "}},{{}}};\n";
+      } else {
+        os << "}},{{";
+        llvm::interleaveComma(wakeEntries, os, [&](const auto &e) {
+          os << "{" << e.first << "u, 0x" << llvm::utohexstr(e.second)
+             << "ull}";
+        });
+        os << "}}};\n";
+      }
+      os << "      " << wake << ".apply(" << loop
+         << ".direct_commit(), _pyc_comb_dirty);\n";
     }
     os << "    }\n";
   }

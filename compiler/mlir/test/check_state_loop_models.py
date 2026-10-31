@@ -39,11 +39,24 @@ def main() -> None:
                 looped = "RegLoop<" in text or "DelayLoop<" in text
                 if looped != (mode == "loop"):
                     raise AssertionError(f"{source} {mode}: loop lowering={looped}")
-                i = text.find("direct_commit()")
-                if mode == "loop" and i >= 0 and \
-                        "if (_pyc_loop_dirty_" not in text[i:i + 80]:
-                    raise AssertionError(
-                        f"{source}: fused dirty walk missing a word skip")
+                i = text.find("if (_pyc_fused_rise)")
+                j = text.find("void tick_commit()")
+                if mode == "loop" and i >= 0 and j > i:
+                    # The fused wake must be the table-driven set-bit walk:
+                    # one FusedLaneWake table + .apply() per fused loop, with
+                    # no per-lane emitted dirty tests in between.
+                    seg = text[i:j]
+                    if "direct_commit()" not in seg or \
+                            "FusedLaneWake<" not in seg or \
+                            ".apply(" not in seg or \
+                            "_pyc_commit_changed_" in seg:
+                        raise AssertionError(
+                            f"{source}: fused wake missing table-driven walk")
+                for line in text.splitlines():
+                    if "FusedLaneWake" in line and \
+                            line.count("{") != line.count("}"):
+                        raise AssertionError(
+                            f"{source}: unbalanced FusedLaneWake table line")
                 binary = temp / f"{source}.{mode}.bin"
                 compile_cpp(args.cxx, header, binary, HERE / driver)
                 outputs[mode] = result([str(binary)])
