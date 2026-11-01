@@ -101,9 +101,14 @@ public:
 
   void negedge() { clkPrev_ = false; clear_pending(); }
 
-  const std::vector<std::uint64_t> &commit() {
+  // Applies pending updates, writes back through the lane's q pointer, and
+  // returns the per-lane dirty bitmap (bit i set == lane i's q changed).
+  // The returned bitmap is consumed (and cleared) by the wake walk
+  // (FusedLaneWake/FlatLaneWake::apply), so no upfront memset: the only
+  // reader in generated code clears as it walks, and add_lanes
+  // zero-initializes once.
+  std::vector<std::uint64_t> &commit() {
     const std::size_t n = q_.size();
-    dirty_.assign(loop_word_count(n), 0);
     for (std::size_t i = 0; i < n; ++i) {
       if (__builtin_expect(pending_[i] != 0, 0)) {
         std::uint64_t *q = q_[i];
@@ -121,10 +126,11 @@ public:
     return dirty_;
   }
 
-  const std::vector<std::uint64_t> &direct_commit() {
+  // Tick-fuse single-phase update: consumed (and cleared) by the wake walk
+  // (FusedLaneWake/FlatLaneWake::apply) — see commit().
+  std::vector<std::uint64_t> &direct_commit() {
     const std::size_t n = q_.size();
     clkPrev_ = true;
-    dirty_.assign(loop_word_count(n), 0);
     // One control read per loop; a disabled edge skips the whole lane walk
     // (qNext keeps its last value, exactly as a per-lane `continue` would).
     const bool r = rst_->toBool();
@@ -153,6 +159,14 @@ public:
 
   void retire() { clear_pending(); }
 
+  // Diagnostic/helper reset of the consumed-in-place dirty bitmap; generated
+  // code never calls this (the wake walks clear as they consume).
+  void clearDirty() { dirty_.assign(loop_word_count(q_.size()), 0); }
+
+  // Probe/trace write-intent bindings: stable addresses for lane i's pending
+  // flag and sampled next value (mirror pyc_reg::pending/qNext). pending_
+  // stores char with values exactly 0/1; bool has the same object
+  // representation on the Itanium ABI and consumers only test truthiness.
   bool *lane_pending(std::size_t i) {
     return reinterpret_cast<bool *>(&pending_[i]);
   }

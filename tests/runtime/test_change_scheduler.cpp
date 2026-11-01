@@ -51,21 +51,28 @@ void testFusedLaneWake() {
   static constexpr FusedLaneWake<2, 0> noFanout{{{0u, 0u, 0u}}, {{}}};
 
   DirtyBitset<128> comb;
-  // Lanes 0, 2, 4 dirty: exactly their fanout pairs get marked.
-  wake.apply(std::vector<std::uint64_t>{0b10101u}, comb);
+  // Lanes 0, 2, 4 dirty: exactly their fanout pairs get marked, and the
+  // consumed bitmap is cleared in place.
+  std::vector<std::uint64_t> dirty{0b10101u};
+  wake.apply(dirty, comb);
   assert(comb.test(0));
   assert(comb.test(65) && comb.test(66));
   assert(comb.test(68) && comb.test(69));
   assert(comb.count() == 5);
+  assert(dirty[0] == 0);
 
-  // Only lanes without fanout dirty: nothing marked.
+  // Only lanes without fanout dirty: nothing marked, input still consumed.
   comb.clear();
-  wake.apply(std::vector<std::uint64_t>{0b10010u}, comb);
+  dirty[0] = 0b10010u;
+  wake.apply(dirty, comb);
   assert(comb.empty());
+  assert(dirty[0] == 0);
 
-  // Empty table wakes nothing even with every lane dirty.
-  noFanout.apply(std::vector<std::uint64_t>{~0ull}, comb);
+  // Empty table wakes nothing even with every lane dirty (and clears).
+  dirty[0] = ~0ull;
+  noFanout.apply(dirty, comb);
   assert(comb.empty());
+  assert(dirty[0] == 0);
 }
 
 } // namespace

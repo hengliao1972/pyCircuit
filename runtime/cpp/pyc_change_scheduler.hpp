@@ -130,8 +130,11 @@ struct FusedLaneWake {
   std::array<unsigned, Lanes + 1> offsets{};
   std::array<std::pair<unsigned, std::uint64_t>, Entries> entries{};
 
+  // Consuming wake: every dirty word is cleared as it is read, so the
+  // producing loop (RegLoop::direct_commit/commit) no longer memsets the
+  // bitmap up front — the only reader in generated code is this walk.
   template <std::size_t Capacity>
-  void apply(const std::vector<std::uint64_t> &dirty,
+  void apply(std::vector<std::uint64_t> &dirty,
              DirtyBitset<Capacity> &comb) const noexcept {
     constexpr std::size_t kWords = (Lanes + 63) / 64;
     // Bits above Lanes in the last word address no offsets entry; mask them
@@ -142,6 +145,7 @@ struct FusedLaneWake {
     for (std::size_t w = 0; w < kWords; ++w) {
       std::uint64_t bits =
           dirty[w] & (w + 1 == kWords ? kValidBits : ~std::uint64_t{0});
+      dirty[w] = 0;
       while (bits) {
         const unsigned lane =
             static_cast<unsigned>(w * 64) +

@@ -142,6 +142,11 @@ int main() {
       std::fprintf(stderr, "VALUE MISMATCH cycle %u\n", c);
       return 1;
     }
+    // The dirty bitmaps are consumed in place by the wake walk in generated
+    // code; this test reads them directly, so reset them explicitly.
+    regLoop.clearDirty();
+    mixedLoop.clearDirty();
+    fusedLoop.clearDirty();
   }
 
   // FlatLaneWake: single-fanout dispatch wake must mark exactly what a
