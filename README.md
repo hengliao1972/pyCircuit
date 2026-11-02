@@ -105,6 +105,48 @@ python3 -m pycircuit.cli build \
   --jobs 8
 ```
 
+Emit device RTL without requiring a testbench:
+
+```bash
+PYTHONPATH=compiler/frontend \
+  PYC_TOOLCHAIN_ROOT=.pycircuit_out/toolchain/install \
+python3 -m pycircuit.cli build \
+  designs/examples/counter/counter.py \
+  --out-dir /tmp/pyc_counter_rtl \
+  --target verilog
+```
+
+An optional XingTian post-Verilog flow can run remote logic synthesis after all
+normal MLIR gates pass:
+
+```bash
+python3 -m pycircuit.cli build design.py \
+  --out-dir build/design \
+  --target verilog \
+  --eda-flow xingtian
+```
+
+Machine-local SDC and SSH paths can be stored in the Git-ignored
+`eda/xingtian/config.local.json`. Public backend documentation, templates,
+scripts, tests, and examples live under `eda/<backend>/`; private credentials
+and generated results remain ignored. See `eda/README.md` and
+`docs/PIPELINE.md`.
+
+For open 45 nm research synthesis, install the pinned Nangate45 Liberty and
+select the local Yosys/ABC adapter:
+
+```bash
+./eda/nangate45/scripts/setup.sh
+cp eda/nangate45/config.example.json eda/nangate45/config.local.json
+python3 -m pycircuit.cli build designs/examples/counter/counter.py \
+  --out-dir eda/nangate45/build/counter \
+  --target verilog \
+  --param width=8 \
+  --eda-flow nangate45
+```
+
+Nangate45 is non-manufacturable and intended for research/flow bring-up.
+
 For more end-to-end commands, see `docs/QUICKSTART.md`.
 
 ## Repo layout

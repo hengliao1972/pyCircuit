@@ -2184,6 +2184,14 @@ def _cmd_build(args: argparse.Namespace) -> int:
     src = Path(args.python_file).resolve()
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    requested_target = str(args.target)
+    eda_flow = str(getattr(args, "eda_flow", "none"))
+    if eda_flow != "none":
+        if requested_target not in {"verilog", "verilator", "both"}:
+            raise SystemExit(
+                f"--eda-flow {eda_flow} requires a Verilog-producing "
+                "--target (verilog, verilator, or both)"
+            )
 
     cache_path = out_dir / ".build_cache.json"
     cache = _load_json(cache_path) if cache_path.is_file() else {"module_hashes": {}}
@@ -2248,15 +2256,26 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if int(args.logic_depth) <= 0:
         raise SystemExit("--logic-depth must be > 0")
     logic_depth = int(args.logic_depth)
+    target = requested_target
+    do_cpp = target in {"cpp", "both"}
+    emit_verilog = target in {"verilog", "verilator", "both"}
+    build_verilator = target in {"verilator", "both"}
+    needs_testbench = do_cpp or build_verilator
+    if not needs_testbench:
+        manifest.pop("testbench", None)
+    if not build_verilator:
+        manifest.pop("verilator_manifest", None)
+        manifest.pop("verilator_binary", None)
+    if eda_flow == "none":
+        manifest.pop("eda", None)
+    else:
+        manifest["eda"] = {}
 
     device_cpp_root = out_dir / "device" / "cpp"
     device_v_root = out_dir / "device" / "verilog"
     device_cpp_root.mkdir(parents=True, exist_ok=True)
     device_v_root.mkdir(parents=True, exist_ok=True)
 
-    target = str(args.target)
-    do_cpp = target in {"cpp", "both"}
-    do_v = target in {"verilator", "both"}
     pycc_build_profile = "dev-fast" if str(args.profile) == "dev" else "release"
     pycc_hard_hierarchy_flags = [
         f"--build-profile={pycc_build_profile}",
@@ -2339,24 +2358,37 @@ def _cmd_build(args: argparse.Namespace) -> int:
             except TraceConfigError as e:
                 raise SystemExit(f"trace config error: {e}") from e
 
-    tb_probes = TbProbes.from_probe_manifest(probe_manifest_obj)
-    tb_name, tb_payload_json = _collect_testbench_payload(
-        mod,
-        iface,
-        trace_plan=trace_plan,
-        tb_probes=tb_probes,
-        tb_schedule_mode=str(args.tb_schedule_mode),
-        tb_schedule_dir=out_dir / "tb",
-    )
-    tb_pyc_path = _emit_testbench_pyc_file(out_dir=out_dir, tb_name=tb_name, payload_json=tb_payload_json)
-    manifest["testbench"] = {"name": tb_name, "pyc": str(tb_pyc_path.relative_to(out_dir))}
     if trace_plan is not None:
         trace_path = out_dir / "trace_plan.json"
         _save_json(trace_path, trace_plan.as_dict())
         manifest["trace_plan"] = str(trace_path.relative_to(out_dir))
 
-    tb_cpp_out = out_dir / "tb" / f"{tb_name}.cpp"
-    tb_sv_out = out_dir / "tb" / f"{tb_name}.sv"
+    tb_name: str | None = None
+    tb_pyc_path: Path | None = None
+    tb_cpp_out: Path | None = None
+    tb_sv_out: Path | None = None
+    if needs_testbench:
+        tb_probes = TbProbes.from_probe_manifest(probe_manifest_obj)
+        tb_name, tb_payload_json = _collect_testbench_payload(
+            mod,
+            iface,
+            trace_plan=trace_plan,
+            tb_probes=tb_probes,
+            tb_schedule_mode=str(args.tb_schedule_mode),
+            tb_schedule_dir=out_dir / "tb",
+        )
+        tb_pyc_path = _emit_testbench_pyc_file(
+            out_dir=out_dir,
+            tb_name=tb_name,
+            payload_json=tb_payload_json,
+        )
+        manifest["testbench"] = {
+            "name": tb_name,
+            "pyc": str(tb_pyc_path.relative_to(out_dir)),
+        }
+        tb_cpp_out = out_dir / "tb" / f"{tb_name}.cpp"
+        tb_sv_out = out_dir / "tb" / f"{tb_name}.sv"
+
     for sym in sorted(module_paths.keys()):
         mp = module_paths[sym]
         h = _module_hash(mp)
@@ -2387,7 +2419,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
         verilog_out_dir = device_v_root / sym
         verilog_ready = verilog_out_dir.is_dir() and any(verilog_out_dir.glob("*.v"))
-        if do_v and not (unchanged and verilog_ready):
+        if emit_verilog and not (unchanged and verilog_ready):
             verilog_out_dir.mkdir(parents=True, exist_ok=True)
             pycc_jobs.append(
                 (
@@ -2405,6 +2437,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
             )
 
     if do_cpp:
+        assert tb_name is not None and tb_pyc_path is not None and tb_cpp_out is not None
         tb_key = f"tb:{tb_name}"
         tb_hash = _module_hash(tb_pyc_path)
         module_hashes[tb_key] = tb_hash
@@ -2416,7 +2449,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
                     [str(pycc), str(tb_pyc_path), *pycc_hard_hierarchy_flags, "-cpp", str(tb_cpp_out)],
                 )
             )
-    if do_v:
+    if build_verilator:
+        assert tb_name is not None and tb_pyc_path is not None and tb_sv_out is not None
         tb_key = f"tb:{tb_name}"
         tb_hash = module_hashes.get(tb_key) or _module_hash(tb_pyc_path)
         module_hashes[tb_key] = tb_hash
@@ -2435,7 +2469,46 @@ def _cmd_build(args: argparse.Namespace) -> int:
             for fut in as_completed(futs):
                 _ = fut.result()
 
+    if eda_flow != "none":
+        from .eda import EdaError, run_eda_flow
+
+        generated_verilog = sorted(
+            path for path in device_v_root.rglob("*.v") if path.is_file()
+        )
+        try:
+            eda_result = run_eda_flow(
+                eda_flow,
+                top=str(manifest["top"]),
+                verilog_files=generated_verilog,
+                build_dir=out_dir,
+                options={
+                    "sdc": args.eda_sdc,
+                    "config": args.eda_config,
+                    "runner": args.eda_runner,
+                    "host": args.eda_host,
+                    "ssh_config": args.eda_ssh_config,
+                    "identity_file": args.eda_identity_file,
+                    "lib_variant": args.eda_lib_variant,
+                    "sdc_style": args.eda_sdc_style,
+                },
+            )
+        except EdaError as exc:
+            raise SystemExit(f"EDA flow {eda_flow!r} failed: {exc}") from exc
+        manifest.setdefault("eda", {})[eda_flow] = eda_result.as_manifest(
+            relative_to=out_dir
+        )
+        _save_json(manifest_path, manifest)
+        if not eda_result.success:
+            evidence = eda_result.log or eda_result.result_dir
+            suffix = f"; evidence: {evidence}" if evidence is not None else ""
+            raise SystemExit(
+                f"EDA flow {eda_flow!r} failed with exit code "
+                f"{eda_result.exit_code}{suffix}"
+            )
+        print(f"EDA {eda_flow} netlist: {eda_result.netlist}")
+
     if do_cpp:
+        assert tb_cpp_out is not None
         cpp_sources = _gather_cpp_sources(device_cpp_root)
         if not cpp_sources:
             raise SystemExit("build(cpp): no generated C++ sources found")
@@ -2510,7 +2583,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
         subprocess.run(["cmake", "--build", str(cmake_build), "-j", str(jobs)], check=True)
         manifest["cpp_executable"] = str(cmake_build / "pyc_tb")
 
-    if do_v:
+    if build_verilator:
+        assert tb_name is not None and tb_sv_out is not None
         if not tb_sv_out.is_file():
             raise SystemExit(f"build(verilator): missing generated TB SV source: {tb_sv_out}")
         prim_file: Path | None = None
@@ -2633,6 +2707,8 @@ def _cmd_sidecar_verify(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .eda import available_eda_flows
+
     p = argparse.ArgumentParser(prog="pycircuit")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -2716,9 +2792,9 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--profile", choices=["dev", "release"], default="release", help="C++ build profile")
     build.add_argument(
         "--target",
-        choices=["cpp", "verilator", "both"],
+        choices=["cpp", "verilog", "verilator", "both"],
         default="both",
-        help="Backend targets to generate/build",
+        help="Backend targets to generate/build; verilog emits device RTL without requiring a testbench",
     )
     build.add_argument("--logic-depth", type=int, default=32, help="Max combinational logic depth for pycc")
     build.add_argument(
@@ -2742,6 +2818,54 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help="Argument passed to the Verilator binary when --run-verilator is set (repeatable).",
+    )
+    build.add_argument(
+        "--eda-flow",
+        choices=["none", *available_eda_flows()],
+        default="none",
+        help="Optional post-Verilog EDA flow (default: none).",
+    )
+    build.add_argument(
+        "--eda-sdc",
+        default=None,
+        help="Optional XingTian SDC override.",
+    )
+    build.add_argument(
+        "--eda-config",
+        default=None,
+        help="Backend-local JSON config (default: $PWD/eda/<flow>/config.local.json).",
+    )
+    build.add_argument(
+        "--eda-runner",
+        default=None,
+        help="Optional XingTian runner override (or set PYC_XINGTIAN_RUNNER).",
+    )
+    build.add_argument(
+        "--eda-host",
+        default=None,
+        help="SSH host or alias override for XingTian (otherwise read from config).",
+    )
+    build.add_argument(
+        "--eda-ssh-config",
+        default=None,
+        help="Optional local OpenSSH config used only by the XingTian runner.",
+    )
+    build.add_argument(
+        "--eda-identity-file",
+        default=None,
+        help="Optional local private-key path; never copied into build artifacts.",
+    )
+    build.add_argument(
+        "--eda-lib-variant",
+        choices=["6t", "asap7", "7p5t"],
+        default="6t",
+        help="XingTian standard-cell library variant.",
+    )
+    build.add_argument(
+        "--eda-sdc-style",
+        choices=["native", "dc"],
+        default="native",
+        help="XingTian SDC dialect.",
     )
     build.set_defaults(fn=_cmd_build)
 

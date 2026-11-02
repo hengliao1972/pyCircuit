@@ -60,7 +60,7 @@ pycircuit = "pycircuit.cli:main"
 where = ["compiler/frontend"]
 
 [tool.setuptools.package-data]
-pycircuit = ["**/*.py", "**/*.md"]
+pycircuit = ["**/*.py", "**/*.md", "tools/**/*.sh"]
 
 [tool.black]
 line-length = 88
