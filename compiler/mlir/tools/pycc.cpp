@@ -1073,7 +1073,10 @@ static std::optional<std::string> findToolchainRoot(const char *argv0) {
   for (unsigned i = 0; i < 6 && !cur.empty(); ++i) {
     if (auto found = tryRoot(cur))
       return found;
-    cur = llvm::sys::path::parent_path(cur);
+    // parent_path(cur) is a StringRef into cur. Copy it before assigning back
+    // because SmallVector assignment may resize and invalidate that reference.
+    llvm::SmallString<256> next = llvm::sys::path::parent_path(cur);
+    cur = next;
   }
   return std::nullopt;
 }
@@ -2359,7 +2362,6 @@ int main(int argc, char **argv) {
   if (!unrollVector)
     pm.addNestedPass<func::FuncOp>(pyc::createSLPPackWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createCombCanonicalizePass());
-  pm.addPass(pyc::createCheckCombCyclesPass());
   pm.addPass(pyc::createCheckClockDomainsPass());
   pm.addNestedPass<func::FuncOp>(pyc::createPackI1RegsPass());
   const bool enableFuseComb = (!cppOnly) || !cppOnlyPreserveOps;
@@ -2370,6 +2372,10 @@ int main(int argc, char **argv) {
   addRemoveDeadValuesPassIfSupported(pm);
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadInstancesPass());
   pm.addPass(createSymbolDCEPass());
+  // Fusion moves combinational ops into pyc.comb regions. The canonical graph
+  // still sees those dependencies, so one check after fusion is sufficient.
+  pm.addPass(pyc::createCheckCombCyclesPass());
+  pm.addPass(pyc::createChangeDrivenSchedulePass());
   pm.addNestedPass<func::FuncOp>(pyc::createCheckFlatTypesPass());
   pm.addNestedPass<func::FuncOp>(pyc::createCheckNoDynamicPass());
   pm.addPass(pyc::createCheckLogicDepthPass(logicDepthLimit));
@@ -2654,13 +2660,16 @@ int main(int argc, char **argv) {
         (void)moduleName;
         os << "// pyCircuit C++ emission (split)\n";
         os << "#pragma once\n";
+        os << "#include <array>\n";
         os << "#include <cstdlib>\n";
         os << "#include <cstdint>\n";
         os << "#include <fstream>\n";
         os << "#include <iostream>\n";
         os << "#include <memory>\n";
         os << "#include <string>\n";
+        os << "#include <type_traits>\n";
         os << "#include <cpp/pyc_sim.hpp>\n";
+        os << "#include <cpp/pyc_change_scheduler.hpp>\n";
       };
 
       auto writeSourcePreamble = [&](llvm::raw_ostream &os, llvm::StringRef headerName) {
@@ -2882,10 +2891,13 @@ int main(int argc, char **argv) {
           }
           hos << "// pyCircuit C++ emission (prototype)\n";
           hos << "#pragma once\n";
+          hos << "#include <array>\n";
           hos << "#include <cstdlib>\n";
           hos << "#include <iostream>\n";
           hos << "#include <memory>\n";
+          hos << "#include <type_traits>\n";
           hos << "#include <cpp/pyc_sim.hpp>\n";
+          hos << "#include <cpp/pyc_change_scheduler.hpp>\n";
           for (const std::string &dep : deps[f.getSymName()])
             hos << "#include \"" << dep << ".hpp\"\n";
           hos << "\nnamespace pyc::gen {\n\n";

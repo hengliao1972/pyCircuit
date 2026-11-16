@@ -156,7 +156,10 @@ public:
     }
   }
 
-  void tick_commit() {
+  // Writes retain their existing side effects; the return value only reports
+  // whether the registered read output changed.
+  bool tick_commit() {
+    bool changed = false;
     if (pendingWrite && (latchedWaddr < DepthEntries)) {
       Wire<DataWidth> committed = applyStrb(mem_[latchedWaddr], latchedWdata, latchedWstrb);
       mem_[latchedWaddr] = committed;
@@ -170,10 +173,13 @@ public:
         watch_events_.push_back(ev);
       }
     }
-    if (pendingRead)
+    if (pendingRead) {
+      changed = rdata != rdataNext;
       rdata = rdataNext;
+    }
     pendingWrite = false;
     pendingRead = false;
+    return changed;
   }
 
   // Convenience for testbenches.
@@ -272,6 +278,9 @@ public:
   static_assert(DataWidth > 0, "pyc_sync_mem_dp requires DataWidth > 0");
   static_assert(DepthEntries > 0, "pyc_sync_mem_dp DepthEntries must be > 0");
   static constexpr unsigned StrbWidth = (DataWidth + 7) / 8;
+  using change_mask_t = std::uint8_t;
+  static constexpr change_mask_t kReadData0Changed = change_mask_t{1} << 0;
+  static constexpr change_mask_t kReadData1Changed = change_mask_t{1} << 1;
 
   pyc_sync_mem_dp(Wire<1> &clk,
                   Wire<1> &rst,
@@ -419,7 +428,9 @@ public:
     }
   }
 
-  void tick_commit() {
+  // Each bit reports a semantic change on the corresponding registered read port.
+  change_mask_t tick_commit() {
+    change_mask_t changed = 0;
     if (pendingWrite && (latchedWaddr < DepthEntries)) {
       Wire<DataWidth> committed = applyStrb(mem_[latchedWaddr], latchedWdata, latchedWstrb);
       mem_[latchedWaddr] = committed;
@@ -433,13 +444,20 @@ public:
         watch_events_.push_back(ev);
       }
     }
-    if (pendingRead0)
+    if (pendingRead0) {
+      if (rdata0 != rdata0Next)
+        changed |= kReadData0Changed;
       rdata0 = rdata0Next;
-    if (pendingRead1)
+    }
+    if (pendingRead1) {
+      if (rdata1 != rdata1Next)
+        changed |= kReadData1Changed;
       rdata1 = rdata1Next;
+    }
     pendingWrite = false;
     pendingRead0 = false;
     pendingRead1 = false;
+    return changed;
   }
 
   void pokeEntry(std::size_t addr, Wire<DataWidth> value) {

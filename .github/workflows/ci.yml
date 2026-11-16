@@ -222,6 +222,13 @@ jobs:
             PYC_GATE_SKIP_BUILD=1 \
             PYC_GATE_RUN_ID="${PYC_GATE_RUN_ID}/cpp-pch" \
             bash flows/scripts/run_cpp_device_pch_gate.sh
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            bash compiler/mlir/test/change_schedule_gate.sh
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            bash compiler/mlir/test/comb_dirty_scheduler_smoke.sh
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            bash compiler/mlir/test/instance_vector_cache_smoke.sh
+          bash tests/runtime/run_change_scheduler.sh
           python -m pytest -q tests/vec/test_vec_ops.py \
             -k 'slt_vv or slt_vs or slt_sv'
 
