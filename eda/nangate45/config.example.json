@@ -1,0 +1,5 @@
+{
+  "liberty": "vendor/NangateOpenCellLibrary_typical.lib",
+  "yosys": "yosys",
+  "flatten": true
+}

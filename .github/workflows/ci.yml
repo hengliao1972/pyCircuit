@@ -96,7 +96,7 @@ jobs:
 
   build-linux:
     name: "G0: Build Toolchain (Linux)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [gate, lint]
     if: needs.gate.outputs.should_run == 'true'
     steps:
@@ -158,7 +158,7 @@ jobs:
 
   gate-g1-linux:
     name: "G1: Examples + Semantic Gates (Linux)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [gate, build-linux]
     if: needs.gate.outputs.should_run == 'true'
     timeout-minutes: 90
@@ -269,7 +269,7 @@ jobs:
 
   gate-g2-linux:
     name: "G2: Cross-backend Sims (Linux)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [gate, build-linux]
     if: needs.gate.outputs.should_run == 'true'
     timeout-minutes: 120
@@ -347,7 +347,7 @@ jobs:
 
   wheel-linux:
     name: "G0: Wheel Smoke (Linux)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [gate, build-linux]
     if: needs.gate.outputs.should_run == 'true'
     steps:

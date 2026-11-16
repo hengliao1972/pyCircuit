@@ -254,3 +254,24 @@ designs/outerCube/
 .claude/settings.local.json
 # gate outputs
 docs/gates
+
+# EDA backends: track public adapters/examples, ignore machine-local/private data
+/eda.zip
+/eda/**/config.local.json
+/eda/**/credentials/
+/eda/**/vendor/
+/eda/**/results/
+/eda/**/work/
+/eda/**/build/
+/eda/**/id_*
+/eda/**/*.pem
+/eda/**/*.key
+/eda/**/ssh-config
+
+# Legacy local layout (kept ignored during/after migration)
+/eda/pyc-build/
+/eda/docs/
+/eda/results/
+/eda/scripts/
+/eda/designs/
+/eda/tests/

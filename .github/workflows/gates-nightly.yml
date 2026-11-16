@@ -15,7 +15,7 @@ env:
 jobs:
   gate-g3-linux:
     name: "G3: Nightly System Gates (Linux)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
       - name: Checkout

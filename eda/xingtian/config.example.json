@@ -1,0 +1,6 @@
+{
+  "host": "your-ssh-host-alias",
+  "sdc": "constraints/default.sdc.tcl",
+  "ssh_config": "credentials/ssh-config",
+  "identity_file": "credentials/id_ed25519"
+}
