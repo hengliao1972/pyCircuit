@@ -94,6 +94,7 @@ add_library(pyc_transforms
   lib/Transforms/PrunePortsPass.cpp
   lib/Transforms/RetimePipelinesPass.cpp
   lib/Transforms/SLPPackWiresPass.cpp
+  lib/Transforms/StateLoopPartitionPass.cpp
   lib/Transforms/StateOptimization.cpp
   lib/Transforms/StateOptimizePass.cpp
   lib/Support/PassIRDumper.cpp

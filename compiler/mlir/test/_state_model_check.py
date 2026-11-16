@@ -32,9 +32,11 @@ def result(command: list[str]) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
-def emit(pycc: Path, source: Path, output: Path) -> dict[str, object]:
+def emit(
+    pycc: Path, source: Path, output: Path, *extra: str
+) -> dict[str, object]:
     run([
-        str(pycc), str(source), "--emit=cpp",
+        str(pycc), str(source), "--emit=cpp", *extra,
         "-o", str(output),
     ])
     return json.loads(Path(f"{output}.stats.json").read_text(encoding="utf-8"))

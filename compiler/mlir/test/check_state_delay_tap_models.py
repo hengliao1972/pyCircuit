@@ -24,7 +24,8 @@ def main() -> None:
         temp = Path(path)
         opt_cpp = temp / "opt.hpp"
         opt_stats = emit(args.pycc, source, opt_cpp)
-        if "pyc_delay_line<" not in opt_cpp.read_text(encoding="utf-8"):
+        header = opt_cpp.read_text(encoding="utf-8")
+        if "DelayLoop<" not in header and "pyc_delay_line<" not in header:
             raise AssertionError("opt: chain was not folded into a delay line")
         if opt_stats.get("reg_count") != 4 or opt_stats.get("reg_bits") != 32:
             raise AssertionError(f"opt: logical state changed: {opt_stats}")

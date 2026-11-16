@@ -52,6 +52,7 @@ static void forceLinkPycPasses() {
   (void)pyc::createRetimePipelinesPass();
   (void)pyc::createCombineDelayChainsPass();
   (void)pyc::createStateOptimizePass();
+  (void)pyc::createStateLoopPartitionPass();
   (void)pyc::createPackI1RegsPass();
   (void)pyc::createApplyObservationDemandPass();
   (void)pyc::createLowerSCFToPYCStaticPass();

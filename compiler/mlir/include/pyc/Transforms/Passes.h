@@ -55,4 +55,10 @@ void runEliminateDeadState(::mlir::func::FuncOp function);
 /// pass that runs the state rewrites in a fixed order.
 std::unique_ptr<::mlir::Pass> createStateOptimizePass();
 
+/// Analysis-only: tag each pyc.reg / scalar pyc.delay_line with
+/// `pyc.loop_id` (one loop per equivalent clock domain) plus function-level
+/// stats; the C++ emitter lowers each loop into one pyc::cpp::RegLoop<W> /
+/// DelayLoop<W> update loop.
+std::unique_ptr<::mlir::Pass> createStateLoopPartitionPass();
+
 } // namespace pyc

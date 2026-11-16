@@ -168,6 +168,13 @@ static llvm::cl::opt<std::string> traceCodegenPlanPath(
         "Resolved per-module internal trace fields used by C++ placement"),
     llvm::cl::init(""));
 
+static llvm::cl::opt<bool> stateLoop(
+    "state-loop",
+    llvm::cl::desc(
+        "Lower same-clock registers and delay lines into per-clock state "
+        "loops (--state-loop=false for the per-object lowering)"),
+    llvm::cl::init(true));
+
 static llvm::cl::opt<std::string> observeNamed(
     "observe-named",
     llvm::cl::desc(
@@ -2450,6 +2457,10 @@ int main(int argc, char **argv) {
   pm.addNestedPass<func::FuncOp>(pyc::createCombCanonicalizePass());
   pm.addPass(pyc::createCheckClockDomainsPass());
   pm.addNestedPass<func::FuncOp>(pyc::createPackI1RegsPass());
+  // Loop partition runs after all state rewrites so loops cover the final
+  // state set; the C++ emitter reads the ids. fuse-comb does not move state.
+  if (emitKind == "cpp" && stateLoop)
+    pm.addNestedPass<func::FuncOp>(pyc::createStateLoopPartitionPass());
   // Demand mode drops undemanded pyc.name after identities were remapped,
   // before fuse-comb treats leftover names as barriers.
   if (emitKind == "cpp" && observeNamed == "demand")
@@ -2768,6 +2779,7 @@ int main(int argc, char **argv) {
         os << "#include <string>\n";
         os << "#include <type_traits>\n";
         os << "#include <cpp/pyc_sim.hpp>\n";
+        os << "#include <cpp/pyc_state_loop.hpp>\n";
         os << "#include <cpp/pyc_change_scheduler.hpp>\n";
       };
 
@@ -2996,6 +3008,7 @@ int main(int argc, char **argv) {
           hos << "#include <memory>\n";
           hos << "#include <type_traits>\n";
           hos << "#include <cpp/pyc_sim.hpp>\n";
+          hos << "#include <cpp/pyc_state_loop.hpp>\n";
           hos << "#include <cpp/pyc_change_scheduler.hpp>\n";
           for (const std::string &dep : deps[f.getSymName()])
             hos << "#include \"" << dep << ".hpp\"\n";
