@@ -250,6 +250,11 @@ struct NameTable {
   std::string get(Value v) {
     if (auto it = names.find(v); it != names.end())
       return it->second;
+    if (Value target = getValueCppAliasTarget(v)) {
+      std::string n = get(target);
+      names.try_emplace(v, n);
+      return n;
+    }
     if (Operation *def = v.getDefiningOp()) {
       if (auto nAttr = def->getAttrOfType<StringAttr>("pyc.name")) {
         auto lazy = def->getAttrOfType<BoolAttr>("pyc.observe_lazy");
@@ -652,6 +657,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     return success();
   }
   if (auto a = dyn_cast<pyc::AliasOp>(op)) {
+    if (getValueCppStorage(a.getResult()) == CppStorageKind::Alias)
+      return success();
     assignExpr(a.getResult(), a.getType(), os, nt,
                [&](llvm::raw_ostream &e) { e << nt.get(a.getIn()); }, ps);
     return success();
@@ -1411,7 +1418,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   decls.reserve(256);
   f.walk([&](Operation *op) {
     for (Value r : op->getResults()) {
-      if (getValueCppStorage(r) == CppStorageKind::Local)
+      if (getValueCppStorage(r) != CppStorageKind::Struct)
         continue;
       decls.push_back(Decl{nt.get(r), r.getType()});
     }
@@ -2915,7 +2922,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       closeGuardGroup();
     if (auto a = dyn_cast<pyc::AssignOp>(*op)) {
       closeGuardGroup();
-      os << "    " << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
+      if (getValueCppStorage(a.getDst()) != CppStorageKind::Alias)
+        os << "    " << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
       ++opIdx;
       continue;
     }
@@ -3485,7 +3493,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       return success();
     }
     if (auto a = dyn_cast<pyc::AssignOp>(*op)) {
-      os << indent << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
+      if (getValueCppStorage(a.getDst()) != CppStorageKind::Alias)
+        os << indent << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
       return success();
     }
     if (auto comb = dyn_cast<pyc::CombOp>(*op)) {
@@ -4402,6 +4411,8 @@ CppStorageKind getValueCppStorage(Value v) {
   if (auto a = op->getAttrOfType<StringAttr>(kCppStorageAttr)) {
     if (a.getValue() == "local")
       return CppStorageKind::Local;
+    if (a.getValue() == "alias")
+      return CppStorageKind::Alias;
   }
   return CppStorageKind::Struct;
 }
