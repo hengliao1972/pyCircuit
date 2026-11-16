@@ -162,6 +162,20 @@ static llvm::cl::opt<std::string> probePlanPath(
     llvm::cl::desc("Resolved @probe alias plan JSON to embed into generated ProbeRegistry registration"),
     llvm::cl::init(""));
 
+static llvm::cl::opt<std::string> traceCodegenPlanPath(
+    "trace-codegen-plan",
+    llvm::cl::desc(
+        "Resolved per-module internal trace fields used by C++ placement"),
+    llvm::cl::init(""));
+
+static llvm::cl::opt<std::string> observeNamed(
+    "observe-named",
+    llvm::cl::desc(
+        "Which pyc.name values stay as eager C++ probes after state opt: "
+        "demand (default: @probe/trace/IR attrs eager, other names lazy "
+        "lookup) or all (every non-cycle-balance name eager)"),
+    llvm::cl::init("demand"));
+
 static llvm::cl::opt<std::string> targetKind("target", llvm::cl::desc("Target: default|fpga"),
                                              llvm::cl::init("default"));
 
@@ -667,6 +681,16 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
             v = a.getIn();
           if (v.getDefiningOp<pyc::RegOp>() != nullptr)
             return true;
+          if (v.getDefiningOp<pyc::DelayLineOp>() != nullptr)
+            return true;
+          if (v.getDefiningOp<pyc::DelayTapOp>() != nullptr)
+            return true;
+          if (auto extract = v.getDefiningOp<pyc::ExtractOp>()) {
+            if (!extract->hasAttr("pyc.state_pack_lsb"))
+              return false;
+            v = extract.getIn();
+            continue;
+          }
           auto comb = v.getDefiningOp<pyc::CombOp>();
           if (!comb)
             return false;
@@ -683,6 +707,13 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
           Value y = yield.getOperand(res.getResultNumber());
           while (auto a = y.getDefiningOp<pyc::AliasOp>())
             y = a.getIn();
+          if (auto extract = y.getDefiningOp<pyc::ExtractOp>()) {
+            if (!extract->hasAttr("pyc.state_pack_lsb"))
+              return false;
+            y = extract.getIn();
+            while (auto alias = y.getDefiningOp<pyc::AliasOp>())
+              y = alias.getIn();
+          }
           auto barg = dyn_cast<BlockArgument>(y);
           if (!barg)
             return false;
@@ -751,6 +782,16 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
           v = a.getIn();
         if (auto rop = v.getDefiningOp<pyc::RegOp>())
           return rop.getQ();
+        if (auto delay = v.getDefiningOp<pyc::DelayLineOp>())
+          return delay.getQ();
+        if (auto tap = v.getDefiningOp<pyc::DelayTapOp>())
+          return tap.getLine();
+        if (auto extract = v.getDefiningOp<pyc::ExtractOp>()) {
+          if (!extract->hasAttr("pyc.state_pack_lsb"))
+            return Value();
+          v = extract.getIn();
+          continue;
+        }
         auto comb = v.getDefiningOp<pyc::CombOp>();
         if (!comb)
           return Value();
@@ -767,6 +808,13 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
         Value y = yield.getOperand(res.getResultNumber());
         while (auto a = y.getDefiningOp<pyc::AliasOp>())
           y = a.getIn();
+        if (auto extract = y.getDefiningOp<pyc::ExtractOp>()) {
+          if (!extract->hasAttr("pyc.state_pack_lsb"))
+            return Value();
+          y = extract.getIn();
+          while (auto alias = y.getDefiningOp<pyc::AliasOp>())
+            y = alias.getIn();
+        }
         auto barg = dyn_cast<BlockArgument>(y);
         if (!barg)
           return Value();
@@ -785,6 +833,10 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
 
     llvm::StringSet<> localNamedFields;
     f.walk([&](Operation *op) {
+      // Cycle-balance names are compiler temporaries, not stable user probes.
+      if (auto generated = op->getAttrOfType<StringAttr>("pyc.generated");
+          generated && generated.getValue() == "cycle_balance")
+        return;
       auto nameAttr = op->getAttrOfType<StringAttr>("pyc.name");
       if (!nameAttr)
         return;
@@ -1964,6 +2016,8 @@ static LogicalResult writeCppCompileManifest(llvm::StringRef path,
 struct CompileStatsSummary {
   int64_t regCount = 0;
   int64_t regBits = 0;
+  int64_t retimeRegionsRewritten = 0;
+  int64_t retimeCombOpsMoved = 0;
   int64_t memCount = 0;
   int64_t memBits = 0;
   int64_t maxLogicDepth = 0;
@@ -1971,6 +2025,9 @@ struct CompileStatsSummary {
   int64_t tns = 0;
   int64_t logicDepthLimit = 32;
   bool fuseCombEnabled = false;
+  std::string observeNamedPolicy;
+  int64_t observeNamedNamesLazy = 0;
+  int64_t observeNamedNamesKept = 0;
 };
 
 static int64_t getI64Attr(Operation *op, llvm::StringRef name, int64_t fallback = 0) {
@@ -1997,8 +2054,19 @@ static CompileStatsSummary collectCompileStats(ModuleOp module, int64_t depthLim
   for (auto f : module.getOps<func::FuncOp>()) {
     s.regCount = satAdd(s.regCount, getI64Attr(f, "pyc.stats.reg_count", 0));
     s.regBits = satAdd(s.regBits, getI64Attr(f, "pyc.stats.reg_bits", 0));
+    s.retimeRegionsRewritten = satAdd(
+        s.retimeRegionsRewritten,
+        getI64Attr(f, "pyc.stats.retime_regions_rewritten", 0));
+    s.retimeCombOpsMoved = satAdd(
+        s.retimeCombOpsMoved, getI64Attr(f, "pyc.stats.retime_comb_ops_moved", 0));
     s.memCount = satAdd(s.memCount, getI64Attr(f, "pyc.stats.mem_count", 0));
     s.memBits = satAdd(s.memBits, getI64Attr(f, "pyc.stats.mem_bits", 0));
+    s.observeNamedNamesLazy = satAdd(
+        s.observeNamedNamesLazy,
+        getI64Attr(f, "pyc.stats.observe_named_names_lazy", 0));
+    s.observeNamedNamesKept = satAdd(
+        s.observeNamedNamesKept,
+        getI64Attr(f, "pyc.stats.observe_named_names_kept", 0));
 
     s.maxLogicDepth = std::max(s.maxLogicDepth, getI64Attr(f, "pyc.logic_depth.max", 0));
 
@@ -2019,10 +2087,13 @@ static CompileStatsSummary collectCompileStats(ModuleOp module, int64_t depthLim
 
 static void printCompileStats(const CompileStatsSummary &s) {
   llvm::errs() << "stats: regs=" << s.regCount << " (" << s.regBits << " bits)"
+               << ", retime_rewritten=" << s.retimeRegionsRewritten
+               << ", comb_moved=" << s.retimeCombOpsMoved
                << ", mems=" << s.memCount << " (" << s.memBits << " bits)"
                << ", max_depth=" << s.maxLogicDepth << "/" << s.logicDepthLimit
                << ", WNS=" << s.wns << ", TNS=" << s.tns
-               << ", fuse_comb=" << (s.fuseCombEnabled ? "on" : "off") << "\n";
+               << ", fuse_comb=" << (s.fuseCombEnabled ? "on" : "off")
+               << ", observe_named=" << s.observeNamedPolicy << "\n";
 }
 
 static LogicalResult writeCompileStatsJson(llvm::StringRef outPath, const CompileStatsSummary &s) {
@@ -2036,6 +2107,11 @@ static LogicalResult writeCompileStatsJson(llvm::StringRef outPath, const Compil
   obj["wns"] = s.wns;
   obj["tns"] = s.tns;
   obj["fuse_comb_enabled"] = s.fuseCombEnabled;
+  obj["retime_regions_rewritten"] = s.retimeRegionsRewritten;
+  obj["retime_comb_ops_moved"] = s.retimeCombOpsMoved;
+  obj["observe_named"] = s.observeNamedPolicy;
+  obj["observe_named_names_lazy"] = s.observeNamedNamesLazy;
+  obj["observe_named_names_kept"] = s.observeNamedNamesKept;
 
   std::string buf;
   llvm::raw_string_ostream ss(buf);
@@ -2100,6 +2176,12 @@ int main(int argc, char **argv) {
   }
   if (cppPch && cppSplitMode != "module") {
     llvm::errs() << "error: --cpp-pch requires --cpp-split=module\n";
+    return 1;
+  }
+
+  if (observeNamed != "demand" && observeNamed != "all") {
+    llvm::errs() << "error: unknown --observe-named: " << observeNamed
+                 << " (expected: demand|all)\n";
     return 1;
   }
 
@@ -2359,11 +2441,20 @@ int main(int argc, char **argv) {
     pm.addNestedPass<func::FuncOp>(pyc::createVectorUnrollPass());
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadStatePass());
+  // State rewrites (delay-line formation) run on the C++ emit path only so
+  // Verilog keeps the pre-optimization register netlist.
+  if (emitKind == "cpp")
+    pm.addNestedPass<func::FuncOp>(pyc::createStateOptimizePass());
   if (!unrollVector)
     pm.addNestedPass<func::FuncOp>(pyc::createSLPPackWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createCombCanonicalizePass());
   pm.addPass(pyc::createCheckClockDomainsPass());
   pm.addNestedPass<func::FuncOp>(pyc::createPackI1RegsPass());
+  // Demand mode drops undemanded pyc.name after identities were remapped,
+  // before fuse-comb treats leftover names as barriers.
+  if (emitKind == "cpp" && observeNamed == "demand")
+    pm.addPass(pyc::createApplyObservationDemandPass(
+        probePlanPath, traceCodegenPlanPath));
   const bool enableFuseComb = (!cppOnly) || !cppOnlyPreserveOps;
   if (enableFuseComb)
     pm.addNestedPass<func::FuncOp>(pyc::createFuseCombPass());
@@ -2380,7 +2471,8 @@ int main(int argc, char **argv) {
   pm.addNestedPass<func::FuncOp>(pyc::createCheckNoDynamicPass());
   pm.addPass(pyc::createCheckLogicDepthPass(logicDepthLimit));
   if (emitKind == "cpp")
-    pm.addPass(pyc::createCppPlacementPass(cppCombChunkNodes));
+    pm.addPass(
+        pyc::createCppPlacementPass(cppCombChunkNodes, traceCodegenPlanPath));
   pm.addNestedPass<func::FuncOp>(pyc::createCollectCompileStatsPass());
   const auto tPassStart = Clock::now();
   if (failed(pm.run(*module))) {
@@ -2417,6 +2509,8 @@ int main(int argc, char **argv) {
 
   CompileStatsSummary compileStats = collectCompileStats(*module, static_cast<int64_t>(logicDepthLimit));
   compileStats.fuseCombEnabled = enableFuseComb;
+  compileStats.observeNamedPolicy =
+      emitKind == "cpp" ? std::string(observeNamed) : std::string("off");
   printCompileStats(compileStats);
 
   if (!probeManifestPath.empty()) {
@@ -2517,6 +2611,11 @@ int main(int argc, char **argv) {
     stats["wns"] = compileStats.wns;
     stats["tns"] = compileStats.tns;
     stats["fuse_comb_enabled"] = compileStats.fuseCombEnabled;
+    stats["retime_regions_rewritten"] = compileStats.retimeRegionsRewritten;
+    stats["retime_comb_ops_moved"] = compileStats.retimeCombOpsMoved;
+    stats["observe_named"] = compileStats.observeNamedPolicy;
+    stats["observe_named_names_lazy"] = compileStats.observeNamedNamesLazy;
+    stats["observe_named_names_kept"] = compileStats.observeNamedNamesKept;
     root["compile_stats"] = std::move(stats);
 
     if (passTimingCollector)

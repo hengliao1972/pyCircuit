@@ -76,9 +76,11 @@ add_library(pyc_transforms
   lib/Transforms/CheckLogicDepthPass.cpp
   lib/Transforms/CheckNoDynamicPass.cpp
   lib/Transforms/CheckCombCyclesPass.cpp
+  lib/Transforms/ApplyObservationDemandPass.cpp
   lib/Transforms/CheckClockDomainsPass.cpp
   lib/Transforms/ChangeDrivenSchedulePass.cpp
   lib/Transforms/CombCanonicalizePass.cpp
+  lib/Transforms/CombineDelayChainsPass.cpp
   lib/Transforms/CollectCompileStatsPass.cpp
   lib/Transforms/EliminateDeadInstancesPass.cpp
   lib/Transforms/EliminateDeadStatePass.cpp
@@ -90,7 +92,10 @@ add_library(pyc_transforms
   lib/Transforms/CppPlacementPass.cpp
   lib/Transforms/LowerSCFToPYCStaticPass.cpp
   lib/Transforms/PrunePortsPass.cpp
+  lib/Transforms/RetimePipelinesPass.cpp
   lib/Transforms/SLPPackWiresPass.cpp
+  lib/Transforms/StateOptimization.cpp
+  lib/Transforms/StateOptimizePass.cpp
   lib/Support/PassIRDumper.cpp
   lib/Transforms/VectorUnrollPass.cpp
 )
@@ -108,35 +113,35 @@ target_link_libraries(pyc_transforms PUBLIC
   LLVMSupport
 )
 
-# pyc-opt requires MLIRRegisterAllPasses; Homebrew LLVM may not export it.
-# Build script uses "ninja pycc" only so pyc-opt is optional; if you run
-# "ninja" (all), pyc-opt may fail to link on some systems.
+# Some LLVM packages do not export MLIRRegisterAllPasses. pyc-opt still builds
+# in a PYC-focused mode there: project pass factories force-link/register all
+# pyc passes, while upstream registerAllPasses() is enabled when available.
+add_executable(pyc-opt EXCLUDE_FROM_ALL tools/pyc-opt.cpp)
+set_target_properties(pyc-opt PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  INSTALL_RPATH "${PYC_INSTALL_RPATH}"
+  BUILD_WITH_INSTALL_RPATH OFF
+)
+llvm_update_compile_flags(pyc-opt)
+target_include_directories(pyc-opt PRIVATE
+  "${PYC_SOURCE_DIR}/include"
+  "${PYC_BINARY_DIR}/include"
+)
+target_link_libraries(pyc-opt PRIVATE
+  pyc_dialect
+  pyc_transforms
+  MLIRArithDialect
+  MLIRFuncDialect
+  MLIRFuncInlinerExtension
+  MLIRSCFDialect
+  MLIROptLib
+  MLIRTransforms
+)
 if(TARGET MLIRRegisterAllPasses)
-  add_executable(pyc-opt EXCLUDE_FROM_ALL tools/pyc-opt.cpp)
-  set_target_properties(pyc-opt PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    INSTALL_RPATH "${PYC_INSTALL_RPATH}"
-    BUILD_WITH_INSTALL_RPATH OFF
-  )
-  llvm_update_compile_flags(pyc-opt)
-  target_include_directories(pyc-opt PRIVATE
-    "${PYC_SOURCE_DIR}/include"
-    "${PYC_BINARY_DIR}/include"
-  )
-  target_link_libraries(pyc-opt PRIVATE
-    pyc_dialect
-    pyc_transforms
-    MLIRArithDialect
-    MLIRFuncDialect
-    MLIRFuncInlinerExtension
-    MLIRRegisterAllPasses
-    MLIRSCFDialect
-    MLIROptLib
-  )
-  set(PYC_OPT_BUILT 1)
-else()
-  message(STATUS "MLIRRegisterAllPasses not found; skipping pyc-opt (pycc only)")
+  target_compile_definitions(pyc-opt PRIVATE PYC_HAVE_MLIR_REGISTER_ALL_PASSES=1)
+  target_link_libraries(pyc-opt PRIVATE MLIRRegisterAllPasses)
 endif()
+set(PYC_OPT_BUILT 1)
 
 add_executable(pycc tools/pycc.cpp lib/Emit/VerilogEmitter.cpp lib/Emit/CppEmitter.cpp)
 llvm_update_compile_flags(pycc)

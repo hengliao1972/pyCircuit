@@ -113,7 +113,9 @@ struct EliminateWiresPass : public PassWrapper<EliminateWiresPass, OperationPass
       else
         builder.setInsertionPointToStart(src.getParentBlock());
       auto alias = builder.create<pyc::AliasOp>(w.getLoc(), src.getType(), src);
-      alias->setAttr("pyc.name", nameAttr);
+      // Preserve ownership/debug attributes when a named wire becomes an
+      // alias; the delay-chain pass relies on pyc.generated surviving here.
+      alias->setAttrs(w->getAttrs());
       replacement = alias.getResult();
     }
 

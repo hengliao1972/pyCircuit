@@ -14,6 +14,7 @@
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <optional>
@@ -762,9 +763,40 @@ OpFoldResult VAddReduceOp::fold(FoldAdaptor adaptor) {
   return foldVectorReduce(*this, adaptor.getVec(), VectorReduceKind::Add);
 }
 
+static bool carriesExternalObservationIdentity(Operation *op) {
+  auto generated = op->getAttrOfType<StringAttr>("pyc.generated");
+  const bool skipCycleBalanceName =
+      generated && generated.getValue() == "cycle_balance";
+  for (NamedAttribute attr : op->getAttrs()) {
+    llvm::StringRef name = attr.getName().strref();
+    if (name == "pyc.name") {
+      if (skipCycleBalanceName)
+        continue;
+      if (auto lazy = op->getAttrOfType<BoolAttr>("pyc.observe_lazy");
+          lazy && lazy.getValue())
+        continue;
+      return true;
+    }
+    if (name == "pyc.debug_keep" || name == "pyc.observable" ||
+        name.starts_with("pyc.probe") || name.starts_with("pyc.trace"))
+      return true;
+  }
+  return false;
+}
+
+void AliasOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  // Unused observation aliases must survive DCE so probe/VCD can still
+  // register the identity after a state rewrite. Comb treats AliasOp as
+  // identity anyway; this Write is liveness, not a real store.
+  if (carriesExternalObservationIdentity(*this))
+    effects.emplace_back(MemoryEffects::Write::get());
+}
+
 OpFoldResult AliasOp::fold(FoldAdaptor) {
-  // Preserve alias ops that carry a debug name (used for codegen name mangling).
-  if (auto nAttr = (*this)->getAttrOfType<StringAttr>("pyc.name"))
+  // Preserve aliases that carry external observation identity.
+  if (carriesExternalObservationIdentity(*this))
     return {};
   return getIn();
 }
@@ -999,6 +1031,47 @@ LogicalResult RegOp::verify() {
     return emitOpError("init type must match next type");
   if (getQ().getType() != nextTy)
     return emitOpError("result type must match next type");
+  return success();
+}
+
+LogicalResult DelayLineOp::verify() {
+  auto nextTy = getNext().getType();
+  if (getInit().getType() != nextTy)
+    return emitOpError("init type must match next type");
+  if (getQ().getType() != nextTy)
+    return emitOpError("result type must match next type");
+  auto depthAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
+  if (!depthAttr)
+    return emitOpError("requires integer attribute `depth`");
+  if (depthAttr.getValue().getSExtValue() <= 1)
+    return emitOpError("depth must be > 1");
+  return success();
+}
+
+void DelayTapOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  if (carriesExternalObservationIdentity(*this))
+    effects.emplace_back(MemoryEffects::Write::get());
+}
+
+LogicalResult DelayTapOp::verify() {
+  auto line = getLine();
+  auto delay = line.getDefiningOp<DelayLineOp>();
+  if (!delay)
+    return emitOpError("line must be defined by pyc.delay_line");
+  auto depthAttr = delay->getAttrOfType<IntegerAttr>("depth");
+  if (!depthAttr)
+    return emitOpError("line delay_line is missing integer attribute `depth`");
+  auto tapAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
+  if (!tapAttr)
+    return emitOpError("requires integer attribute `depth`");
+  int64_t tapDepth = tapAttr.getInt();
+  int64_t lineDepth = depthAttr.getInt();
+  if (tapDepth <= 0)
+    return emitOpError("tap depth must be > 0");
+  if (tapDepth > lineDepth)
+    return emitOpError("tap depth must not exceed delay_line depth");
   return success();
 }
 
@@ -1243,11 +1316,14 @@ LogicalResult CombOp::verify() {
   // A pyc.comb body is freely topologically reorderable by code-generation
   // placement passes. Keep that contract explicit instead of trusting the
   // producer that originally formed the region.
+  //
+  // Observation aliases report Write only so unused probe names survive DCE.
+  // They are still identity ops and stay safe to reorder.
   for (Operation &op : b.without_terminator()) {
     if (op.getNumRegions() != 0)
       return emitOpError("body operation ")
              << op.getName() << " must not contain nested regions";
-    if (!isMemoryEffectFree(&op))
+    if (!isMemoryEffectFree(&op) && !isa<AliasOp>(&op))
       return emitOpError("body operation ")
              << op.getName() << " must be memory-effect-free";
   }

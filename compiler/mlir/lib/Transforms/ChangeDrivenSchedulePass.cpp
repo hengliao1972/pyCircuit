@@ -20,8 +20,8 @@ namespace pyc {
 
 bool isChangeScheduleNode(Operation *op) {
   return isa_and_nonnull<pyc::CombOp, pyc::InstanceOp, pyc::RegOp,
-                         pyc::FifoOp, pyc::ByteMemOp, pyc::SyncMemOp,
-                         pyc::SyncMemDPOp, pyc::AsyncFifoOp,
+                         pyc::DelayLineOp, pyc::FifoOp, pyc::ByteMemOp,
+                         pyc::SyncMemOp, pyc::SyncMemDPOp, pyc::AsyncFifoOp,
                          pyc::CdcSyncOp>(op);
 }
 

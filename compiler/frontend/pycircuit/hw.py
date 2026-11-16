@@ -1267,7 +1267,8 @@ class Circuit(Module):
         en: Union[Wire, Signal, int, LiteralValue] = 1,
         shape: list[int],
         stage: str | None = None,
-        signed: bool | None = None
+        signed: bool | None = None,
+        generated: str | None = None,
     ) -> Reg[Vector]: ...
     
     @overload
@@ -1282,7 +1283,8 @@ class Circuit(Module):
         init: Union[Wire, Reg, Signal, int, list, LiteralValue] | None = None,
         en: Union[Wire, Signal, int, LiteralValue] = 1,
         stage: str | None = None,
-        signed: bool | None = None
+        signed: bool | None = None,
+        generated: str | None = None,
     ) -> Reg: ...
     
     def out(
@@ -1298,6 +1300,7 @@ class Circuit(Module):
         shape: list[int] | None = None,
         stage: str | None = None,
         signed: bool | None = None,  # reserved for future type inference / lowering
+        generated: str | None = None,
     ) -> Reg:
         """Declare a named stateful variable (backedge register).
 
@@ -1329,7 +1332,12 @@ class Circuit(Module):
 
         next_w = Wire(
             self,
-            super().new_signal(width=width, name=f"{fullname}__next", shape=shape),
+            super().new_signal(
+                width=width,
+                name=f"{fullname}__next",
+                shape=shape,
+                generated=generated,
+            ),
         )
 
         # ``pyc.reg`` enable is scalar i1 (shared across vector lanes).
@@ -1351,10 +1359,14 @@ class Circuit(Module):
         if shape and isinstance(init_w.ty, Vector) and init_w.ty.shape() != shape:
             raise TypeError(f"out() init shape must be {shape}, got {init_w.ty}")
 
-        r = self.reg(clk, rst, en_w, next_w, init_w)
+        r = self.reg(clk, rst, en_w, next_w, init_w, generated=generated)
 
         # Name the observable value of the state variable.
-        q_named = Wire(self, self.alias(r.q.sig, name=fullname), signed=r.q.signed)
+        q_named = Wire(
+            self,
+            self.alias(r.q.sig, name=fullname, generated=generated),
+            signed=r.q.signed,
+        )
         return Reg(q=q_named, clk=r.clk, rst=r.rst, en=r.en, next=r.next, init=r.init)
 
     def reg_wire(
@@ -1374,12 +1386,21 @@ class Circuit(Module):
         en: Union[Wire, Signal],
         next_: Union[Wire, Signal],
         init: Union[Wire, Signal, int, LiteralValue],
+        *,
+        generated: str | None = None,
     ) -> Reg:
         en = Wire.as_wire(en, m=self)
         next_ = Wire.as_wire(next_, m=self)
         init = Wire.as_wire(init, m=self, width=next_.width)
         self._record_struct_state_alloc()
-        q_sig = super().reg(clk, rst, en.sig, next_.sig, init.sig)
+        q_sig = super().reg(
+            clk,
+            rst,
+            en.sig,
+            next_.sig,
+            init.sig,
+            generated=generated,
+        )
         q_w = Wire(self, q_sig)
         return Reg(q=q_w, clk=clk, rst=rst, en=en, next=next_, init=init)
 

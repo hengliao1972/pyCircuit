@@ -32,7 +32,7 @@ static int64_t addReachableDepth(int64_t lhs, int64_t rhs) {
 }
 
 static bool isHardSequentialCut(Operation *op) {
-  return isa<pyc::RegOp, pyc::SyncMemOp, pyc::SyncMemDPOp,
+  return isa<pyc::RegOp, pyc::DelayLineOp, pyc::SyncMemOp, pyc::SyncMemDPOp,
              pyc::AsyncFifoOp, pyc::CdcSyncOp>(op);
 }
 
@@ -75,7 +75,7 @@ static int64_t opCost(Operation *op) {
   if (isHardSequentialCut(op))
     return 0;
   if (isa<pyc::WireOp, pyc::AliasOp, pyc::ResetActiveOp, pyc::ConstantOp, pyc::CombOp, pyc::YieldOp,
-          arith::ConstantOp>(op))
+          pyc::DelayTapOp, arith::ConstantOp>(op))
     return 0;
   if (isa<pyc::VGetOp, pyc::VCreateOp, pyc::VBroadcastOp,
           pyc::VBroadcastDimOp>(op))
@@ -146,6 +146,17 @@ resolveResultTransfer(Operation *op, unsigned resultIndex, ModuleOp module,
   }
   if (isHardSequentialCut(op)) {
     transfer.baseDepth = 0;
+    return transfer;
+  }
+  if (isa<pyc::DelayTapOp>(op)) {
+    // A tap reads a committed delay-line stage. Connect it to the line so
+    // change-driven fanout reaches tap consumers, without a same-tick path
+    // from the delay input.
+    transfer.baseDepth = 0;
+    transfer.operandDependencies.reserve(op->getNumOperands());
+    for (unsigned operandIndex = 0; operandIndex < op->getNumOperands();
+         ++operandIndex)
+      transfer.operandDependencies.push_back({operandIndex, 0});
     return transfer;
   }
   if (isa<pyc::ConstantOp, arith::ConstantOp>(op)) {

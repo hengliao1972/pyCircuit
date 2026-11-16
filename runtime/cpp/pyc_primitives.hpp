@@ -136,6 +136,113 @@ public:
   Wire<Width> qNext{};
 };
 
+// Simulator representation of DEPTH cascaded registers. A circular buffer
+// makes the normal enabled edge O(1); reset still initializes every stage so
+// reset/enable and compute-before-commit semantics match pyc_reg chains.
+template <unsigned Width, unsigned Depth>
+class pyc_delay_line {
+  static_assert(Depth > 1, "pyc_delay_line requires Depth > 1");
+
+public:
+  pyc_delay_line(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, Wire<Width> &d,
+                 Wire<Width> &init, Wire<Width> &q)
+      : clk(clk), rst(rst), en(en), d(d), init(init), q(q) {}
+
+  inline void tick_compute() {
+    bool clkNow = clk.toBool();
+    bool posedge = (!clkPrev) & clkNow;
+    clkPrev = clkNow;
+    if (__builtin_expect(!posedge, 1)) {
+      pending = false;
+      return;
+    }
+    posedge_compute_inner();
+  }
+
+  inline void posedge_tick_compute() {
+    clkPrev = true;
+    posedge_compute_inner();
+  }
+
+  inline void negedge_update() {
+    clkPrev = false;
+    pending = false;
+  }
+
+  // Return the value at a fixed enabled-edge distance from the input.  The
+  // caller must pass 1..Depth; the verifier guarantees this for generated IR.
+  inline Wire<Width> tap(unsigned depth) const {
+    return stages[(head + Depth - depth) % Depth];
+  }
+
+  inline Wire<Width> tap_next(unsigned depth) const {
+    if (pendingReset)
+      return init;
+    if (!pending)
+      return tap(depth);
+    return depth == 1 ? sampledInput : tap(depth - 1);
+  }
+
+  // True while an enabled edge is waiting for tick_commit. Tap consumers
+  // must wake on this (every enabled edge shifts every tap), while tail-`q`
+  // consumers can use tick_commit's tail-change result directly.
+  inline bool has_pending() const { return pending; }
+
+  // Applies a pending edge and reports whether the tail `q` changed. Tap
+  // consumers wake via has_pending(); a tail-only result would leave them
+  // stale on cycles where the tail happens to repeat.
+  inline bool tick_commit() {
+    if (__builtin_expect(!pending, 1))
+      return false;
+    const bool changed = q != qNext;
+    if (pendingReset) {
+      stages.fill(init);
+      head = 0;
+    } else {
+      stages[head] = sampledInput;
+      head = nextIndex(head);
+    }
+    q = qNext;
+    pending = false;
+    return changed;
+  }
+
+private:
+  static constexpr unsigned nextIndex(unsigned index) {
+    return index + 1u == Depth ? 0u : index + 1u;
+  }
+
+  inline void posedge_compute_inner() {
+    pendingReset = rst.toBool();
+    bool enabled = en.toBool();
+    pending = pendingReset | enabled;
+    if (pendingReset) {
+      qNext = init;
+      return;
+    }
+    if (enabled) {
+      sampledInput = d;
+      qNext = stages[nextIndex(head)];
+    }
+  }
+
+public:
+  Wire<1> &clk;
+  Wire<1> &rst;
+  Wire<1> &en;
+  Wire<Width> &d;
+  Wire<Width> &init;
+  Wire<Width> &q;
+
+  bool clkPrev = false;
+  bool pending = false;
+  bool pendingReset = false;
+  Wire<Width> qNext{};
+  Wire<Width> sampledInput{};
+  std::array<Wire<Width>, Depth> stages{};
+  unsigned head = 0;
+};
+
 template <typename T>
 class pyc_vec_reg {
 public:
@@ -195,6 +302,107 @@ public:
   bool clkPrev = false;
   bool pending = false;
   T qNext{};
+};
+
+// Vector counterpart of pyc_delay_line; T is one complete vector value, so a
+// single circular-buffer slot advances every lane atomically.
+template <typename T, unsigned Depth>
+class pyc_vec_delay_line {
+  static_assert(Depth > 1, "pyc_vec_delay_line requires Depth > 1");
+
+public:
+  pyc_vec_delay_line(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, T &d, T &init,
+                     T &q)
+      : clk(clk), rst(rst), en(en), d(d), init(init), q(q) {}
+
+  inline void tick_compute() {
+    bool clkNow = clk.toBool();
+    bool posedge = (!clkPrev) & clkNow;
+    clkPrev = clkNow;
+    if (__builtin_expect(!posedge, 1)) {
+      pending = false;
+      return;
+    }
+    posedge_compute_inner();
+  }
+
+  inline void posedge_tick_compute() {
+    clkPrev = true;
+    posedge_compute_inner();
+  }
+
+  inline void negedge_update() {
+    clkPrev = false;
+    pending = false;
+  }
+
+  // True while an enabled edge is waiting for tick_commit. Tap consumers
+  // must wake on this (every enabled edge shifts every tap).
+  inline bool has_pending() const { return pending; }
+
+  // Applies a pending edge and reports whether the tail `q` changed; tap
+  // consumers wake via has_pending() (see the scalar note above).
+  inline bool tick_commit() {
+    if (__builtin_expect(!pending, 1))
+      return false;
+    const bool changed = q != qNext;
+    if (pendingReset) {
+      stages.fill(init);
+      head = 0;
+    } else {
+      stages[head] = sampledInput;
+      head = nextIndex(head);
+    }
+    q = qNext;
+    pending = false;
+    return changed;
+  }
+
+  inline T tap(unsigned depth) const {
+    return stages[(head + Depth - depth) % Depth];
+  }
+
+  inline T tap_next(unsigned depth) const {
+    if (pendingReset)
+      return init;
+    if (!pending)
+      return tap(depth);
+    return depth == 1 ? sampledInput : tap(depth - 1);
+  }
+
+private:
+  static constexpr unsigned nextIndex(unsigned index) {
+    return index + 1u == Depth ? 0u : index + 1u;
+  }
+
+  inline void posedge_compute_inner() {
+    pendingReset = rst.toBool();
+    bool enabled = en.toBool();
+    pending = pendingReset | enabled;
+    if (pendingReset) {
+      qNext = init;
+      return;
+    }
+    if (enabled) {
+      sampledInput = d;
+      qNext = stages[nextIndex(head)];
+    }
+  }
+
+public:
+  Wire<1> &clk;
+  Wire<1> &rst;
+  Wire<1> &en;
+  T &d;
+  T &init;
+  T &q;
+  bool clkPrev = false;
+  bool pending = false;
+  bool pendingReset = false;
+  T qNext{};
+  T sampledInput{};
+  std::array<T, Depth> stages{};
+  unsigned head = 0;
 };
 
 template <unsigned Width, unsigned Depth>

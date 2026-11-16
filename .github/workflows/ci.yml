@@ -229,6 +229,18 @@ jobs:
           PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
             bash compiler/mlir/test/instance_vector_cache_smoke.sh
           bash tests/runtime/run_change_scheduler.sh
+          bash tests/runtime/run_delay_line_commit.sh
+          PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+            bash compiler/mlir/test/delay_line_verify_smoke.sh
+          PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+            bash compiler/mlir/test/state_delay_chain_smoke.sh
+          PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+            bash compiler/mlir/test/state_retime_smoke.sh
+          PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            bash compiler/mlir/test/state_codegen_smoke.sh
+          python -m pytest -q tests/test_trace_codegen_plan.py \
+            tests/v5/test_delay_line_combine.py
           python -m pytest -q tests/vec/test_vec_ops.py \
             -k 'slt_vv or slt_vs or slt_sv'
 

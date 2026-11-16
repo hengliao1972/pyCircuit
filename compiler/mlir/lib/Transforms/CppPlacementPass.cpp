@@ -1,6 +1,7 @@
 #include "pyc/Dialect/PYC/PYCOps.h"
 #include "pyc/Emit/CppEmitter.h"
 #include "pyc/Transforms/Passes.h"
+#include "pyc/Transforms/StateOptimization.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
@@ -13,11 +14,16 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
+#include "llvm/Support/JSON.h"
+#include "llvm/Support/MemoryBuffer.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <queue>
+#include <string>
 #include <vector>
 
 using namespace mlir;
@@ -488,16 +494,26 @@ static bool pinToStruct(Value v) {
   if (!def)
     return true;
 
-  // Named values are registered as probes by the C++ emitter. Their addresses
-  // must therefore remain valid for the lifetime of the generated SimObject.
-  if (def->hasAttr("pyc.name"))
+  // Named values are registered as probes, and trace-selected fields are a
+  // subset of those names. Their addresses must stay valid for the model.
+  if (def->hasAttr("pyc.name")) {
+    if (auto lazy = def->getAttrOfType<BoolAttr>("pyc.observe_lazy");
+        lazy && lazy.getValue()) {
+      // Undeclared names stay lookupable via lazy slices/wires, not a
+      // second named Wire. The host below may still be pinned.
+    } else {
+      return true;
+    }
+  }
+  if (def->hasAttr("pyc.lazy_probe_wires"))
     return true;
 
   // Top-level comb results and state-holding ops always live on the struct.
   if (isa<pyc::CombOp>(def))
     return true;
-  if (isa<pyc::RegOp, pyc::InstanceOp, pyc::FifoOp, pyc::ByteMemOp, pyc::SyncMemOp, pyc::SyncMemDPOp,
-          pyc::AsyncFifoOp, pyc::CdcSyncOp>(def))
+  if (isa<pyc::RegOp, pyc::DelayLineOp, pyc::InstanceOp, pyc::FifoOp,
+          pyc::ByteMemOp, pyc::SyncMemOp, pyc::SyncMemDPOp, pyc::AsyncFifoOp,
+          pyc::CdcSyncOp>(def))
     return true;
 
   // Values defined inside a comb but used outside it must be struct members.
@@ -552,7 +568,9 @@ static void setFuncPlacementSummary(func::FuncOp f, const CppPlacementSummary &s
 
 /// Decide struct vs method-local storage for every value in \p f and annotate the IR.
 /// Returns placement statistics consumed by the build profile JSON.
-static CppPlacementSummary runCppMemberPlacement(func::FuncOp f, unsigned combChunkNodes) {
+static CppPlacementSummary
+runCppMemberPlacement(func::FuncOp f, unsigned combChunkNodes,
+                      const llvm::StringSet<> &traceSelectedFields) {
   CppPlacementSummary summary;
 
   // Phase A — Comb method assignment (independent of storage decisions):
@@ -633,6 +651,11 @@ static CppPlacementSummary runCppMemberPlacement(func::FuncOp f, unsigned combCh
         continue;
       annotatePlacement(r, CppStorageKind::Struct, {});
       summary.structMembers++;
+      // Eager named values keep a named struct member for probes/trace, so
+      // they count as probe-pinned just like the Phase-B path. Lazy names
+      // (`pyc.observe_lazy`) are lookup-only and must not count.
+      if (op->hasAttr("pyc.name") && !isObserveLazy(op))
+        summary.probePinnedStruct++;
     }
   });
 
@@ -682,15 +705,18 @@ CppPlacementSummary accumulateModulePlacementSummary(ModuleOp module) {
 // pass entry point
 // ---------------------------------------------------------------------------
 
-struct CppPlacementPass : public PassWrapper<CppPlacementPass, OperationPass<ModuleOp>> {
+struct CppPlacementPass
+    : public PassWrapper<CppPlacementPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(CppPlacementPass)
 
-  CppPlacementPass(unsigned chunkNodes = CppEmitterOptions::kDefaultCombChunkNodes)
-      : combChunkNodes(chunkNodes) {}
+  CppPlacementPass(unsigned chunkNodes = CppEmitterOptions::kDefaultCombChunkNodes,
+                   std::string planPath = {})
+      : combChunkNodes(chunkNodes), traceCodegenPlanPath(std::move(planPath)) {}
 
   StringRef getArgument() const override { return "pyc-cpp-placement"; }
   StringRef getDescription() const override {
-    return "Set pyc.cpp.comb_chunk_nodes and annotate comb member placement for C++ emit";
+    return "Set pyc.cpp.comb_chunk_nodes and annotate comb member placement "
+           "for C++ emit";
   }
 
   void runOnOperation() override {
@@ -701,19 +727,46 @@ struct CppPlacementPass : public PassWrapper<CppPlacementPass, OperationPass<Mod
     }
     setModuleCombChunkNodes(module, combChunkNodes);
 
+    ObservationPlans plans;
+    if (failed(loadObservationPlans(module, /*probePlanPath=*/"",
+                                    traceCodegenPlanPath, plans))) {
+      return signalPassFailure();
+    }
+
     for (auto f : module.getOps<func::FuncOp>()) {
       if (f.isDeclaration())
         continue;
-      CppPlacementSummary summary = runCppMemberPlacement(f, combChunkNodes);
+      llvm::StringSet<> traceSelectedFields;
+      if (const auto it = plans.traceFieldsByModule.find(f.getSymName());
+          it != plans.traceFieldsByModule.end())
+        traceSelectedFields = it->second;
+      llvm::StringSet<> foundTraceFields;
+      f.walk([&](Operation *op) {
+        if (auto name = op->getAttrOfType<StringAttr>("pyc.name");
+            name && traceSelectedFields.contains(name.getValue()))
+          foundTraceFields.insert(name.getValue());
+      });
+      for (const auto &field : traceSelectedFields) {
+        if (!foundTraceFields.contains(field.getKey())) {
+          f.emitError("C++ trace codegen field not found in module: ")
+              << field.getKey();
+          return signalPassFailure();
+        }
+      }
+      CppPlacementSummary summary =
+          runCppMemberPlacement(f, combChunkNodes, traceSelectedFields);
       setFuncPlacementSummary(f, summary);
     }
   }
 
   unsigned combChunkNodes;
+  std::string traceCodegenPlanPath;
 };
 
-std::unique_ptr<Pass> createCppPlacementPass(unsigned combChunkNodes) {
-  return std::make_unique<CppPlacementPass>(combChunkNodes);
+std::unique_ptr<Pass> createCppPlacementPass(unsigned combChunkNodes,
+                                             std::string traceCodegenPlanPath) {
+  return std::make_unique<CppPlacementPass>(combChunkNodes,
+                                            std::move(traceCodegenPlanPath));
 }
 
 static PassRegistration<CppPlacementPass> pass;
