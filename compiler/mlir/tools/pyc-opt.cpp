@@ -1,4 +1,5 @@
 #include "pyc/Dialect/PYC/PYCDialect.h"
+#include "pyc/Emit/CppEmitter.h"
 #include "pyc/Support/PassIRDumper.h"
 #include "pyc/Transforms/Passes.h"
 
@@ -47,6 +48,7 @@ static void forceLinkPycPasses() {
   (void)pyc::createLowerSCFToPYCStaticPass();
   (void)pyc::createCheckFlatTypesPass();
   (void)pyc::createPrunePortsPass();
+  (void)pyc::createCppPlacementPass(pyc::CppEmitterOptions::kDefaultCombChunkNodes);
   (void)pyc::createVectorUnrollPass();
   (void)pyc::createSLPPackWiresPass();
   (void)pyc::createFlattenInstancesPass();
