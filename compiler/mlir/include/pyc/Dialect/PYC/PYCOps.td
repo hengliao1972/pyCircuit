@@ -264,7 +264,8 @@ def PYC_ConcatOp : PYC_Op<"concat", [Pure]> {
   let hasFolder = 1;
 }
 
-def PYC_AliasOp : PYC_Op<"alias", [Pure, SameOperandsAndResultType]> {
+def PYC_AliasOp : PYC_Op<"alias", [SameOperandsAndResultType,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "Alias a value (for naming / debug)";
   let arguments = (ins AnyType:$in);
   let results = (outs AnyType:$result);
@@ -298,6 +299,29 @@ def PYC_RegOp : PYC_Op<"reg", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch
   let results = (outs AnyIntegerOrV:$q);
   let hasVerifier = 1;
   let assemblyFormat = "$clk `,` $rst `,` $en `,` $next `,` $init attr-dict `:` type($q)";
+}
+
+// Compact IR form of DEPTH cascaded registers with common controls. Backends
+// may choose an efficient simulator representation, but retain DEPTH states.
+def PYC_DelayLineOp : PYC_Op<"delay_line", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch<["next", "init", "q"]>]> {
+  let summary = "Fixed-latency delay line with reset + enable";
+  let arguments = (ins PYC_ClockType:$clk, PYC_ResetType:$rst, I1:$en, AnyIntegerOrV:$next, AnyIntegerOrV:$init);
+  let results = (outs AnyIntegerOrV:$q);
+  let hasVerifier = 1;
+  let assemblyFormat = "$clk `,` $rst `,` $en `,` $next `,` $init attr-dict `:` type($q)";
+}
+
+// Read-only view of an internal stage of a fixed-depth delay line.  The
+// producer remains the owner of the storage; this op only exposes the value
+// that would be present after `depth` enabled edges.
+def PYC_DelayTapOp : PYC_Op<"delay_tap",
+    [AllTypesMatch<["line", "tap"]>,
+     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Read-only fixed-depth delay-line tap";
+  let arguments = (ins AnyIntegerOrV:$line);
+  let results = (outs AnyIntegerOrV:$tap);
+  let hasVerifier = 1;
+  let assemblyFormat = "$line attr-dict `:` type($tap)";
 }
 
 def PYC_FifoOp : PYC_Op<"fifo", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch<["in_data", "out_data"]>]> {

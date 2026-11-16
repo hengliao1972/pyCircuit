@@ -1,4 +1,5 @@
 #include "pyc/Transforms/Passes.h"
+#include "pyc/Transforms/StateOptimization.h"
 
 #include "pyc/Dialect/PYC/PYCOps.h"
 
@@ -7,6 +8,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
@@ -17,6 +19,8 @@ namespace pyc {
 namespace {
 
 static bool isFusableCombOp(Operation *op) {
+  if (shouldKeepStateOptimization(op) || hasStableStateName(op))
+    return false;
   return isa<pyc::ConstantOp,
              pyc::AddOp,
              pyc::SubOp,
@@ -104,6 +108,7 @@ struct FuseCombPass : public PassWrapper<FuseCombPass, OperationPass<func::FuncO
 
     // Live-outs: results that are used by an op outside the run.
     llvm::SmallVector<Value> outputs;
+    llvm::DenseSet<Value> outputSet;
     for (Operation *op : run) {
       for (Value r : op->getResults()) {
         bool usedOutside = false;
@@ -113,10 +118,37 @@ struct FuseCombPass : public PassWrapper<FuseCombPass, OperationPass<func::FuncO
             break;
           }
         }
-        if (usedOutside)
+        if (usedOutside && outputSet.insert(r).second)
           outputs.push_back(r);
       }
     }
+
+    // Promote any pyc.lazy_probe_wires host in the run to a live-out so
+    // its wired result survives as a comb output. Observation demand
+    // hangs the attribute on the alias-stripped producer (see
+    // findWireHost in ApplyObservationDemandPass), so a named alias that
+    // is the live-out, or a mid-pipeline named op consumed only by other
+    // fused ops, would otherwise be cloned into the pyc.comb body and
+    // become invisible to the emitter (which skips ops inside pyc.comb).
+    for (Operation *op : run) {
+      auto wires = op->getAttrOfType<ArrayAttr>("pyc.lazy_probe_wires");
+      if (!wires)
+        continue;
+      for (Attribute item : wires) {
+        auto dict = dyn_cast<DictionaryAttr>(item);
+        if (!dict)
+          continue;
+        auto resultAttr = dict.getAs<IntegerAttr>("result");
+        const unsigned srcResult =
+            resultAttr ? static_cast<unsigned>(resultAttr.getInt()) : 0;
+        if (srcResult >= op->getNumResults())
+          continue;
+        Value r = op->getResult(srcResult);
+        if (outputSet.insert(r).second)
+          outputs.push_back(r);
+      }
+    }
+
     if (outputs.empty())
       return;
 
@@ -165,6 +197,43 @@ struct FuseCombPass : public PassWrapper<FuseCombPass, OperationPass<func::FuncO
     for (Value out : outputs)
       yieldVals.push_back(mapping.lookup(out));
     builder.create<pyc::YieldOp>(comb.getLoc(), yieldVals);
+
+    // Keep undeclared combinational names lookupable after fusion: they
+    // register as addWire of this comb result, not a second named copy.
+    SmallVector<Attribute> lazyWires;
+    auto copyLazyWires = [&](Value out, int64_t combResult) {
+      Operation *def = out.getDefiningOp();
+      if (!def)
+        return;
+      auto wires = def->getAttrOfType<ArrayAttr>("pyc.lazy_probe_wires");
+      if (!wires)
+        return;
+      unsigned outResult = 0;
+      if (auto res = dyn_cast<OpResult>(out))
+        outResult = res.getResultNumber();
+      for (Attribute item : wires) {
+        auto dict = dyn_cast<DictionaryAttr>(item);
+        if (!dict)
+          continue;
+        auto resultAttr = dict.getAs<IntegerAttr>("result");
+        const unsigned srcResult =
+            resultAttr ? static_cast<unsigned>(resultAttr.getInt()) : 0;
+        if (srcResult != outResult)
+          continue;
+        NamedAttrList fields;
+        if (auto name = dict.getAs<StringAttr>("name"))
+          fields.set("name", name);
+        if (auto width = dict.getAs<IntegerAttr>("width"))
+          fields.set("width", width);
+        fields.set("result", builder.getI64IntegerAttr(combResult));
+        lazyWires.push_back(DictionaryAttr::get(def->getContext(), fields));
+      }
+    };
+    for (auto [i, out] : llvm::enumerate(outputs))
+      copyLazyWires(out, static_cast<int64_t>(i));
+    if (!lazyWires.empty())
+      comb->setAttr("pyc.lazy_probe_wires",
+                    ArrayAttr::get(comb.getContext(), lazyWires));
 
     // Replace uses outside the run with comb results.
     for (auto [out, res] : llvm::zip(outputs, comb.getResults())) {

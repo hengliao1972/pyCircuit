@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -292,6 +293,8 @@ public:
     bool *write_valid = nullptr;
     const void *write_data_ptr = nullptr;
     std::uint32_t write_width_bits = 0;
+    std::uint32_t write_storage_width_bits = 0;
+    std::uint32_t write_lsb_bits = 0;
     const std::size_t *write_addr = nullptr;
     const void *write_mask_ptr = nullptr;
     std::uint32_t write_mask_width_bits = 0;
@@ -300,6 +303,16 @@ public:
     std::uint32_t known_mask_width_bits = 0;
     const void *z_mask_ptr = nullptr;
     std::uint32_t z_mask_width_bits = 0;
+
+    // Set for lazy named lookups: evaluate storage on this read, not every
+    // eval. Eager entries may also set this so callers can use one API.
+    std::function<std::uint64_t()> read_u64{};
+
+    std::uint64_t readU64() const {
+      if (read_u64)
+        return read_u64();
+      return 0;
+    }
   };
 
   static constexpr std::uint64_t kProbeIdSeed = 0;
@@ -316,7 +329,11 @@ public:
 
   template <unsigned W>
   std::uint64_t addWire(std::string path, Wire<W> *wire, ProbeKind kind = ProbeKind::Wire) {
-    return addImpl(std::move(path), kind, /*width_bits=*/W, static_cast<void *>(wire));
+    const std::uint64_t id =
+        addImpl(std::move(path), kind, /*width_bits=*/W, static_cast<void *>(wire));
+    if (Entry *e = const_cast<Entry *>(findById(id)))
+      e->read_u64 = [wire]() -> std::uint64_t { return wire->value(); };
+    return id;
   }
 
   // Register a scalar wire leaf (terminal case of the vector overload below).
@@ -339,13 +356,104 @@ public:
 
   template <unsigned W>
   std::uint64_t addReg(std::string path, Wire<W> *q, bool *write_valid, Wire<W> *write_data) {
-    return addImpl(std::move(path),
+    const std::uint64_t id = addImpl(std::move(path),
                    ProbeKind::Reg,
                    /*width_bits=*/W,
                    static_cast<void *>(q),
                    write_valid,
                    static_cast<const void *>(write_data),
-                   /*write_width_bits=*/W);
+                   /*write_width_bits=*/W,
+                   /*write_storage_width_bits=*/W,
+                   /*write_lsb_bits=*/0);
+    if (Entry *e = const_cast<Entry *>(findById(id))) {
+      e->read_u64 = [q]() -> std::uint64_t { return q->value(); };
+    }
+    return id;
+  }
+
+  template <unsigned W, unsigned StorageW>
+  std::uint64_t addRegSlice(std::string path, Wire<W> *q, bool *write_valid,
+                            Wire<StorageW> *write_data, unsigned lsb) {
+    const std::uint64_t id = addImpl(std::move(path),
+                   ProbeKind::Reg,
+                   /*width_bits=*/W,
+                   static_cast<void *>(q),
+                   write_valid,
+                   static_cast<const void *>(write_data),
+                   /*write_width_bits=*/W,
+                   /*write_storage_width_bits=*/StorageW,
+                   /*write_lsb_bits=*/lsb);
+    if (Entry *e = const_cast<Entry *>(findById(id))) {
+      e->read_u64 = [q]() -> std::uint64_t { return q->value(); };
+    }
+    return id;
+  }
+
+  // No dedicated lane Wire: slice packed/survivor storage when the caller
+  // reads this name (undeclared pyc.name after --observe-named=demand).
+  template <unsigned W, unsigned StorageW>
+  std::uint64_t addRegLazySlice(std::string path, Wire<StorageW> *storage,
+                                unsigned lsb, bool *write_valid,
+                                Wire<StorageW> *write_data) {
+    const std::uint64_t id = addImpl(std::move(path),
+                   ProbeKind::Reg,
+                   /*width_bits=*/W,
+                   static_cast<void *>(storage),
+                   write_valid,
+                   static_cast<const void *>(write_data),
+                   /*write_width_bits=*/W,
+                   /*write_storage_width_bits=*/StorageW,
+                   /*write_lsb_bits=*/lsb);
+    if (Entry *e = const_cast<Entry *>(findById(id))) {
+      e->read_u64 = [storage, lsb]() -> std::uint64_t {
+        return extract<W, StorageW>(*storage, lsb).value();
+      };
+    }
+    return id;
+  }
+
+  template <unsigned W, typename DelayInst>
+  std::uint64_t addRegLazyTap(std::string path, DelayInst *inst, unsigned depth,
+                              bool *write_valid, Wire<W> *write_data) {
+    const std::uint64_t id = addImpl(std::move(path),
+                   ProbeKind::Reg,
+                   /*width_bits=*/W,
+                   static_cast<void *>(inst),
+                   write_valid,
+                   static_cast<const void *>(write_data),
+                   /*write_width_bits=*/W,
+                   /*write_storage_width_bits=*/W,
+                   /*write_lsb_bits=*/0);
+    if (Entry *e = const_cast<Entry *>(findById(id))) {
+      e->read_u64 = [inst, depth]() -> std::uint64_t {
+        return inst->tap(depth).value();
+      };
+    }
+    return id;
+  }
+
+  // Slice a specific delay-line stage: read `extract<W,StorageW>(tap(depth), lsb)`
+  // and route force-writes to that stage's own qNext.
+  template <unsigned W, unsigned StorageW, typename DelayInst>
+  std::uint64_t addRegLazyTapSlice(std::string path, DelayInst *inst,
+                                   unsigned depth, unsigned lsb,
+                                   bool *write_valid,
+                                   Wire<StorageW> *write_data) {
+    const std::uint64_t id = addImpl(std::move(path),
+                   ProbeKind::Reg,
+                   /*width_bits=*/W,
+                   static_cast<void *>(inst),
+                   write_valid,
+                   static_cast<const void *>(write_data),
+                   /*write_width_bits=*/W,
+                   /*write_storage_width_bits=*/StorageW,
+                   /*write_lsb_bits=*/lsb);
+    if (Entry *e = const_cast<Entry *>(findById(id))) {
+      e->read_u64 = [inst, depth, lsb]() -> std::uint64_t {
+        return extract<W, StorageW>(inst->tap(depth), lsb).value();
+      };
+    }
+    return id;
   }
 
   template <typename MemT>
@@ -367,19 +475,23 @@ public:
                    write_valid,
                    static_cast<const void *>(write_data),
                    /*write_width_bits=*/DataW,
+                   /*write_storage_width_bits=*/DataW,
+                   /*write_lsb_bits=*/0,
                    write_addr,
                    static_cast<const void *>(write_mask),
                    /*write_mask_width_bits=*/MaskW);
   }
 
   std::uint64_t addAlias(std::string path, const Entry &src) {
-    return addImpl(std::move(path),
+    const std::uint64_t id = addImpl(std::move(path),
                    src.kind,
                    src.width_bits,
                    src.ptr,
                    src.write_valid,
                    src.write_data_ptr,
                    src.write_width_bits,
+                   src.write_storage_width_bits,
+                   src.write_lsb_bits,
                    src.write_addr,
                    src.write_mask_ptr,
                    src.write_mask_width_bits,
@@ -387,6 +499,9 @@ public:
                    src.known_mask_width_bits,
                    src.z_mask_ptr,
                    src.z_mask_width_bits);
+    if (Entry *e = const_cast<Entry *>(findById(id)))
+      e->read_u64 = src.read_u64;
+    return id;
   }
 
   const Entry *findByPath(std::string_view path) const {
@@ -464,6 +579,8 @@ private:
                         bool *write_valid = nullptr,
                         const void *write_data_ptr = nullptr,
                         std::uint32_t write_width_bits = 0,
+                        std::uint32_t write_storage_width_bits = 0,
+                        std::uint32_t write_lsb_bits = 0,
                         const std::size_t *write_addr = nullptr,
                         const void *write_mask_ptr = nullptr,
                         std::uint32_t write_mask_width_bits = 0,
@@ -499,6 +616,8 @@ private:
     e.write_valid = write_valid;
     e.write_data_ptr = write_data_ptr;
     e.write_width_bits = write_width_bits;
+    e.write_storage_width_bits = write_storage_width_bits;
+    e.write_lsb_bits = write_lsb_bits;
     e.write_addr = write_addr;
     e.write_mask_ptr = write_mask_ptr;
     e.write_mask_width_bits = write_mask_width_bits;

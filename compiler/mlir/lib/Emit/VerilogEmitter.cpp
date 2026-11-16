@@ -8,6 +8,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/Visitors.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -470,6 +471,10 @@ static std::optional<LogicalResult> emitScalarOpAssign(Operation &op, raw_ostrea
          << lsb << "];\n";
     return success();
   }
+  if (isa<pyc::DelayTapOp>(op))
+    return {op.emitError("pyc.delay_tap is not supported by the Verilog "
+                         "backend (delay lines are C++-only; re-emit with "
+                         "--emit=cpp or disable state optimization)")};
   if (auto sh = dyn_cast<pyc::ShliOp>(op)) {
     os << "assign " << nt.get(sh.getResult()) << " = (" << nt.get(sh.getIn()) << " << " << sh.getAmountAttr().getInt()
        << ");\n";
@@ -991,6 +996,16 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
   }
   os << "\n";
 
+  // Reject delay lines early with a clear diagnostic: the Verilog backend
+  // keeps the pre-optimization netlist contract and never emits them.
+  bool sawDelayLine = false;
+  f.walk([&](pyc::DelayLineOp) { sawDelayLine = true; });
+  if (sawDelayLine)
+    return f.emitError("pyc.delay_line is not supported by the Verilog "
+                       "backend (delay lines are C++-only; re-emit with "
+                       "--emit=cpp or disable state optimization)");
+  os << "\n";
+
   // Collect top-level ops for netlist-friendly emission.
   llvm::SmallVector<Operation *> combAssignOps;
   llvm::SmallVector<Operation *> instOps;
@@ -1219,6 +1234,8 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         };
 
         if (auto vt = dyn_cast<VectorType>(qTy)) {
+          // The primitive has scalar leaf ports, so preserve vector shape by
+          // emitting one delay instance per leaf, as for vector registers.
           SmallVector<int64_t> shape = vectorShape(vt);
           walkVectorIndices(shape, [&](ArrayRef<int64_t> indices) {
             std::string suffix = indexSuffix(indices);
