@@ -1211,7 +1211,7 @@ static bool hasDirtyPolledBoundaryInput(pyc::CombOp comb) {
 
 static void emitCombInputGuard(
     pyc::CombOp comb, llvm::raw_ostream &os, NameTable &nt, unsigned idx) {
-  os << "    bool _pyc_comb_should_eval = _pyc_comb_take_active(" << idx
+  os << "    bool _pyc_comb_should_eval = _pyc_comb_dirty.take(" << idx
      << "u);\n";
   os << "    bool _pyc_comb_inputs_changed = _pyc_comb_should_eval;\n";
   for (auto [inputIndex, input] : llvm::enumerate(comb.getInputs())) {
@@ -1659,15 +1659,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "  // Runtime-owned local fused-comb dirty set.\n";
     os << "  pyc::cpp::DirtyBitset<" << combs.size()
        << "> _pyc_comb_dirty{};\n";
-    os << "  inline bool _pyc_comb_take_active(unsigned id) {\n";
-    os << "    return _pyc_comb_dirty.take(id);\n";
-    os << "  }\n";
-    os << "  inline bool _pyc_comb_is_active(unsigned id) const {\n";
-    os << "    return _pyc_comb_dirty.test(id);\n";
-    os << "  }\n";
-    os << "  inline void _pyc_mark_comb_dirty(unsigned id) {\n";
-    os << "    _pyc_comb_dirty.mark(id);\n";
-    os << "  }\n\n";
   }
 
   sortBySchedule(instances);
@@ -2939,11 +2930,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                << "u)) {\n";
             openGuardWord = guardWord;
           }
-          os << "      if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << "      if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << "        eval_comb_" << index << "();\n";
           os << "      }\n";
         } else {
-          os << "    if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << "    if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << "      eval_comb_" << index << "();\n";
           os << "    }\n";
         }
@@ -3508,11 +3499,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                << "u)) {\n";
             guard->openGuardWord = guardWord;
           }
-          os << indent << "  if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << indent << "  if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << indent << "    eval_comb_" << index << "();\n";
           os << indent << "  }\n";
         } else {
-          os << indent << "if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << indent << "if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << indent << "  eval_comb_" << index << "();\n";
           os << indent << "}\n";
         }
