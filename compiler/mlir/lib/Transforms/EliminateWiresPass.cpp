@@ -45,8 +45,7 @@ static bool dependsOn(Value root, Value target) {
 // Ops whose wire inputs are not read combinationally within eval_comb_pass.
 static bool isWireReadCut(Operation *op) {
   return isa<pyc::AssignOp, pyc::RegOp, pyc::DelayLineOp, pyc::SyncMemOp,
-             pyc::SyncMemDPOp, pyc::FifoOp, pyc::AsyncFifoOp, pyc::ByteMemOp,
-             pyc::CdcSyncOp, pyc::InstanceOp>(op);
+             pyc::SyncMemDPOp, pyc::CdcSyncOp>(op);
 }
 
 // Stable topological sort in which a combinational reader of a wire also
@@ -225,9 +224,15 @@ struct EliminateWiresPass : public PassWrapper<EliminateWiresPass, OperationPass
     if (dependsOn(src, wireVal))
       return false;
 
-    for (OpOperand *use : reads) {
-      if (!dom.dominates(src, use->getOwner()))
-        return false;
+    // Readers after the driver take its source directly; only the readers
+    // before it keep the wire.
+    auto early = llvm::partition(reads, [&](OpOperand *use) {
+      return dom.dominates(src, use->getOwner());
+    });
+    if (early != reads.end()) {
+      for (OpOperand *use : llvm::make_range(reads.begin(), early))
+        use->set(src);
+      return early != reads.begin();
     }
 
     Value replacement = src;

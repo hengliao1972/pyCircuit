@@ -2458,7 +2458,8 @@ int main(int argc, char **argv) {
   pm.addPass(pyc::createCheckClockDomainsPass());
   pm.addNestedPass<func::FuncOp>(pyc::createPackI1RegsPass());
   // Loop partition runs after all state rewrites so loops cover the final
-  // state set; the C++ emitter reads the ids. fuse-comb does not move state.
+  // state set; the C++ emitter reads the ids. fuse-comb only hoists state,
+  // keeping its relative order.
   if (emitKind == "cpp" && stateLoop)
     pm.addNestedPass<func::FuncOp>(pyc::createStateLoopPartitionPass());
   // Demand mode drops undemanded pyc.name after identities were remapped,

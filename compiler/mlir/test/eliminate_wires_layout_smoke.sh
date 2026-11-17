@@ -30,4 +30,15 @@ check_layout eliminate_wires_layout \
 check_layout eliminate_wires_pinned_reg \
   "pyc.wire pyc.constant pyc.constant pyc.reg pyc.not pyc.not pyc.assign return"
 
+"${PYC_OPT}" "${ROOT}/compiler/mlir/test/Inputs/eliminate_wires_partial.mlir" \
+  --pyc-eliminate-wires | python3 -c '
+import re, sys
+ir = sys.stdin.read()
+w = re.search(r"(%\w+) = pyc\.wire", ir).group(1)
+readers = [l.split()[2] for l in ir.splitlines()
+           if re.search(re.escape(w) + r"\b", l) and "= pyc." in l and "pyc.wire" not in l]
+if readers != ["pyc.reg"]:
+    raise SystemExit(f"fail: readers after the driver still read the wire\n{ir}")
+'
+
 echo "eliminate_wires_layout_smoke: PASS"
