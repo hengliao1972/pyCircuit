@@ -4190,6 +4190,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                            (indent + "  ").str());
     os << indent << "}\n";
   };
+  // A clean 64-lane dirty word skips all of its per-lane wake checks.
+  auto openLaneWord = [&](unsigned lane, const std::string &cond) {
+    if (lane & 63)
+      return;
+    if (lane)
+      os << "    }\n";
+    os << "    if (" << cond << ") {\n";
+  };
   // DelayLoop commit: tail-dirty wakes q consumers, advanced wakes tap
   // consumers (every enabled edge shifts every tap).
   for (int64_t dbk : delayLoopIds) {
@@ -4208,20 +4216,26 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       const std::string condA = "((_pyc_dloop_adv_" + std::to_string(dbk) +
           "[" + std::to_string(lane >> 6) + "u] >> " +
           std::to_string(lane & 63) + "u) & 1u)";
-      os << "    if (" << condT << ") {\n";
-      emitMetadataCombFanout(dl.getQ(), os, *schedule, combIndex, nt, "      ");
-      os << "    }\n";
+      const std::string word =
+          std::to_string(dbk) + "[" + std::to_string(lane >> 6) + "u]";
+      openLaneWord(lane,
+                   "_pyc_dloop_tail_" + word + " | _pyc_dloop_adv_" + word);
+      os << "      if (" << condT << ") {\n";
+      emitMetadataCombFanout(dl.getQ(), os, *schedule, combIndex, nt, "        ");
+      os << "      }\n";
       for (auto tap : delayTaps) {
         auto src = tap.getLine().getDefiningOp<pyc::DelayLineOp>();
         if (src == dl) {
-          os << "    if (" << condA << ") {\n";
+          os << "      if (" << condA << ") {\n";
           emitMetadataCombFanout(tap.getTap(), os, *schedule, combIndex, nt,
-                                 "      ");
-          os << "    }\n";
+                                 "        ");
+          os << "      }\n";
         }
       }
       ++lane;
     }
+    if (lane)
+      os << "    }\n";
   }
   // RegLoop commit: per-lane dirty bitmap keeps the change-driven wake as
   // precise as the per-reg path.
@@ -4236,13 +4250,18 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       // per-reg path); the condition is unchanged.
       std::string changed =
           "_pyc_commit_changed_" + nt.get(r.getQ()) + "_inst";
-      os << "    const bool " << changed << " = ((_pyc_loop_dirty_" << loopId
-         << "[" << (lane >> 6) << "u] >> " << (lane & 63) << "u) & 1u);\n";
-      os << "    if (" << changed << ") {\n";
-      emitMetadataCombFanout(r.getQ(), os, *schedule, combIndex, nt, "      ");
-      os << "    }\n";
+      const std::string word = "_pyc_loop_dirty_" + std::to_string(loopId) +
+                               "[" + std::to_string(lane >> 6) + "u]";
+      openLaneWord(lane, word);
+      os << "      const bool " << changed << " = ((" << word << " >> "
+         << (lane & 63) << "u) & 1u);\n";
+      os << "      if (" << changed << ") {\n";
+      emitMetadataCombFanout(r.getQ(), os, *schedule, combIndex, nt, "        ");
+      os << "      }\n";
       ++lane;
     }
+    if (lane)
+      os << "    }\n";
   }
   for (auto r : regs) {
     std::string key = nt.get(r.getQ()) + "_inst";
