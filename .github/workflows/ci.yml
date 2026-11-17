@@ -227,6 +227,8 @@ jobs:
           PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
             bash compiler/mlir/test/comb_dirty_scheduler_smoke.sh
           PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            bash compiler/mlir/test/comb_false_cycle_smoke.sh
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
             bash compiler/mlir/test/instance_vector_cache_smoke.sh
           bash tests/runtime/run_change_scheduler.sh
           bash tests/runtime/run_delay_line_commit.sh

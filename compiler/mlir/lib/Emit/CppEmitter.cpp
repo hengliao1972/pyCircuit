@@ -2882,12 +2882,16 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   // clean one load+branch skips up to 64 per-comb checks.
   os << "  inline void eval_comb_pass() {\n";
   llvm::SmallVector<Operation *> ordered;
-  if (!topoOrder(/*includePrims=*/false, ordered)) {
+  const bool blockOrder = !topoOrder(/*includePrims=*/false, ordered);
+  if (blockOrder) {
     for (Operation &op : top) {
       if (isa<func::ReturnOp>(op) || isa<pyc::WireOp>(op))
         continue;
       ordered.push_back(&op);
     }
+    // Block order may wake a comb that already ran, so one pass can leave the
+    // design stale; repeat until every wake has been consumed.
+    os << "    for (unsigned _pyc_iter = 0; ; ++_pyc_iter) {\n";
   }
 
   unsigned openGuardWord = ~0u;
@@ -3032,6 +3036,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     return op->emitError("unsupported op for C++ emission: ") << op->getName();
   }
   closeGuardGroup();
+  if (blockOrder) {
+    os << "    if (_pyc_comb_dirty.empty()) break;\n";
+    os << "    if (_pyc_iter >= " << (combs.size() + 2) << "u) {\n";
+    os << "      std::cerr << \"pyc eval_comb_pass failed to converge\" << \"\\n\";\n";
+    os << "      std::abort();\n";
+    os << "    }\n";
+    os << "    }\n";
+  }
   os << "  }\n\n";
 
   llvm::SmallVector<Operation *> fullOrdered;
