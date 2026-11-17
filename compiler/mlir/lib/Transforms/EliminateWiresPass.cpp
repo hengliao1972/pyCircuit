@@ -9,6 +9,8 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 
+#include <queue>
+
 using namespace mlir;
 
 namespace pyc {
@@ -40,6 +42,100 @@ static bool dependsOn(Value root, Value target) {
   return false;
 }
 
+// Ops whose wire inputs are not read combinationally within eval_comb_pass.
+static bool isWireReadCut(Operation *op) {
+  return isa<pyc::AssignOp, pyc::RegOp, pyc::DelayLineOp, pyc::SyncMemOp,
+             pyc::SyncMemDPOp, pyc::FifoOp, pyc::AsyncFifoOp, pyc::ByteMemOp,
+             pyc::CdcSyncOp, pyc::InstanceOp>(op);
+}
+
+// Stable topological sort in which a combinational reader of a wire also
+// follows the wire's driver, so block order is a valid evaluation order and
+// any contiguous run of ops can be fused without a comb-level cycle.  A true
+// combinational loop keeps the original order for pyc-check-comb-cycles.
+static bool trySortByWireDrivers(Block &block) {
+  llvm::SmallVector<Operation *> ops;
+  llvm::DenseMap<Operation *, unsigned> index;
+  for (Operation &op : block.without_terminator()) {
+    index[&op] = ops.size();
+    ops.push_back(&op);
+  }
+  llvm::SmallVector<llvm::SmallVector<unsigned>> succ(ops.size());
+  llvm::SmallVector<unsigned> indeg(ops.size(), 0);
+  auto addEdge = [&](Value v, unsigned to) {
+    Operation *def = v.getDefiningOp();
+    if (!def || !(def = block.findAncestorOpInBlock(*def)))
+      return;
+    auto it = index.find(def);
+    if (it == index.end() || it->second == to)
+      return;
+    succ[it->second].push_back(to);
+    ++indeg[to];
+  };
+  for (auto [i, op] : llvm::enumerate(ops)) {
+    bool cut = isWireReadCut(op);
+    op->walk([&, i = i](Operation *inner) {
+      for (Value v : inner->getOperands()) {
+        addEdge(v, i);
+        if (cut || !v.getDefiningOp<pyc::WireOp>())
+          continue;
+        for (OpOperand &use : v.getUses())
+          if (auto a = dyn_cast<pyc::AssignOp>(use.getOwner()))
+            if (use.getOperandNumber() == 0)
+              addEdge(a.getSrc(), i);
+      }
+    });
+  }
+
+  std::priority_queue<unsigned, std::vector<unsigned>, std::greater<unsigned>> ready;
+  for (unsigned i = 0; i < ops.size(); ++i)
+    if (indeg[i] == 0)
+      ready.push(i);
+  llvm::SmallVector<Operation *> order;
+  while (!ready.empty()) {
+    unsigned n = ready.top();
+    ready.pop();
+    order.push_back(ops[n]);
+    for (unsigned s : succ[n])
+      if (--indeg[s] == 0)
+        ready.push(s);
+  }
+  if (order.size() != ops.size())
+    return false;
+  for (Operation *op : order)
+    op->moveBefore(block.getTerminator());
+  return true;
+}
+
+// A state or primitive op reading combinational logic directly is pinned by
+// SSA between that logic and its own fanout; reading through a wire unpins it.
+static void wireCutInputs(Block &block) {
+  OpBuilder builder(block.getParentOp()->getContext());
+  for (Operation &op : block.without_terminator()) {
+    if (!isWireReadCut(&op) || isa<pyc::AssignOp>(op))
+      continue;
+    for (OpOperand &use : op.getOpOperands()) {
+      Value v = use.get();
+      Operation *def = v.getDefiningOp();
+      if (!def || def->getBlock() != &block || !isa<IntegerType, VectorType>(v.getType()) ||
+          isWireReadCut(def) || isa<pyc::WireOp, pyc::ConstantOp>(def))
+        continue;
+      builder.setInsertionPointToStart(&block);
+      auto w = builder.create<pyc::WireOp>(op.getLoc(), v.getType());
+      builder.setInsertionPoint(block.getTerminator());
+      builder.create<pyc::AssignOp>(op.getLoc(), w, v);
+      use.set(w);
+    }
+  }
+}
+
+static void sortByWireDrivers(Block &block) {
+  if (!trySortByWireDrivers(block)) {
+    wireCutInputs(block);
+    trySortByWireDrivers(block);
+  }
+}
+
 struct EliminateWiresPass : public PassWrapper<EliminateWiresPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(EliminateWiresPass)
 
@@ -50,6 +146,8 @@ struct EliminateWiresPass : public PassWrapper<EliminateWiresPass, OperationPass
 
   void runOnOperation() override {
     func::FuncOp f = getOperation();
+    for (Block &block : f.getBody())
+      sortByWireDrivers(block);
     DominanceInfo dom(f);
 
     OpBuilder builder(f.getContext());
@@ -59,12 +157,33 @@ struct EliminateWiresPass : public PassWrapper<EliminateWiresPass, OperationPass
       // Collect wires up-front since we may erase ops during the walk.
       llvm::SmallVector<pyc::WireOp> wires;
       f.walk([&](pyc::WireOp w) { wires.push_back(w); });
-      for (pyc::WireOp w : wires)
-        changed |= tryEliminateWire(w, dom, builder);
+      for (pyc::WireOp w : wires) {
+        FailureOr<bool> eliminated = tryEliminateWire(w, dom, builder);
+        if (failed(eliminated))
+          return signalPassFailure();
+        changed |= *eliminated;
+      }
+    }
+
+    // Continuous assignment is position-independent, so declare every wire
+    // first and drive it last; wires then never split a fusable comb run.
+    for (Block &block : f.getBody()) {
+      llvm::SmallVector<Operation *> wires, assigns;
+      for (Operation &op : block) {
+        if (isa<pyc::WireOp>(op))
+          wires.push_back(&op);
+        else if (isa<pyc::AssignOp>(op))
+          assigns.push_back(&op);
+      }
+      for (Operation *op : llvm::reverse(wires))
+        op->moveBefore(&block.front());
+      for (Operation *op : assigns)
+        op->moveBefore(block.getTerminator());
     }
   }
 
-  bool tryEliminateWire(pyc::WireOp w, DominanceInfo &dom, OpBuilder &builder) {
+  FailureOr<bool> tryEliminateWire(pyc::WireOp w, DominanceInfo &dom,
+                                   OpBuilder &builder) {
     Value wireVal = w.getResult();
 
     llvm::SmallVector<pyc::AssignOp> assigns;
@@ -88,8 +207,13 @@ struct EliminateWiresPass : public PassWrapper<EliminateWiresPass, OperationPass
       return true;
     }
 
-    // Only handle the single-driver case for now.
-    if (assigns.size() != 1)
+    if (assigns.size() > 1) {
+      w.emitError("pyc.wire has ")
+          << assigns.size()
+          << " pyc.assign drivers; a wire must have a single driver";
+      return failure();
+    }
+    if (assigns.empty())
       return false;
 
     pyc::AssignOp driver = assigns.front();
