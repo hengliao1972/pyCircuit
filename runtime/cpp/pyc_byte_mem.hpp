@@ -141,8 +141,9 @@ public:
       return;
 
     pendingWrite = false;
-    if (rst.toBool())
-      return;
+    // rst does not gate writes: memory contents survive across reset per
+    // FIRRTL/Chisel convention (issue #43). The rst port is kept for
+    // interface compatibility but no longer blocks the write path.
 
     if (wvalid.toBool()) {
       pendingWrite = true;
