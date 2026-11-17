@@ -26,7 +26,7 @@ inline constexpr llvm::StringLiteral kCppMethodAttr = "pyc.cpp.method";
 inline constexpr llvm::StringLiteral kCppPlacementSummaryAttr = "pyc.cpp.placement_summary";
 inline constexpr llvm::StringLiteral kCppCombChunkNodesAttr = "pyc.cpp.comb_chunk_nodes";
 
-enum class CppStorageKind { Struct, Local };
+enum class CppStorageKind { Struct, Local, Alias };
 
 struct CppPlacementSummary {
   unsigned structMembers = 0;
@@ -93,6 +93,10 @@ struct CppEmitterOptions {
 
 /// Read storage decision for a value (default struct).
 CppStorageKind getValueCppStorage(::mlir::Value v);
+
+/// Value whose storage an Alias value shares: the single assign source of a
+/// pyc.wire or the input of a pyc.alias. Null for non-Alias values.
+::mlir::Value getValueCppAliasTarget(::mlir::Value v);
 
 /// Owner method name for local values (empty if struct or unknown).
 ::llvm::StringRef getValueCppOwner(::mlir::Value v);

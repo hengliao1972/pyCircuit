@@ -14,7 +14,9 @@ There is no `--cpp-localize-members` flag. Placement runs whenever
   `pyc-collect-compile-stats`.
 - The pass writes `pyc.cpp.comb_chunk_nodes` on the module (from
   `--cpp-shard-max-ast-nodes`, or 256) and annotates:
-  - `pyc.cpp.storage` = `local` | `struct`
+  - `pyc.cpp.storage` = `local` | `struct` | `alias` (`alias`: a top-level
+    `pyc.wire` with one `pyc.assign` driver, or a `pyc.alias`, that reuses its
+    source's member instead of copying it each comb pass)
   - `pyc.cpp.owner` = owning method for locals
   - `pyc.cpp.method` = `eval_comb_N` or `eval_comb_N_part_K`
   - `pyc.cpp.placement_summary` on each `func.func`

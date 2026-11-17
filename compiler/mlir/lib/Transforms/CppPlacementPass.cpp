@@ -534,11 +534,33 @@ static void annotatePlacement(Value v, CppStorageKind kind, StringRef owner) {
     return;
   auto *ctx = op->getContext();
   op->setAttr(kCppStorageAttr,
-              StringAttr::get(ctx, kind == CppStorageKind::Local ? "local" : "struct"));
+              StringAttr::get(ctx, kind == CppStorageKind::Local   ? "local"
+                                   : kind == CppStorageKind::Alias ? "alias"
+                                                                   : "struct"));
   if (!owner.empty())
     op->setAttr(kCppOwnerAttr, StringAttr::get(ctx, owner));
   else
     op->removeAttr(kCppOwnerAttr);
+}
+
+/// The value a pyc.alias forwards, or the source of the only pyc.assign
+/// driving a pyc.wire; null otherwise.
+static Value aliasSource(Value v) {
+  Operation *def = v.getDefiningOp();
+  if (auto a = dyn_cast_or_null<pyc::AliasOp>(def))
+    return a.getIn();
+  if (!isa_and_nonnull<pyc::WireOp>(def))
+    return {};
+  Value src;
+  for (OpOperand &use : v.getUses()) {
+    auto assign = dyn_cast<pyc::AssignOp>(use.getOwner());
+    if (!assign || use.getOperandNumber() != 0)
+      continue;
+    if (src)
+      return {};
+    src = assign.getSrc();
+  }
+  return src;
 }
 
 /// Set the per-module comb chunk size. Read-back lives in the emitter TU.
@@ -659,6 +681,22 @@ runCppMemberPlacement(func::FuncOp f, unsigned combChunkNodes,
     }
   });
 
+  // Phase D: a top-level wire/alias that only mirrors another top-level value
+  // shares that value's member instead of copying it on every comb pass.
+  f.walk([&](Operation *op) {
+    if (!isa<pyc::WireOp, pyc::AliasOp>(op) || op->getParentOfType<pyc::CombOp>())
+      return;
+    Value v = op->getResult(0);
+    Value src = aliasSource(v);
+    if (!src || src.getType() != v.getType() || src.getParentBlock() != op->getBlock())
+      return;
+    llvm::DenseSet<Value> seen;
+    for (Value s = src; s; s = aliasSource(s))
+      if (s == v || !seen.insert(s).second)
+        return;
+    annotatePlacement(v, CppStorageKind::Alias, {});
+  });
+
   return summary;
 }
 
@@ -667,6 +705,14 @@ runCppMemberPlacement(func::FuncOp f, unsigned combChunkNodes,
 // ---------------------------------------------------------------------------
 // public entry points declared in Emit/CppEmitter.h
 // ---------------------------------------------------------------------------
+
+Value getValueCppAliasTarget(Value v) {
+  Operation *op = v.getDefiningOp();
+  auto storage = op ? op->getAttrOfType<StringAttr>(kCppStorageAttr) : StringAttr();
+  if (!storage || storage.getValue() != "alias")
+    return {};
+  return aliasSource(v);
+}
 
 // Aggregate per-function summaries across the module. Reads back the summary
 // attribute via the same field names the writer stamps. Kept on the pass side

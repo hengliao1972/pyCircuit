@@ -250,6 +250,11 @@ struct NameTable {
   std::string get(Value v) {
     if (auto it = names.find(v); it != names.end())
       return it->second;
+    if (Value target = getValueCppAliasTarget(v)) {
+      std::string n = get(target);
+      names.try_emplace(v, n);
+      return n;
+    }
     if (Operation *def = v.getDefiningOp()) {
       if (auto nAttr = def->getAttrOfType<StringAttr>("pyc.name")) {
         auto lazy = def->getAttrOfType<BoolAttr>("pyc.observe_lazy");
@@ -652,6 +657,8 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     return success();
   }
   if (auto a = dyn_cast<pyc::AliasOp>(op)) {
+    if (getValueCppStorage(a.getResult()) == CppStorageKind::Alias)
+      return success();
     assignExpr(a.getResult(), a.getType(), os, nt,
                [&](llvm::raw_ostream &e) { e << nt.get(a.getIn()); }, ps);
     return success();
@@ -1211,7 +1218,7 @@ static bool hasDirtyPolledBoundaryInput(pyc::CombOp comb) {
 
 static void emitCombInputGuard(
     pyc::CombOp comb, llvm::raw_ostream &os, NameTable &nt, unsigned idx) {
-  os << "    bool _pyc_comb_should_eval = _pyc_comb_take_active(" << idx
+  os << "    bool _pyc_comb_should_eval = _pyc_comb_dirty.take(" << idx
      << "u);\n";
   os << "    bool _pyc_comb_inputs_changed = _pyc_comb_should_eval;\n";
   for (auto [inputIndex, input] : llvm::enumerate(comb.getInputs())) {
@@ -1411,7 +1418,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   decls.reserve(256);
   f.walk([&](Operation *op) {
     for (Value r : op->getResults()) {
-      if (getValueCppStorage(r) == CppStorageKind::Local)
+      if (getValueCppStorage(r) != CppStorageKind::Struct)
         continue;
       decls.push_back(Decl{nt.get(r), r.getType()});
     }
@@ -1659,15 +1666,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "  // Runtime-owned local fused-comb dirty set.\n";
     os << "  pyc::cpp::DirtyBitset<" << combs.size()
        << "> _pyc_comb_dirty{};\n";
-    os << "  inline bool _pyc_comb_take_active(unsigned id) {\n";
-    os << "    return _pyc_comb_dirty.take(id);\n";
-    os << "  }\n";
-    os << "  inline bool _pyc_comb_is_active(unsigned id) const {\n";
-    os << "    return _pyc_comb_dirty.test(id);\n";
-    os << "  }\n";
-    os << "  inline void _pyc_mark_comb_dirty(unsigned id) {\n";
-    os << "    _pyc_comb_dirty.mark(id);\n";
-    os << "  }\n\n";
   }
 
   sortBySchedule(instances);
@@ -2924,7 +2922,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       closeGuardGroup();
     if (auto a = dyn_cast<pyc::AssignOp>(*op)) {
       closeGuardGroup();
-      os << "    " << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
+      if (getValueCppStorage(a.getDst()) != CppStorageKind::Alias)
+        os << "    " << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
       ++opIdx;
       continue;
     }
@@ -2939,11 +2938,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                << "u)) {\n";
             openGuardWord = guardWord;
           }
-          os << "      if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << "      if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << "        eval_comb_" << index << "();\n";
           os << "      }\n";
         } else {
-          os << "    if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << "    if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << "      eval_comb_" << index << "();\n";
           os << "    }\n";
         }
@@ -3494,7 +3493,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       return success();
     }
     if (auto a = dyn_cast<pyc::AssignOp>(*op)) {
-      os << indent << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
+      if (getValueCppStorage(a.getDst()) != CppStorageKind::Alias)
+        os << indent << nt.get(a.getDst()) << " = " << nt.get(a.getSrc()) << ";\n";
       return success();
     }
     if (auto comb = dyn_cast<pyc::CombOp>(*op)) {
@@ -3508,11 +3508,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                << "u)) {\n";
             guard->openGuardWord = guardWord;
           }
-          os << indent << "  if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << indent << "  if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << indent << "    eval_comb_" << index << "();\n";
           os << indent << "  }\n";
         } else {
-          os << indent << "if (_pyc_comb_is_active(" << index << "u)) {\n";
+          os << indent << "if (_pyc_comb_dirty.test(" << index << "u)) {\n";
           os << indent << "  eval_comb_" << index << "();\n";
           os << indent << "}\n";
         }
@@ -4411,6 +4411,8 @@ CppStorageKind getValueCppStorage(Value v) {
   if (auto a = op->getAttrOfType<StringAttr>(kCppStorageAttr)) {
     if (a.getValue() == "local")
       return CppStorageKind::Local;
+    if (a.getValue() == "alias")
+      return CppStorageKind::Alias;
   }
   return CppStorageKind::Struct;
 }
