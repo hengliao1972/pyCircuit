@@ -234,6 +234,8 @@ jobs:
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
             bash compiler/mlir/test/delay_line_verify_smoke.sh
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+            bash compiler/mlir/test/eliminate_wires_layout_smoke.sh
+          PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
             bash compiler/mlir/test/state_delay_chain_smoke.sh
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
             bash compiler/mlir/test/state_retime_smoke.sh

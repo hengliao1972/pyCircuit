@@ -2467,8 +2467,11 @@ int main(int argc, char **argv) {
     pm.addPass(pyc::createApplyObservationDemandPass(
         probePlanPath, traceCodegenPlanPath));
   const bool enableFuseComb = (!cppOnly) || !cppOnlyPreserveOps;
-  if (enableFuseComb)
+  if (enableFuseComb) {
+    // State rewrites add wire readers; restore dependency order before fusion.
+    pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());
     pm.addNestedPass<func::FuncOp>(pyc::createFuseCombPass());
+  }
   pm.addPass(createCanonicalizerPass(canonicalizeCfg));
   pm.addPass(createCSEPass());
   addRemoveDeadValuesPassIfSupported(pm);
