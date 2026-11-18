@@ -298,23 +298,6 @@ public:
     return lane_tap<Width>(i, depth - 1);
   }
 
-  // Lightweight per-lane tap view: satisfies the DelayInst interface used by
-  // ProbeRegistry::addRegLazyTap* (tap(depth) / has_pending() / pending /
-  // qNext members). Held by value in generated probe registration code.
-  template <unsigned Width>
-  struct TapView {
-    const DelayLoop *loop;
-    std::size_t lane;
-    Wire<Width> tap(unsigned depth) const { return loop->lane_tap<Width>(lane, depth); }
-    bool has_pending() const { return loop->pending_[lane] != 0; }
-    bool *pending_ptr() const {
-      return reinterpret_cast<bool *>(const_cast<char *>(&loop->pending_[lane]));
-    }
-    const Wire<Width> *qnext() const {
-      return reinterpret_cast<const Wire<Width> *>(loop->qNext_[lane].data());
-    }
-  };
-
 private:
   void tapWords(std::size_t i, unsigned depth, std::uint64_t *out) const {
     const Lane &lane = lanes_[i];

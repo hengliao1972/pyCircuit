@@ -2227,6 +2227,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             std::string loopPend;
             std::string loopQNext;
             std::string tapViewRef;
+            std::string tapLane;
             {
               Value qv = q;
               if (auto *def = qv.getDefiningOp())
@@ -2259,9 +2260,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                                       std::to_string(dw) + "> *>(" + loop +
                                       ".lane_qnext_raw(" +
                                       std::to_string(lane) + "u))";
-                          tapViewRef = "&delay_tap_view_" +
-                                       std::to_string(key) + "_" +
-                                       std::to_string(lane);
+                          tapViewRef = "&" + loop;
+                          tapLane = std::to_string(lane) + "u";
                         }
                       }
                     }
@@ -2269,36 +2269,48 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                 }
             }
             if (matchingTap)
-              tapWriteNext = nt.get(matchingTap.getTap()) + "_qNext";
+              tapWriteNext = "&" + nt.get(matchingTap.getTap()) + "_qNext";
             else if (!loopQNext.empty())
               tapWriteNext = loopQNext;
             else
-              tapWriteNext = inst + "->qNext";
+              tapWriteNext = "&" + inst + "->qNext";
             if (tapViewRef.empty()) {
               tapViewRef = inst;
               if (loopPend.empty())
                 loopPend = "&" + inst + "->pending";
             }
-            // Looped source delay: pass the lane's DelayLoop::TapView member
-            // as the DelayInst argument (same tap()/pending interface), with
-            // write-intent from the loop lane.
+            // Looped source delay: register the loop lane directly (tap reads
+            // go through DelayLoop::lane_tap), with write-intent from the
+            // loop lane; per-object delays keep the DelayInst argument.
+            const bool looped = !tapLane.empty();
             if (lsb == 0 && width == storageWidth) {
-              const bool loopedW =
-                  tapWriteNext.rfind("delay_loop_", 0) == 0 ||
-                  tapWriteNext.rfind("reinterpret_cast<", 0) == 0;
-              os << "    reg.addRegLazyTap<" << width << ">(reg_path("
-                 << cppStringLiteral(field) << "), " << tapViewRef << ", "
-                 << tapDepth << "u, " << (loopPend.empty() ? ("&" + inst + "->pending") : loopPend)
-                 << ", " << (loopedW ? tapWriteNext : ("&" + tapWriteNext)) << ");\n";
+              if (looped)
+                os << "    reg.addDelayLoopTap<" << width << ">(reg_path("
+                   << cppStringLiteral(field) << "), " << tapViewRef << ", "
+                   << tapLane << ", " << tapDepth << "u, "
+                   << (loopPend.empty() ? ("&" + inst + "->pending") : loopPend)
+                   << ", " << tapWriteNext << ");\n";
+              else
+                os << "    reg.addRegLazyTap<" << width << ">(reg_path("
+                   << cppStringLiteral(field) << "), " << tapViewRef << ", "
+                   << tapDepth << "u, "
+                   << (loopPend.empty() ? ("&" + inst + "->pending") : loopPend)
+                   << ", " << tapWriteNext << ");\n";
             } else {
-              const bool loopedW2 =
-                  tapWriteNext.rfind("delay_loop_", 0) == 0 ||
-                  tapWriteNext.rfind("reinterpret_cast<", 0) == 0;
-              os << "    reg.addRegLazyTapSlice<" << width << ", "
-                 << storageWidth << ">(reg_path(" << cppStringLiteral(field)
-                 << "), " << tapViewRef << ", " << tapDepth << "u, " << lsb
-                 << "u, " << (loopPend.empty() ? ("&" + inst + "->pending") : loopPend)
-                 << ", " << (loopedW2 ? tapWriteNext : ("&" + tapWriteNext)) << ");\n";
+              if (looped)
+                os << "    reg.addDelayLoopTapSlice<" << width << ", "
+                   << storageWidth << ">(reg_path(" << cppStringLiteral(field)
+                   << "), " << tapViewRef << ", " << tapLane << ", "
+                   << tapDepth << "u, " << lsb << "u, "
+                   << (loopPend.empty() ? ("&" + inst + "->pending") : loopPend)
+                   << ", " << tapWriteNext << ");\n";
+              else
+                os << "    reg.addRegLazyTapSlice<" << width << ", "
+                   << storageWidth << ">(reg_path(" << cppStringLiteral(field)
+                   << "), " << tapViewRef << ", " << tapDepth << "u, " << lsb
+                   << "u, "
+                   << (loopPend.empty() ? ("&" + inst + "->pending") : loopPend)
+                   << ", " << tapWriteNext << ");\n";
             }
             continue;
           }
@@ -2429,13 +2441,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   }
   for (int64_t dbk : delayLoopIds) {
     os << "  pyc::cpp::DelayLoop delay_loop_" << dbk << ";\n";
-    // One stable TapView per lane: probe lambdas keep a pointer to it, so it
-    // must live and die with this instance (not a function-local static).
-    for (size_t lane = 0; lane < delayLoopLines[dbk].size(); ++lane)
-      os << "  pyc::cpp::DelayLoop::TapView<"
-         << bitWidth(delayLoopLines[dbk][lane].getQ().getType())
-         << "> delay_tap_view_" << dbk << "_" << lane << "{&delay_loop_"
-         << dbk << ", " << lane << "u};\n";
   }
   std::string fastClkName;
   bool fastClkUnique = true;
