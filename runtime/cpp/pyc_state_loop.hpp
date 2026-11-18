@@ -152,6 +152,132 @@ private:
   bool clkPrev_ = false;
 };
 
+// Width-erased RegLoop: lanes of different widths share one loop, so the
+// emitter groups by (loop id, fused) instead of (loop id, width, fused).
+// Lane values are raw words (Wire<W>::data()); qNext lives in a packed
+// arena whose per-lane segment is kWords long, so write-intent probes can
+// still reinterpret the segment as Wire<W> via lane_qnext_raw(). Semantics
+// mirror RegLoop<Width> exactly; only the per-lane compare/copy loops are
+// bounded by the runtime word count instead of a template constant.
+class RegLoopDyn {
+public:
+  struct Lane {
+    std::uint64_t *q;
+    std::uint64_t *d;
+    Wire<1> *rst;
+    Wire<1> *en;
+    const std::uint64_t *init;
+    unsigned words;  // ceil(width / 64), from the emitting reg
+  };
+
+  void add_lanes(std::initializer_list<Lane> lanes) {
+    for (const Lane &lane : lanes) {
+      lanes_.push_back(lane);
+      laneOff_.push_back(qStore_.size());
+      qStore_.resize(qStore_.size() + lane.words, 0);
+      pending_.push_back(0);
+    }
+    dirty_.assign(loop_word_count(lanes_.size()), 0);
+  }
+
+  std::size_t size() const { return lanes_.size(); }
+
+  void compute_rise() {
+    clkPrev_ = true;
+    const std::size_t n = lanes_.size();
+    for (std::size_t i = 0; i < n; ++i) {
+      const Lane &lane = lanes_[i];
+      const bool r = lane.rst->toBool();
+      const bool e = lane.en->toBool();
+      pending_[i] = static_cast<char>(r | e);
+      std::uint64_t *next = qStore_.data() + laneOff_[i];
+      const std::uint64_t *src = r ? lane.init : lane.d;
+      for (unsigned w = 0; w < lane.words; ++w)
+        next[w] = src[w];
+    }
+  }
+
+  void compute_generic(bool clkNow) {
+    const bool posedge = (!clkPrev_) & clkNow;
+    clkPrev_ = clkNow;
+    if (__builtin_expect(!posedge, 1)) {
+      clear_pending();
+      return;
+    }
+    compute_rise();
+  }
+
+  void negedge() { clkPrev_ = false; clear_pending(); }
+
+  const std::vector<std::uint64_t> &commit() {
+    const std::size_t n = lanes_.size();
+    dirty_.assign(loop_word_count(n), 0);
+    for (std::size_t i = 0; i < n; ++i) {
+      if (__builtin_expect(pending_[i] != 0, 0)) {
+        const Lane &lane = lanes_[i];
+        std::uint64_t *q = lane.q;
+        const std::uint64_t *next = qStore_.data() + laneOff_[i];
+        bool changed = false;
+        for (unsigned w = 0; w < lane.words; ++w) {
+          changed |= q[w] != next[w];
+          q[w] = next[w];
+        }
+        pending_[i] = 0;
+        if (changed)
+          dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
+      }
+    }
+    return dirty_;
+  }
+
+  const std::vector<std::uint64_t> &direct_commit() {
+    const std::size_t n = lanes_.size();
+    clkPrev_ = true;
+    dirty_.assign(loop_word_count(n), 0);
+    for (std::size_t i = 0; i < n; ++i) {
+      const Lane &lane = lanes_[i];
+      const bool r = lane.rst->toBool();
+      const bool go = r | lane.en->toBool();
+      pending_[i] = static_cast<char>(go);
+      if (!go)
+        continue;
+      const std::uint64_t *src = r ? lane.init : lane.d;
+      std::uint64_t *next = qStore_.data() + laneOff_[i];
+      std::uint64_t *q = lane.q;
+      bool changed = false;
+      for (unsigned w = 0; w < lane.words; ++w) {
+        changed |= q[w] != src[w];
+        next[w] = src[w];
+        q[w] = src[w];
+      }
+      if (changed)
+        dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
+    }
+    return dirty_;
+  }
+
+  void retire() { clear_pending(); }
+
+  bool *lane_pending(std::size_t i) {
+    return reinterpret_cast<bool *>(&pending_[i]);
+  }
+  // Segment is kWords long; callers reinterpret it as Wire<W> (Bits is
+  // standard-layout with words_ as its only member).
+  void *lane_qnext_raw(std::size_t i) {
+    return qStore_.data() + laneOff_[i];
+  }
+
+private:
+  void clear_pending() { pending_.assign(lanes_.size(), 0); }
+
+  std::vector<Lane> lanes_;
+  std::vector<std::uint64_t> qStore_;
+  std::vector<std::size_t> laneOff_;
+  std::vector<char> pending_;
+  std::vector<std::uint64_t> dirty_;
+  bool clkPrev_ = false;
+};
+
 template <unsigned Width>
 struct DelayLoopLane {
   Wire<Width> *q;

@@ -1569,10 +1569,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
           !dependsOnState(r.getEn()))
         fusedRegOps.insert(r.getOperation());
 
-  // RegLoop grouping: scalar regs carrying pyc.loop_id lower into
-  // per-loop pyc::cpp::RegLoop<W> members; everything else keeps the
-  // per-reg expansion. Map: loop id -> (width, regs in IR order).
-  llvm::DenseMap<int64_t, unsigned> regLoopWidth;
+  // RegLoop grouping: scalar regs carrying pyc.loop_id lower into per-loop
+  // width-erased pyc::cpp::RegLoopDyn members; everything else keeps the
+  // per-reg expansion. Map: loop id -> regs in IR order (widths may mix).
   llvm::DenseSet<int64_t> fusedRegLoops; // loops whose lanes are all fused
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::RegOp>> regLoopRegs;
   llvm::SmallVector<pyc::RegOp> unloopedRegs;
@@ -1583,16 +1582,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       continue;
     }
     const int64_t id = idAttr.getValue().getSExtValue();
-    unsigned w = bitWidth(r.getQ().getType());
-    // Regs rewritten by earlier passes (retiming/packing) may carry a width
-    // different from the partition-time majority; split into a per-width
-    // sub-loop keyed (id, width) so RegLoop<W>'s single template width holds.
-    // Fused (single-phase) and phased lanes live in separate loops.
+    // Fused (single-phase) and phased lanes live in separate loops; widths
+    // mix inside one width-erased RegLoopDyn (per-lane word count).
     const bool fused = fusedRegOps.count(r.getOperation());
-    const int64_t key = (id * 4096 + static_cast<int64_t>(w)) * 2 + fused;
+    const int64_t key = id * 2 + fused;
     if (fused)
       fusedRegLoops.insert(key);
-    regLoopWidth.try_emplace(key, w);
     regLoopRegs[key].push_back(r);
     r->setAttr("pyc.loop_id",
                IntegerAttr::get(IntegerType::get(r->getContext(), 64), key));
@@ -1685,10 +1680,15 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
           }
         }
         std::string loop = regLoopName(id);
-        // lane_pending/lane_qnext return pointers; keep the '&' at the call
-        // site out of this string (callers concatenate it verbatim after &).
+        // lane_pending/lane_qnext_raw return pointers; keep the '&' at the
+        // call site out of this string (callers concatenate it verbatim
+        // after &). The arena segment is kWords long, so reinterpret it as
+        // the reg's Wire<W> (standard-layout).
+        const unsigned w = bitWidth(r.getQ().getType());
         return {loop + ".lane_pending(" + std::to_string(lane) + "u)",
-                loop + ".lane_qnext(" + std::to_string(lane) + "u)"};
+                "reinterpret_cast<pyc::cpp::Wire<" + std::to_string(w) +
+                    "> *>(" + loop + ".lane_qnext_raw(" + std::to_string(lane) +
+                    "u))"};
       }
     }
     return {nt.get(r.getQ()) + "_inst->pending",
@@ -2420,8 +2420,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "  pyc::cpp::pyc_reg<" << w << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
   }
   for (int64_t loopId : regLoopIds) {
-    os << "  pyc::cpp::RegLoop<" << regLoopWidth[loopId] << "> "
-       << regLoopName(loopId) << ";\n";
+    os << "  pyc::cpp::RegLoopDyn " << regLoopName(loopId) << ";\n";
   }
   for (int64_t dbk : delayLoopIds) {
     os << "  pyc::cpp::DelayLoop<" << delayLoopShape[dbk].first
@@ -2770,9 +2769,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       if (!firstLane)
         os << ", ";
       firstLane = false;
-      os << "{&" << nt.get(r.getQ()) << ", &" << nt.get(r.getNext()) << ", &"
-         << nt.get(r.getRst()) << ", &" << nt.get(r.getEn()) << ", &"
-         << nt.get(r.getInit()) << "}";
+      const unsigned words =
+          (bitWidth(r.getQ().getType()) + 63u) / 64u;
+      os << "{" << nt.get(r.getQ()) << ".data(), " << nt.get(r.getNext())
+         << ".data(), &" << nt.get(r.getRst()) << ", &" << nt.get(r.getEn())
+         << ", " << nt.get(r.getInit()) << ".data(), " << words << "u}";
     }
     os << "});\n";
   }
