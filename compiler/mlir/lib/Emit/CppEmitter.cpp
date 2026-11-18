@@ -1634,7 +1634,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   for (pyc::RegOp r : unloopedRegs)
     regs.push_back(r);
 
-  // DelayLoop buckets: key = (clk, width, depth); vector delays stay per-object.
+  // DelayLoop buckets: key = (loop_id, depth); width is per-lane now, and
+  // vector delays stay per-object.
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::DelayLineOp>> delayLoopLines;
   llvm::SmallVector<pyc::DelayLineOp> unloopedDelays;
   for (pyc::DelayLineOp dl : delayLines) {
