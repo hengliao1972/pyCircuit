@@ -57,13 +57,13 @@ module pyc_byte_mem #(
     end
   end
 
-  // Byte-enable write.
+  // Byte-enable write (rst does not gate writes: memory contents survive
+  // across reset per FIRRTL/Chisel convention; init happens via INIT_MEMH
+  // or simulation-default zeros — issue #43).
   integer j;
   integer wa;
   always @(posedge clk) begin
-    if (rst) begin
-      // Reset does not clear memory (init happens via INIT_MEMH or sim-default 0s).
-    end else if (wvalid) begin
+    if (wvalid) begin
       wa = waddr[31:0];
       for (j = 0; j < STRB_WIDTH; j = j + 1) begin
         if (wstrb[j] && ((wa + j) < DEPTH))
@@ -71,4 +71,10 @@ module pyc_byte_mem #(
       end
     end
   end
+
+  // rst is intentionally unused (kept for interface compatibility with
+  // the VerilogEmitter instantiation); lint_off prevents warnings.
+  /* verilator lint_off UNUSED */
+  wire _unused_rst = rst;
+  /* verilator lint_on UNUSED */
 endmodule
