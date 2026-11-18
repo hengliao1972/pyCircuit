@@ -1570,7 +1570,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         fusedRegOps.insert(r.getOperation());
 
   // RegLoop grouping: scalar regs carrying pyc.loop_id lower into per-loop
-  // width-erased pyc::cpp::RegLoopDyn members; everything else keeps the
+  // width-erased pyc::cpp::RegLoop members; everything else keeps the
   // per-reg expansion. Map: loop id -> regs in IR order (widths may mix).
   llvm::DenseSet<int64_t> fusedRegLoops; // loops whose lanes are all fused
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::RegOp>> regLoopRegs;
@@ -2420,7 +2420,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "  pyc::cpp::pyc_reg<" << w << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
   }
   for (int64_t loopId : regLoopIds) {
-    os << "  pyc::cpp::RegLoopDyn " << regLoopName(loopId) << ";\n";
+    os << "  pyc::cpp::RegLoop " << regLoopName(loopId) << ";\n";
   }
   for (int64_t dbk : delayLoopIds) {
     os << "  pyc::cpp::DelayLoop<" << delayLoopShape[dbk].first

@@ -37,13 +37,15 @@ int main() {
       rqLoop(kRegLanes), rqFused(kRegLanes);
   std::vector<pyc_reg<8>> regRef;
   regRef.reserve(kRegLanes);
-  RegLoop<8> regLoop, fusedLoop;  // fusedLoop: tick-fuse single-phase lanes
+  RegLoop regLoop, fusedLoop;  // fusedLoop: tick-fuse single-phase lanes
   for (unsigned i = 0; i < kRegLanes; ++i) {
     rd[i] = Wire<8>{i * 7 + 3};
     rinit[i] = Wire<8>{i + 1};
     regRef.emplace_back(clk, rst, en, rd[i], rinit[i], rqRef[i]);
-    regLoop.add_lanes({{&rqLoop[i], &rd[i], &rst, &en, &rinit[i]}});
-    fusedLoop.add_lanes({{&rqFused[i], &rd[i], &rst, &en, &rinit[i]}});
+    regLoop.add_lanes({{rqLoop[i].data(), rd[i].data(), &rst, &en,
+                          rinit[i].data(), 1u}});
+    fusedLoop.add_lanes({{rqFused[i].data(), rd[i].data(), &rst, &en,
+                           rinit[i].data(), 1u}});
   }
 
   std::vector<Wire<8>> dd(kDelayLanes), dinit(kDelayLanes), dqRef(kDelayLanes),
@@ -95,8 +97,10 @@ int main() {
     for (unsigned i = 0; i < kRegLanes; ++i) {
       const bool pend = *regLoop.lane_pending(i);
       if (pend != *fusedLoop.lane_pending(i) ||
-          (pend && regLoop.lane_qnext(i)->value() !=
-                       fusedLoop.lane_qnext(i)->value())) {
+          (pend &&
+           reinterpret_cast<Wire<8> *>(regLoop.lane_qnext_raw(i))->value() !=
+               reinterpret_cast<Wire<8> *>(fusedLoop.lane_qnext_raw(i))
+                   ->value())) {
         std::fprintf(stderr, "FUSED WRITE-INTENT MISMATCH cycle %u lane %u\n",
                      c, i);
         return 1;

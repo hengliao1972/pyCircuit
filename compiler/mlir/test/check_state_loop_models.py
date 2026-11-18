@@ -36,7 +36,7 @@ def main() -> None:
                 header = temp / f"{source}.{mode}.hpp"
                 emit(args.pycc, HERE / source, header, flag)
                 text = header.read_text(encoding="utf-8")
-                looped = "RegLoop<" in text or "DelayLoop<" in text
+                looped = "RegLoop " in text or "DelayLoop<" in text
                 if looped != (mode == "loop"):
                     raise AssertionError(f"{source} {mode}: loop lowering={looped}")
                 i = text.find("if (_pyc_fused_rise)")

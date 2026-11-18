@@ -26,140 +26,14 @@ constexpr std::size_t loop_word_count(std::size_t lanes) {
   return (lanes + 63) / 64;
 }
 
-template <unsigned Width>
-struct RegLoopLane {
-  Wire<Width> *q;
-  Wire<Width> *d;
-  Wire<1> *rst;
-  Wire<1> *en;
-  const Wire<Width> *init;
-};
-
-template <unsigned Width>
-class RegLoop {
-  static_assert(Width > 0, "RegLoop requires Width > 0");
-
-public:
-  using Lane = RegLoopLane<Width>;
-
-  // Bulk form used by generated code: add_lanes({a,b,c,d,e}, {f,g,h,i,j}).
-  void add_lanes(std::initializer_list<Lane> lanes) {
-    for (const Lane &lane : lanes) {
-      lanes_.push_back(lane);
-      qNext_.emplace_back();
-      pending_.push_back(0);
-    }
-    dirty_.assign(loop_word_count(lanes_.size()), 0);
-  }
-
-  std::size_t size() const { return lanes_.size(); }
-
-  // Caller guarantees a 0->1 edge just occurred on this loop's clock.
-  void compute_rise() {
-    clkPrev_ = true;
-    const std::size_t n = lanes_.size();
-    for (std::size_t i = 0; i < n; ++i) {
-      const Lane &lane = lanes_[i];
-      const bool r = lane.rst->toBool();
-      const bool e = lane.en->toBool();
-      pending_[i] = static_cast<char>(r | e);
-      if (r)
-        qNext_[i] = *lane.init;
-      else
-        qNext_[i] = *lane.d;
-    }
-  }
-
-  // Generic path: caller only knows the current clock level.
-  void compute_generic(bool clkNow) {
-    const bool posedge = (!clkPrev_) & clkNow;
-    clkPrev_ = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
-      clear_pending();
-      return;
-    }
-    compute_rise();
-  }
-
-  // Falling edge bookkeeping: next compute must re-detect the edge.
-  void negedge() { clkPrev_ = false; clear_pending(); }
-
-  // Applies pending updates, writes back through the lane's q pointer, and
-  // returns the per-lane dirty bitmap (bit i set == lane i's q changed).
-  const std::vector<std::uint64_t> &commit() {
-    const std::size_t n = lanes_.size();
-    dirty_.assign(loop_word_count(n), 0);
-    for (std::size_t i = 0; i < n; ++i) {
-      if (__builtin_expect(pending_[i] != 0, 0)) {
-        Wire<Width> &q = *lanes_[i].q;
-        const bool changed = q != qNext_[i];
-        q = qNext_[i];
-        pending_[i] = 0;
-        if (changed)
-          dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
-      }
-    }
-    return dirty_;
-  }
-
-  // Tick-fuse single-phase update: sample rst/en/d and publish q in one pass,
-  // returning the per-lane dirty bitmap. Only valid for lanes whose rst/en/d
-  // are pre-edge snapshots (no dependency on any state output) and only right
-  // after a rising edge; such a loop never uses compute_rise()/commit().
-  // pending/qNext are still recorded so write-intent probes see the update;
-  // retire() clears pending at the point where commit() would have.
-  const std::vector<std::uint64_t> &direct_commit() {
-    const std::size_t n = lanes_.size();
-    clkPrev_ = true;
-    dirty_.assign(loop_word_count(n), 0);
-    for (std::size_t i = 0; i < n; ++i) {
-      const Lane &lane = lanes_[i];
-      const bool r = lane.rst->toBool();
-      const bool go = r | lane.en->toBool();
-      pending_[i] = static_cast<char>(go);
-      if (!go)
-        continue;
-      const Wire<Width> &nxt = r ? *lane.init : *lane.d;
-      qNext_[i] = nxt;
-      Wire<Width> &q = *lane.q;
-      if (q != nxt) {
-        q = nxt;
-        dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
-      }
-    }
-    return dirty_;
-  }
-
-  // Fused loops: the commit() counterpart for pending bookkeeping only.
-  void retire() { clear_pending(); }
-
-  // Probe/trace write-intent bindings: stable addresses for lane i's pending
-  // flag and sampled next value (mirror pyc_reg::pending/qNext). pending_
-  // stores char with values exactly 0/1; bool has the same object
-  // representation on the Itanium ABI and consumers only test truthiness.
-  bool *lane_pending(std::size_t i) {
-    return reinterpret_cast<bool *>(&pending_[i]);
-  }
-  Wire<Width> *lane_qnext(std::size_t i) { return &qNext_[i]; }
-
-private:
-  void clear_pending() { pending_.assign(lanes_.size(), 0); }
-
-  std::vector<Lane> lanes_;
-  std::vector<Wire<Width>> qNext_;
-  std::vector<char> pending_;  // char (not vector<bool>): stable lane addresses
-  std::vector<std::uint64_t> dirty_;
-  bool clkPrev_ = false;
-};
-
-// Width-erased RegLoop: lanes of different widths share one loop, so the
+// RegLoop: lanes of different widths share one loop, so the
 // emitter groups by (loop id, fused) instead of (loop id, width, fused).
 // Lane values are raw words (Wire<W>::data()); qNext lives in a packed
 // arena whose per-lane segment is kWords long, so write-intent probes can
 // still reinterpret the segment as Wire<W> via lane_qnext_raw(). Semantics
-// mirror RegLoop<Width> exactly; only the per-lane compare/copy loops are
-// bounded by the runtime word count instead of a template constant.
-class RegLoopDyn {
+// mirror the per-object pyc_reg exactly; the per-lane compare/copy loops
+// are bounded by the runtime word count.
+class RegLoop {
 public:
   struct Lane {
     std::uint64_t *q;

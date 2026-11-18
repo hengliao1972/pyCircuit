@@ -2,7 +2,7 @@
 // Analysis-only: no IR semantics change. Each op gets `pyc.loop_id = <i>`
 // (loops are numbered densely per function, one per equivalent-clock domain);
 // the function gets `pyc.stats.loop_groups` / `pyc.stats.loop_lanes`. The C++
-// emitter lowers each loop into one pyc::cpp::RegLoop<W> / DelayLoop<W> member
+// emitter lowers each loop into one pyc::cpp::RegLoop / DelayLoop<W> member
 // and one generated update loop instead of per-object expansions.
 //
 // Equivalence of clock SSA values resolves clk aliases, so a loop is exactly
@@ -49,7 +49,7 @@ struct StateLoopPartitionPass
     // Regs and scalar delay_lines whose clk resolves to equivalent values
     // share a loop. Reset/enable/depth stay per-lane (read per lane in the
     // loop); the emitter further splits by (id, width[, depth]) because
-    // RegLoop<W>/DelayLoop<W> are single-width templates and delay lanes
+    // RegLoop/DelayLoop<W> are single-width templates and delay lanes
     // carry per-lane depth.
     llvm::SmallVector<pyc::RegOp> regs;
     llvm::SmallVector<pyc::DelayLineOp> delays;
