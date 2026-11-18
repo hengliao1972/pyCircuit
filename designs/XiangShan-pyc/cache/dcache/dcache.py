@@ -173,7 +173,7 @@ def dcache(
         data_wr_en = wire_of(data_wr_valid & (data_wr_way == w_const))
 
         tag_rd.append(m.sync_mem(
-            cd.clk,
+            cd.clk, cd.rst,
             ren=wire_of(s0_fire), raddr=wire_of(s0_set_idx),
             wvalid=tag_wr_en, waddr=wire_of(refill_set),
             wdata=wire_of(refill_tag),
@@ -182,7 +182,7 @@ def dcache(
         ))
 
         data_rd.append(m.sync_mem(
-            cd.clk,
+            cd.clk, cd.rst,
             ren=wire_of(s0_fire), raddr=wire_of(s0_set_idx),
             wvalid=data_wr_en, waddr=wire_of(data_wr_set),
             wdata=wire_of(data_wr_data),

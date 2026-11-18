@@ -769,6 +769,7 @@ class Module:
     def byte_mem(
         self,
         clk: Signal,
+        rst: Signal,
         raddr: Signal,
         wvalid: Signal,
         waddr: Signal,
@@ -781,6 +782,8 @@ class Module:
         """Byte-addressed memory (async read + sync write, prototype)."""
         if not isinstance(clk.ty, Clock):
             raise TypeError("byte_mem clk must be !pyc.clock")
+        if not isinstance(rst.ty, Reset):
+            raise TypeError("byte_mem rst must be !pyc.reset")
         if wvalid.ty != Bits(1):
             raise TypeError("byte_mem wvalid must be i1")
         if raddr.ty != waddr.ty:
@@ -797,7 +800,7 @@ class Module:
         tmp = self._get_next_temp_var()
         attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
         self._emit(
-            f"{tmp} = pyc.byte_mem {clk.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
+            f"{tmp} = pyc.byte_mem {clk.ref}, {rst.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
             + f"{attrs} : {raddr.ty}, {wdata.ty}, {wstrb.ty}"
         )
         return Signal(ref=tmp, ty=wdata.ty)
@@ -805,6 +808,7 @@ class Module:
     def sync_mem(
         self,
         clk: Signal,
+        rst: Signal,
         ren: Signal,
         raddr: Signal,
         wvalid: Signal,
@@ -818,6 +822,8 @@ class Module:
         """Synchronous 1R1W memory (registered read data, prototype)."""
         if not isinstance(clk.ty, Clock):
             raise TypeError("sync_mem clk must be !pyc.clock")
+        if not isinstance(rst.ty, Reset):
+            raise TypeError("sync_mem rst must be !pyc.reset")
         if ren.ty != Bits(1):
             raise TypeError("sync_mem ren must be i1")
         if wvalid.ty != Bits(1):
@@ -832,7 +838,7 @@ class Module:
         tmp = self._get_next_temp_var()
         attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
         self._emit(
-            f"{tmp} = pyc.sync_mem {clk.ref}, {ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
+            f"{tmp} = pyc.sync_mem {clk.ref}, {rst.ref}, {ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
             + f"{attrs} : {raddr.ty}, {wdata.ty}, {wstrb.ty}"
         )
         return Signal(ref=tmp, ty=wdata.ty)
@@ -840,6 +846,7 @@ class Module:
     def sync_mem_dp(
         self,
         clk: Signal,
+        rst: Signal,
         ren0: Signal,
         raddr0: Signal,
         ren1: Signal,
@@ -855,6 +862,8 @@ class Module:
         """Synchronous 2R1W memory (registered outputs, prototype)."""
         if not isinstance(clk.ty, Clock):
             raise TypeError("sync_mem_dp clk must be !pyc.clock")
+        if not isinstance(rst.ty, Reset):
+            raise TypeError("sync_mem_dp rst must be !pyc.reset")
         if ren0.ty != Bits(1) or ren1.ty != Bits(1):
             raise TypeError("sync_mem_dp ren0/ren1 must be i1")
         if wvalid.ty != Bits(1):
@@ -870,7 +879,7 @@ class Module:
         out1 = self._get_next_temp_var()
         attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
         self._emit(
-            f"{out0}, {out1} = pyc.sync_mem_dp {clk.ref}, {ren0.ref}, {raddr0.ref}, {ren1.ref}, {raddr1.ref}, "
+            f"{out0}, {out1} = pyc.sync_mem_dp {clk.ref}, {rst.ref}, {ren0.ref}, {raddr0.ref}, {ren1.ref}, {raddr1.ref}, "
             + f"{wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} {attrs} : {raddr0.ty}, {wdata.ty}, {wstrb.ty}"
         )
         return Signal(ref=out0, ty=wdata.ty), Signal(ref=out1, ty=wdata.ty)

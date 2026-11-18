@@ -1302,6 +1302,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << "pyc_byte_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth() << "), .DEPTH("
            << depth << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
+        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
         os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
         os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
         os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
@@ -1329,6 +1330,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << "pyc_sync_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
            << "), .DEPTH(" << depth << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
+        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
         os << "  .ren(" << nt.get(mem.getRen()) << "),\n";
         os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
         os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
@@ -1357,6 +1359,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << "pyc_sync_mem_dp #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
            << "), .DEPTH(" << depth << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
+        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
         os << "  .ren0(" << nt.get(mem.getRen0()) << "),\n";
         os << "  .raddr0(" << nt.get(mem.getRaddr0()) << "),\n";
         os << "  .rdata0(" << nt.get(mem.getRdata0()) << "),\n";

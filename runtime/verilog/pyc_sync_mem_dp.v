@@ -4,14 +4,13 @@
 // - Both reads are synchronous (registered outputs).
 // - One write port with byte enables `wstrb`.
 // - Read-during-write to the same address returns pre-write data ("old-data") by default.
-// - No reset port: memory contents and read outputs survive across reset
-//   (FIRRTL/Chisel memory semantics).
 module pyc_sync_mem_dp #(
   parameter ADDR_WIDTH = 64,
   parameter DATA_WIDTH = 64,
   parameter DEPTH = 1024
 ) (
   input                   clk,
+  input                   rst,
 
   input                   ren0,
   input  [ADDR_WIDTH-1:0] raddr0,
@@ -64,55 +63,60 @@ module pyc_sync_mem_dp #(
   wire [ADDR_BITS-1:0] wa = waddr[ADDR_BITS-1:0];
 
   always @(posedge clk) begin
-    // Write with per-lane strobes; last lane may be narrower than 8 bits.
-    if (wvalid) begin
-      `ifndef SYNTHESIS
-      if (wa < DEPTH) begin
+    if (rst) begin
+      rdata0 <= {DATA_WIDTH{1'b0}};
+      rdata1 <= {DATA_WIDTH{1'b0}};
+    end else begin
+      // Write with per-lane strobes; last lane may be narrower than 8 bits.
+      if (wvalid) begin
+        `ifndef SYNTHESIS
+        if (wa < DEPTH) begin
+          for (i = 0; i < STRB_WIDTH - 1; i = i + 1) begin
+            if (wstrb[i])
+              mem[wa][8 * i +: 8] <= wdata[8 * i +: 8];
+          end
+          if (wstrb[STRB_WIDTH-1])
+            mem[wa][8*(STRB_WIDTH-1) +: LAST_LANE_BITS] <= wdata[8*(STRB_WIDTH-1) +: LAST_LANE_BITS];
+        end
+        `else
         for (i = 0; i < STRB_WIDTH - 1; i = i + 1) begin
           if (wstrb[i])
             mem[wa][8 * i +: 8] <= wdata[8 * i +: 8];
         end
         if (wstrb[STRB_WIDTH-1])
           mem[wa][8*(STRB_WIDTH-1) +: LAST_LANE_BITS] <= wdata[8*(STRB_WIDTH-1) +: LAST_LANE_BITS];
+        `endif
       end
-      `else
-      for (i = 0; i < STRB_WIDTH - 1; i = i + 1) begin
-        if (wstrb[i])
-          mem[wa][8 * i +: 8] <= wdata[8 * i +: 8];
-      end
-      if (wstrb[STRB_WIDTH-1])
-        mem[wa][8*(STRB_WIDTH-1) +: LAST_LANE_BITS] <= wdata[8*(STRB_WIDTH-1) +: LAST_LANE_BITS];
-      `endif
-    end
 
-    // Registered read port 0.
-    if (ren0) begin
-      `ifndef SYNTHESIS
-      if (ra0 < DEPTH) begin
+      // Registered read port 0.
+      if (ren0) begin
+        `ifndef SYNTHESIS
+        if (ra0 < DEPTH) begin
+          rd0 = mem[ra0];
+          rdata0 <= rd0;
+        end else begin
+          rdata0 <= {DATA_WIDTH{1'b0}};
+        end
+        `else
         rd0 = mem[ra0];
         rdata0 <= rd0;
-      end else begin
-        rdata0 <= {DATA_WIDTH{1'b0}};
+        `endif
       end
-      `else
-      rd0 = mem[ra0];
-      rdata0 <= rd0;
-      `endif
-    end
 
-    // Registered read port 1.
-    if (ren1) begin
-      `ifndef SYNTHESIS
-      if (ra1 < DEPTH) begin
+      // Registered read port 1.
+      if (ren1) begin
+        `ifndef SYNTHESIS
+        if (ra1 < DEPTH) begin
+          rd1 = mem[ra1];
+          rdata1 <= rd1;
+        end else begin
+          rdata1 <= {DATA_WIDTH{1'b0}};
+        end
+        `else
         rd1 = mem[ra1];
         rdata1 <= rd1;
-      end else begin
-        rdata1 <= {DATA_WIDTH{1'b0}};
+        `endif
       end
-      `else
-      rd1 = mem[ra1];
-      rdata1 <= rd1;
-      `endif
     end
   end
 endmodule

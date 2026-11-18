@@ -2281,6 +2281,7 @@ class Circuit(Module):
     def byte_mem(
         self,
         clk: Signal,
+        rst: Signal,
         *,
         raddr: Union[Wire, Reg, Signal],
         wvalid: Union[Wire, Reg, Signal],
@@ -2292,6 +2293,7 @@ class Circuit(Module):
     ) -> Wire:
         rdata = super().byte_mem(
             clk,
+            rst,
             Signal.as_sig(raddr),
             Signal.as_sig(wvalid),
             Signal.as_sig(waddr),
@@ -2306,6 +2308,7 @@ class Circuit(Module):
     def sync_mem(
         self,
         clk: Signal,
+        rst: Signal,
         *,
         ren: Union[Wire, Reg, Signal],
         raddr: Union[Wire, Reg, Signal],
@@ -2318,6 +2321,7 @@ class Circuit(Module):
     ) -> Wire:
         rdata = super().sync_mem(
             clk,
+            rst,
             Signal.as_sig(ren),
             Signal.as_sig(raddr),
             Signal.as_sig(wvalid),
@@ -2333,6 +2337,7 @@ class Circuit(Module):
     def sync_mem_dp(
         self,
         clk: Signal,
+        rst: Signal,
         *,
         ren0: Union[Wire, Reg, Signal],
         raddr0: Union[Wire, Reg, Signal],
@@ -2347,6 +2352,7 @@ class Circuit(Module):
     ) -> tuple[Wire, Wire]:
         rdata0, rdata1 = super().sync_mem_dp(
             clk,
+            rst,
             Signal.as_sig(ren0),
             Signal.as_sig(raddr0),
             Signal.as_sig(ren1),

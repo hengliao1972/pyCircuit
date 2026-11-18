@@ -18,7 +18,7 @@ def build(m: CycleAwareCircuit, domain: CycleAwareDomain, depth: int = 4, data_w
 
     rdata = m.sync_mem(
         clk,
-        
+        rst,
         ren=ren,
         raddr=raddr,
         wvalid=wvalid,
