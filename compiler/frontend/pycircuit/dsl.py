@@ -637,19 +637,44 @@ class Module:
             self._emit(f"{lhs}pyc.instance {attrs} : {in_sig} -> {out_sig}")
         return out
 
-    def alias(self, a: Signal, *, name: str | None = None) -> Signal:
+    def alias(
+        self,
+        a: Signal,
+        *,
+        name: str | None = None,
+        generated: str | None = None,
+    ) -> Signal:
         """Alias a value (pure) to attach a debug name in codegen."""
         tmp = self._get_next_temp_var()
-        if name is None:
+        attrs: list[str] = []
+        if generated is not None:
+            attrs.append(f"pyc.generated = {json.dumps(str(generated))}")
+        if name is not None:
+            attrs.append(f"pyc.name = {json.dumps(str(name))}")
+        if not attrs:
             self._emit(f"{tmp} = pyc.alias {a.ref} : {a.ty}")
         else:
-            self._emit(f'{tmp} = pyc.alias {a.ref} {{pyc.name = "{name}"}} : {a.ty}')
+            self._emit(f"{tmp} = pyc.alias {a.ref} {{{', '.join(attrs)}}} : {a.ty}")
         return Signal(ref=tmp, ty=a.ty)
 
-    def new_wire(self, *, width: int, shape: list[int] | None = None, name: str | None = None) -> Signal:
-        return self.new_signal(width=width, shape=shape, name=name)
+    def new_wire(
+        self,
+        *,
+        width: int,
+        shape: list[int] | None = None,
+        name: str | None = None,
+        generated: str | None = None,
+    ) -> Signal:
+        return self.new_signal(width=width, shape=shape, name=name, generated=generated)
         
-    def new_signal(self, *, width: int, shape: list[int] | None = None, name: str | None = None) -> Signal:
+    def new_signal(
+        self,
+        *,
+        width: int,
+        shape: list[int] | None = None,
+        name: str | None = None,
+        generated: str | None = None,
+    ) -> Signal:
         if width <= 0:
             raise ValueError("width must be > 0")
         if shape:
@@ -657,10 +682,15 @@ class Module:
         else: 
             ty = Bits(width)
         tmp = self._get_next_temp_var()
-        if name is None:
+        attrs: list[str] = []
+        if generated is not None:
+            attrs.append(f"pyc.generated = {json.dumps(str(generated))}")
+        if name is not None:
+            attrs.append(f"pyc.name = {json.dumps(str(name))}")
+        if not attrs:
             self._emit(f"{tmp} = pyc.wire : {ty}")
         else:
-            self._emit(f'{tmp} = pyc.wire {{pyc.name = "{name}"}} : {ty}')
+            self._emit(f"{tmp} = pyc.wire {{{', '.join(attrs)}}} : {ty}")
         return Signal(ref=tmp, ty=ty)
 
     def assign(self, dst: Signal, src: Signal) -> None:
@@ -680,7 +710,16 @@ class Module:
             return
         self._emit(f"pyc.assert {cond.ref} {{msg = {json.dumps(s, ensure_ascii=False)}}}")
 
-    def reg(self, clk: Signal, rst: Signal, en: Signal, next_: Signal, init: Signal) -> Signal:
+    def reg(
+        self,
+        clk: Signal,
+        rst: Signal,
+        en: Signal,
+        next_: Signal,
+        init: Signal,
+        *,
+        generated: str | None = None,
+    ) -> Signal:
         if not isinstance(clk.ty, Clock):
             raise TypeError("reg clk must be !pyc.clock")
         if not isinstance(rst.ty, Reset):
@@ -689,7 +728,13 @@ class Module:
             raise TypeError("reg en must be i1")
         self._require_same_ty(next_.ty, init.ty, "reg")
         tmp = self._get_next_temp_var()
-        self._emit(f"{tmp} = pyc.reg {clk.ref}, {rst.ref}, {en.ref}, {next_.ref}, {init.ref} : {next_.ty}")
+        attr_dict = ""
+        if generated is not None:
+            attr_dict = f" {{pyc.generated = {json.dumps(str(generated))}}}"
+        self._emit(
+            f"{tmp} = pyc.reg {clk.ref}, {rst.ref}, {en.ref}, {next_.ref}, "
+            f"{init.ref}{attr_dict} : {next_.ty}"
+        )
         return Signal(ref=tmp, ty=next_.ty)
 
     def fifo(
