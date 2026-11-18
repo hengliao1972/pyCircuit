@@ -212,6 +212,7 @@ static std::string cppType(Type ty) {
   llvm::report_fatal_error(llvm::StringRef(os.str()));
 }
 
+
 static unsigned bitWidth(Type ty) {
   if (isa<pyc::ClockType>(ty) || isa<pyc::ResetType>(ty))
     return 1;
@@ -220,6 +221,31 @@ static unsigned bitWidth(Type ty) {
   if (auto vt = dyn_cast<VectorType>(ty))
     return bitWidth(vt.getElementType());  // scalar element bit width
   return 0;
+}
+
+// Vec lanes keep the whole vector as one RegLoop lane: the storage is a
+// nested std::array (flat and standard-layout), so the lane covers the
+// leaf wires' words back to back.
+static unsigned planeWords(Type ty) {
+  if (auto vt = dyn_cast<VectorType>(ty)) {
+    std::uint64_t leaves = 1;
+    for (int64_t dim : vt.getShape())
+      leaves *= static_cast<std::uint64_t>(dim);
+    const unsigned leafW =
+        bitWidth(vt.getElementType());  // element type is scalar
+    return static_cast<unsigned>(leaves * ((leafW + 63u) / 64u));
+  }
+  return (bitWidth(ty) + 63u) / 64u;
+}
+
+// Expression for the first leaf's raw words of a (possibly vector) value,
+// e.g. `v[0][0].data()` for a 2-D vector.
+static std::string firstLeafData(Type ty, const std::string &name) {
+  std::string expr = name;
+  if (auto vt = dyn_cast<VectorType>(ty))
+    for (std::size_t d = 0, n = vt.getShape().size(); d < n; ++d)
+      expr += "[0]";
+  return expr + ".data()";
 }
 
 // Number of uint64_t words written by appendPackedWireWords for this type.
@@ -1578,7 +1604,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   llvm::SmallVector<pyc::RegOp> unloopedRegs;
   for (pyc::RegOp r : regs) {
     auto idAttr = r->getAttrOfType<IntegerAttr>("pyc.loop_id");
-    if (isa<VectorType>(r.getQ().getType()) || !idAttr) {
+    if (!idAttr) {
       unloopedRegs.push_back(r);
       continue;
     }
@@ -1668,28 +1694,29 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   // for `&...pending` and `&...qNext`.
   auto probePendingNext = [&](pyc::RegOp r) -> std::pair<std::string, std::string> {
     if (auto idAttr = r->getAttrOfType<IntegerAttr>("pyc.loop_id")) {
-      if (!isa<VectorType>(r.getQ().getType())) {
-        const int64_t id = idAttr.getValue().getSExtValue();
-        // Lane index within the loop = position in regLoopRegs[id].
-        long lane = 0;
-        if (auto it = regLoopRegs.find(id); it != regLoopRegs.end()) {
-          for (pyc::RegOp cand : it->second) {
-            if (cand == r)
-              break;
-            ++lane;
-          }
+      const int64_t id = idAttr.getValue().getSExtValue();
+      // Lane index within the loop = position in regLoopRegs[id].
+      long lane = 0;
+      if (auto it = regLoopRegs.find(id); it != regLoopRegs.end()) {
+        for (pyc::RegOp cand : it->second) {
+          if (cand == r)
+            break;
+          ++lane;
         }
-        std::string loop = regLoopName(id);
-        // lane_pending/lane_qnext_raw return pointers; keep the '&' at the
-        // call site out of this string (callers concatenate it verbatim
-        // after &). The arena segment is kWords long, so reinterpret it as
-        // the reg's Wire<W> (standard-layout).
-        const unsigned w = bitWidth(r.getQ().getType());
-        return {loop + ".lane_pending(" + std::to_string(lane) + "u)",
-                "reinterpret_cast<pyc::cpp::Wire<" + std::to_string(w) +
-                    "> *>(" + loop + ".lane_qnext_raw(" + std::to_string(lane) +
-                    "u))"};
       }
+      std::string loop = regLoopName(id);
+      // lane_pending/lane_qnext_raw return pointers; keep the '&' at the
+      // call site out of this string (callers concatenate it verbatim
+      // after &). The arena segment reinterprets back to the value type
+      // (Wire<W> or the whole Vec, both standard-layout over the words).
+      const std::string valTy =
+          isa<VectorType>(r.getQ().getType())
+              ? cppType(r.getQ().getType())
+              : ("pyc::cpp::Wire<" +
+                 std::to_string(bitWidth(r.getQ().getType())) + ">");
+      return {loop + ".lane_pending(" + std::to_string(lane) + "u)",
+              "reinterpret_cast<" + valTy + " *>(" + loop +
+                  ".lane_qnext_raw(" + std::to_string(lane) + "u))"};
     }
     return {nt.get(r.getQ()) + "_inst->pending",
             nt.get(r.getQ()) + "_inst->qNext"};
@@ -2779,11 +2806,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       if (!firstLane)
         os << ", ";
       firstLane = false;
-      const unsigned words =
-          (bitWidth(r.getQ().getType()) + 63u) / 64u;
-      os << "{" << nt.get(r.getQ()) << ".data(), " << nt.get(r.getNext())
-         << ".data(), &" << nt.get(r.getRst()) << ", &" << nt.get(r.getEn())
-         << ", " << nt.get(r.getInit()) << ".data(), " << words << "u}";
+      const Type qTy = r.getQ().getType();
+      os << "{" << firstLeafData(qTy, nt.get(r.getQ())) << ", "
+         << firstLeafData(r.getNext().getType(), nt.get(r.getNext()))
+         << ", &" << nt.get(r.getRst()) << ", &" << nt.get(r.getEn())
+         << ", " << firstLeafData(r.getInit().getType(), nt.get(r.getInit()))
+         << ", " << planeWords(qTy) << "u}";
     }
     os << "});\n";
   }
