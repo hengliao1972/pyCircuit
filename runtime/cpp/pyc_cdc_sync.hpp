@@ -40,13 +40,16 @@ public:
       pipeNext_[i] = pipe_[i - 1];
   }
 
-  void tick_commit() {
+  // Applies a destination-clock edge and reports whether out changed.
+  bool tick_commit() {
     if (!pending)
-      return;
+      return false;
     for (unsigned i = 0; i < Stages; i++)
       pipe_[i] = pipeNext_[i];
+    const bool changed = out != pipe_[Stages - 1];
     out = pipe_[Stages - 1];
     pending = false;
+    return changed;
   }
 
 public:
