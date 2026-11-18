@@ -131,6 +131,22 @@ static LogicalResult requireCombChunkConfig(ModuleOp module) {
       "missing pyc.cpp.comb_chunk_nodes; run pyc-cpp-placement before C++ emit");
 }
 
+// RegLoop grouping keys are (id * 4096 + width) * 2 + fused. Fused loops
+// keep the legacy key name (id * 4096 + width) so their member names stay
+// identical to the two-phase-only emitter output; phased sub-loops add a
+// _phased suffix so the two never collide.
+static std::string regLoopId(int64_t loopId) {
+  std::string name = std::to_string(loopId >> 1);
+  if ((loopId & 1) == 0)
+    name += "_phased";
+  return name;
+}
+
+static std::string regLoopName(int64_t loopId) {
+  return "reg_loop_" + regLoopId(loopId);
+}
+
+
 static std::string sanitizeId(llvm::StringRef s) {
   std::string out;
   out.reserve(s.size() + 1);
@@ -1668,7 +1684,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             ++lane;
           }
         }
-        std::string loop = "reg_loop_" + std::to_string(id);
+        std::string loop = regLoopName(id);
         // lane_pending/lane_qnext return pointers; keep the '&' at the call
         // site out of this string (callers concatenate it verbatim after &).
         return {loop + ".lane_pending(" + std::to_string(lane) + "u)",
@@ -2404,8 +2420,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "  pyc::cpp::pyc_reg<" << w << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
   }
   for (int64_t loopId : regLoopIds) {
-    os << "  pyc::cpp::RegLoop<" << regLoopWidth[loopId] << "> reg_loop_"
-       << loopId << ";\n";
+    os << "  pyc::cpp::RegLoop<" << regLoopWidth[loopId] << "> "
+       << regLoopName(loopId) << ";\n";
   }
   for (int64_t dbk : delayLoopIds) {
     os << "  pyc::cpp::DelayLoop<" << delayLoopShape[dbk].first
@@ -2748,7 +2764,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
        << nt.get(r.getNext()) << ", " << nt.get(r.getInit()) << ", " << nt.get(r.getQ()) << ");\n";
   }
   for (int64_t loopId : regLoopIds) {
-    os << "    reg_loop_" << loopId << ".add_lanes({";
+    os << "    " << regLoopName(loopId) << ".add_lanes({";
     bool firstLane = true;
     for (pyc::RegOp r : regLoopRegs[loopId]) {
       if (!firstLane)
@@ -4185,7 +4201,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (!fusedRegLoopIds.empty())
       os << "        _pyc_fused_rise = true;\n";
     for (int64_t loopId : phasedRegLoopIds) {
-      os << "        reg_loop_" << loopId << ".compute_rise();\n";
+      os << "        " << regLoopName(loopId) << ".compute_rise();\n";
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_rise();\n";
@@ -4196,7 +4212,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "      } else if (_pyc_fall) {\n";
     os << "        if (_pyc_seq_armed) {\n";
     for (int64_t loopId : phasedRegLoopIds) {
-      os << "          reg_loop_" << loopId << ".negedge();\n";
+      os << "          " << regLoopName(loopId) << ".negedge();\n";
     }
     for (int64_t dbk : delayLoopIds)
       os << "          delay_loop_" << dbk << ".negedge();\n";
@@ -4207,7 +4223,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       return failure();
     os << "      } else {\n";
     for (int64_t loopId : phasedRegLoopIds) {
-      os << "        reg_loop_" << loopId << ".compute_generic(_pyc_now);\n";
+      os << "        " << regLoopName(loopId) << ".compute_generic(_pyc_now);\n";
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_generic(_pyc_now);\n";
@@ -4293,7 +4309,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     // per-lane fanout (comb word, OR mask) pairs live in constexpr rodata.
     os << "    if (_pyc_fused_rise) {\n";
     for (int64_t loopId : fusedRegLoopIds) {
-      std::string loop = "reg_loop_" + std::to_string(loopId);
+      std::string loop = regLoopName(loopId);
       llvm::SmallVector<unsigned> wakeOffsets;
       llvm::SmallVector<std::pair<unsigned, uint64_t>> wakeEntries;
       for (pyc::RegOp r : regLoopRegs[loopId]) {
@@ -4391,12 +4407,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   }
   // Fused loops already published q in tick_compute; only retire pending.
   for (int64_t loopId : fusedRegLoopIds)
-    os << "    reg_loop_" << loopId << ".retire();\n";
+    os << "    " << regLoopName(loopId) << ".retire();\n";
   // RegLoop commit: per-lane dirty bitmap keeps the change-driven wake as
   // precise as the per-reg path.
   for (int64_t loopId : phasedRegLoopIds) {
-    std::string loop = "reg_loop_" + std::to_string(loopId);
-    os << "    const auto &_pyc_loop_dirty_" << loopId << " = " << loop
+    std::string loop = regLoopName(loopId);
+    os << "    const auto &_pyc_loop_dirty_" << regLoopId(loopId) << " = " << loop
        << ".commit();\n";
     unsigned lane = 0;
     for (pyc::RegOp r : regLoopRegs[loopId]) {
@@ -4405,7 +4421,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       // per-reg path); the condition is unchanged.
       std::string changed =
           "_pyc_commit_changed_" + nt.get(r.getQ()) + "_inst";
-      const std::string word = "_pyc_loop_dirty_" + std::to_string(loopId) +
+      const std::string word = "_pyc_loop_dirty_" + regLoopId(loopId) +
                                "[" + std::to_string(lane >> 6) + "u]";
       openLaneWord(lane, word);
       os << "      const bool " << changed << " = ((" << word << " >> "
