@@ -257,6 +257,8 @@ jobs:
             tests/v5/test_delay_line_combine.py
           python -m pytest -q tests/vec/test_vec_ops.py \
             -k 'slt_vv or slt_vs or slt_sv'
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            python -m pytest -q tests/test_multi_assign_cpp_verilog.py
 
       - name: Write gate summary
         if: always()

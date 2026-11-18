@@ -821,19 +821,22 @@ class Reg(Generic[DT]):
         *,
         when: Union[Wire, Signal, Connector, int, LiteralValue] = 1,
     ) -> None:
-        """Drive `self.next` (backedge) for a stateful variable.
+        """Accumulate this cycle's D input for a stateful variable.
 
-        - `r.set(v)` is equivalent to `m.assign(r.next, v)`
-        - `r.set(v, when=cond)` drives `cond ? v : r` (hold otherwise)
+        Successive calls fold in call order and emit one ``pyc.assign`` at
+        circuit seal. Conditional ``when=0`` keeps the already-decided next,
+        not the old Q. Unconditional ``r.set(v)`` replaces any pending next.
         """
         m = self.q.m
         if not isinstance(m, Circuit):
             raise TypeError("Reg.set requires the Reg to belong to a Circuit")
         
         next_w = Wire.as_wire(value, m=m, width=self.width)
+        prev = m._pending_assign.get(self.next.ref)
+        hold = prev[1] if prev is not None else self.q
 
         if isinstance(when, int) and int(when) == 1:
-            m.assign(self.next, next_w)
+            m._record_pending_assign(self.next, next_w)
             return
         
         cond = Wire.as_wire(when, m=m, width=1)
@@ -841,7 +844,7 @@ class Reg(Generic[DT]):
             raise TypeError("when width must be 1")
         when_w = Wire.as_wire(when, m=m)
 
-        m.assign(self.next, when_w._select_internal(value, self.q))
+        m._record_pending_assign(self.next, when_w._select_internal(value, hold))
 
 class Circuit(Module):
     """High-level wrapper over `Module` that returns `Wire`/`Reg` objects."""
@@ -862,6 +865,21 @@ class Circuit(Module):
         self._struct_instance_count = 0
         self._struct_state_alloc_count = 0
         self._struct_collections: list[dict[str, Any]] = []
+        # Last-wins pending assign (Reg.set / m.assign); one pyc.assign per dst.
+        self._pending_assign: dict[str, tuple[Wire, Wire]] = {}
+
+    def _record_pending_assign(self, dst: Wire, value: Wire) -> None:
+        """Replace the pending driver for ``dst``; emit once after finalizers."""
+        self._pending_assign[dst.ref] = (dst, value)
+
+    def _flush_pending_assign(self) -> None:
+        items = list(self._pending_assign.values())
+        self._pending_assign.clear()
+        for dst, value in items:
+            super().assign(dst.sig, value.sig)
+
+    def _after_finalizers(self) -> None:
+        self._flush_pending_assign()
 
     @staticmethod
     def _struct_identity(payload: Any) -> str:
@@ -1196,6 +1214,7 @@ class Circuit(Module):
         dst: Union[Wire, Reg, Signal, Connector],
         src: Union[Wire, Reg, Signal, Connector, int, LiteralValue],
     ) -> None:
+        """Drive ``dst``. A later assign to the same wire replaces the earlier one."""
         if isinstance(dst, Connector):
             if isinstance(dst, RegConnector):
                 dst.set(src)
@@ -1221,32 +1240,23 @@ class Circuit(Module):
         if isinstance(src, LiteralValue):
             lit_w, _ = _coerce_literal_width(src, ctx_width=dst_sig.ty.width, ctx_signed=is_signed_src(src))
             src_sig = super().const(int(src.value), width=lit_w)
-            super().assign(dst_sig, src_sig)
-            return
-        if isinstance(src, int):
+        elif isinstance(src, int):
             src_sig = super().const(int(src), width=dst_sig.ty.width)
-            super().assign(dst_sig, src_sig)
-            return
+        else:
+            src_signed = is_signed_src(src)
+            src_sig = Signal.as_sig(src)
+            if dst_sig.ty != src_sig.ty:
+                if not (isinstance(dst_sig.ty, Bits) and isinstance(src_sig.ty, Bits)):
+                    raise TypeError(f"assign requires same types, got {dst_sig.ty} and {src_sig.ty}")
+                dst_w = dst_sig.ty.width
+                src_w = src_sig.ty.width
+                if src_w < dst_w:
+                    src_sig = super().sext(src_sig, width=dst_w) if src_signed else super().zext(src_sig, width=dst_w)
+                elif src_w > dst_w:
+                    src_sig = super().trunc(src_sig, width=dst_w)
 
-        src_signed = is_signed_src(src)
-        src_sig = Signal.as_sig(src)
-        
-        if dst_sig.ty == src_sig.ty:
-            super().assign(dst_sig, src_sig)
-            return
-
-        # Implicit integer resizing for convenience (zext smaller, trunc larger).
-        if isinstance(dst_sig.ty, Bits) and isinstance(src_sig.ty, Bits):
-            dst_w = dst_sig.ty.width
-            src_w = src_sig.ty.width
-            if src_w < dst_w:
-                src_sig = super().sext(src_sig, width=dst_w) if src_signed else super().zext(src_sig, width=dst_w)
-            elif src_w > dst_w:
-                src_sig = super().trunc(src_sig, width=dst_w)
-            super().assign(dst_sig, src_sig)
-            return
-
-        raise TypeError(f"assign requires same types, got {dst_sig.ty} and {src_sig.ty}")
+        dst_w = dst if isinstance(dst, Wire) else Wire(self, dst_sig)
+        self._record_pending_assign(dst_w, Wire(self, src_sig))
 
     def assert_(self, cond: Union[Wire, Reg, Signal], *, msg: str | None = None) -> None:
         c = cond.q.sig if isinstance(cond, Reg) else cond
