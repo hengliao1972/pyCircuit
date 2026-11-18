@@ -1,7 +1,5 @@
 #include "pyc/Emit/CppEmitter.h"
 
-#include "pyc/Emit/WireDriverCheck.h"
-
 #include "pyc/Dialect/PYC/PYCOps.h"
 #include "pyc/Dialect/PYC/PYCTypes.h"
 #include "pyc/Transforms/ChangeDrivenSchedule.h"
@@ -1355,9 +1353,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                               const CppEmitterOptions &opts,
                               const ObservationPlans &probePlans) {
   NameTable nt;
-
-  if (failed(rejectMultipleWireDrivers(f)))
-    return failure();
 
   if (!f.isDeclaration() && !getFuncPlacementSummary(f))
       return f.emitError(

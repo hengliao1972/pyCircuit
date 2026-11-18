@@ -34,10 +34,11 @@ If the backend sees a missing/mismatched contract marker, `pycc` fails early.
 
 `Circuit.assign` / `Reg.set` fold successive updates in the frontend: one
 `pyc.assign` per destination (`when=` accumulates a mux chain; plain
-`m.assign` last-write-wins). A leftover multi-`pyc.assign` on the same wire
-in IR is rejected by the C++ and Verilog emitters
-(`has multiple drivers for the same wire`). Remaining true multi-drive must
-use an explicit net (Decision 0137).
+`m.assign` last-write-wins). A `pyc.assign` destination must be defined by a
+`pyc.wire`, and `pyc-eliminate-wires` rejects a wire with more than one
+driver (`pyc.wire has N pyc.assign drivers; a wire must have a single
+driver`), so a leftover multi-drive fails the pipeline instead of reaching
+the emitters. Genuine multi-drive must use an explicit net (Decision 0137).
 
 ## Useful commands
 
