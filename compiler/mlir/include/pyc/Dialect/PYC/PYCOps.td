@@ -337,7 +337,6 @@ def PYC_ByteMemOp : PYC_Op<"byte_mem", [MemoryEffects<[MemRead, MemWrite]>,
                                        AllTypesMatch<["wdata", "rdata"]>]> {
   let summary = "Byte-addressed memory (async read, sync write, prototype)";
   let arguments = (ins PYC_ClockType:$clk,
-                       PYC_ResetType:$rst,
                        AnyInteger:$raddr,
                        I1:$wvalid,
                        AnyInteger:$waddr,
@@ -345,7 +344,7 @@ def PYC_ByteMemOp : PYC_Op<"byte_mem", [MemoryEffects<[MemRead, MemWrite]>,
                        AnyInteger:$wstrb);
   let results = (outs AnyInteger:$rdata);
   let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $rst `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
+  let assemblyFormat = "$clk `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
 }
 
 def PYC_SyncMemOp : PYC_Op<"sync_mem", [MemoryEffects<[MemRead, MemWrite]>,
@@ -353,7 +352,6 @@ def PYC_SyncMemOp : PYC_Op<"sync_mem", [MemoryEffects<[MemRead, MemWrite]>,
                                        AllTypesMatch<["wdata", "rdata"]>]> {
   let summary = "Synchronous 1R1W memory (registered read data, prototype)";
   let arguments = (ins PYC_ClockType:$clk,
-                       PYC_ResetType:$rst,
                        I1:$ren,
                        AnyInteger:$raddr,
                        I1:$wvalid,
@@ -362,7 +360,7 @@ def PYC_SyncMemOp : PYC_Op<"sync_mem", [MemoryEffects<[MemRead, MemWrite]>,
                        AnyInteger:$wstrb);
   let results = (outs AnyInteger:$rdata);
   let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $rst `,` $ren `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
+  let assemblyFormat = "$clk `,` $ren `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
 }
 
 def PYC_SyncMemDPOp : PYC_Op<"sync_mem_dp", [MemoryEffects<[MemRead, MemWrite]>,
@@ -370,7 +368,6 @@ def PYC_SyncMemDPOp : PYC_Op<"sync_mem_dp", [MemoryEffects<[MemRead, MemWrite]>,
                                             AllTypesMatch<["wdata", "rdata0", "rdata1"]>]> {
   let summary = "Synchronous 2R1W memory (dual-read, registered outputs, prototype)";
   let arguments = (ins PYC_ClockType:$clk,
-                       PYC_ResetType:$rst,
                        I1:$ren0,
                        AnyInteger:$raddr0,
                        I1:$ren1,
@@ -381,7 +378,7 @@ def PYC_SyncMemDPOp : PYC_Op<"sync_mem_dp", [MemoryEffects<[MemRead, MemWrite]>,
                        AnyInteger:$wstrb);
   let results = (outs AnyInteger:$rdata0, AnyInteger:$rdata1);
   let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $rst `,` $ren0 `,` $raddr0 `,` $ren1 `,` $raddr1 `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr0) `,` type($rdata0) `,` type($wstrb)";
+  let assemblyFormat = "$clk `,` $ren0 `,` $raddr0 `,` $ren1 `,` $raddr1 `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr0) `,` type($rdata0) `,` type($wstrb)";
 }
 
 def PYC_AsyncFifoOp : PYC_Op<"async_fifo", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch<["in_data", "out_data"]>]> {

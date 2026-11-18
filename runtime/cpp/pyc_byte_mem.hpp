@@ -25,14 +25,13 @@ public:
   static constexpr unsigned StrbWidth = DataWidth / 8;
 
   pyc_byte_mem(Wire<1> &clk,
-               Wire<1> &rst,
-               Wire<AddrWidth> &raddr,
+                              Wire<AddrWidth> &raddr,
                Wire<DataWidth> &rdata,
                Wire<1> &wvalid,
                Wire<AddrWidth> &waddr,
                Wire<DataWidth> &wdata,
                Wire<StrbWidth> &wstrb)
-      : clk(clk), rst(rst), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
+      : clk(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
         mem_(DepthBytes, 0u) {
     eval();
   }
@@ -141,9 +140,6 @@ public:
       return;
 
     pendingWrite = false;
-    if (rst.toBool())
-      return;
-
     if (wvalid.toBool()) {
       pendingWrite = true;
       latchedAddr = toIndex(waddr);
@@ -218,7 +214,6 @@ public:
 
 public:
   Wire<1> &clk;
-  Wire<1> &rst;
 
   Wire<AddrWidth> &raddr;
   Wire<DataWidth> &rdata;

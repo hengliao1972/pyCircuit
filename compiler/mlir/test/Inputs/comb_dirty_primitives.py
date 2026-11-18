@@ -18,7 +18,6 @@ def build(m: CycleAwareCircuit, domain: CycleAwareDomain) -> None:
     )
     byte_data = m.byte_mem(
         clk,
-        rst,
         raddr=addr,
         wvalid=valid,
         waddr=addr,
@@ -29,7 +28,6 @@ def build(m: CycleAwareCircuit, domain: CycleAwareDomain) -> None:
     )
     sync_data = m.sync_mem(
         clk,
-        rst,
         ren=valid,
         raddr=addr,
         wvalid=valid,
@@ -41,7 +39,6 @@ def build(m: CycleAwareCircuit, domain: CycleAwareDomain) -> None:
     )
     sync0, sync1 = m.sync_mem_dp(
         clk,
-        rst,
         ren0=valid,
         raddr0=addr,
         ren1=valid,
