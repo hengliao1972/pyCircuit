@@ -1,4 +1,5 @@
 #include "pyc/Transforms/Passes.h"
+#include "pyc/Transforms/StateOptimization.h"
 
 #include "pyc/Dialect/PYC/PYCOps.h"
 
@@ -180,6 +181,9 @@ struct PackI1RegsPass : public PassWrapper<PackI1RegsPass, OperationPass<func::F
       Value oldQ = r.getQ();
       Value repl = bits[i];
       oldQ.replaceUsesWithIf(repl, [&](OpOperand &use) { return !erased.contains(use.getOwner()); });
+      if (hasExternalObservationIdentity(r.getOperation()))
+        materializeObservationAlias(builder, r.getLoc(), bits[i],
+                                    r.getOperation());
     }
 
     // Re-create aliases at the insertion point, preserving attributes and
