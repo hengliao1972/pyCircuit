@@ -3,6 +3,8 @@
 // - `DEPTH` is in bytes.
 // - Combinational little-endian read window.
 // - Byte-enable write on posedge.
+// - No reset port: memory contents survive across reset (FIRRTL/Chisel
+//   memory semantics; SRAM in real hardware has no reset).
 module pyc_byte_mem #(
   parameter ADDR_WIDTH = 64,
   parameter DATA_WIDTH = 64,
@@ -12,7 +14,6 @@ module pyc_byte_mem #(
   parameter INIT_MEMH = ""
 ) (
   input                   clk,
-  input                   rst,
 
   input  [ADDR_WIDTH-1:0] raddr,
   output reg [DATA_WIDTH-1:0] rdata,
@@ -57,9 +58,7 @@ module pyc_byte_mem #(
     end
   end
 
-  // Byte-enable write (rst does not gate writes: memory contents survive
-  // across reset per FIRRTL/Chisel convention; init happens via INIT_MEMH
-  // or simulation-default zeros — issue #43).
+  // Byte-enable write (no reset gating: contents survive across reset).
   integer j;
   integer wa;
   always @(posedge clk) begin
@@ -71,10 +70,4 @@ module pyc_byte_mem #(
       end
     end
   end
-
-  // rst is intentionally unused (kept for interface compatibility with
-  // the VerilogEmitter instantiation); lint_off prevents warnings.
-  /* verilator lint_off UNUSED */
-  wire _unused_rst = rst;
-  /* verilator lint_on UNUSED */
 endmodule

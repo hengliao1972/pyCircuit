@@ -4,6 +4,8 @@
 // - Read is synchronous: when `ren` is asserted, `rdata` updates on the next
 //   rising edge of `clk`.
 // - Write is synchronous with byte enables `wstrb`.
+// - No reset port: memory contents and read output survive across reset
+//   (FIRRTL/Chisel memory semantics).
 //
 // Note: Read-during-write to the same address returns the pre-write data
 // ("old-data") by default.
@@ -13,7 +15,6 @@ module pyc_sync_mem #(
   parameter DEPTH = 1024
 ) (
   input                   clk,
-  input                   rst,
 
   input                   ren,
   input  [ADDR_WIDTH-1:0] raddr,
@@ -63,44 +64,40 @@ module pyc_sync_mem #(
   wire [ADDR_BITS-1:0] wa = waddr[ADDR_BITS-1:0];
 
   always @(posedge clk) begin
-    if (rst) begin
-      rdata <= {DATA_WIDTH{1'b0}};
-    end else begin
-      // Write with per-lane strobes; last lane may be narrower than 8 bits.
-      if (wvalid) begin
-        `ifndef SYNTHESIS
-        if (wa < DEPTH) begin
-          for (i = 0; i < STRB_WIDTH - 1; i = i + 1) begin
-            if (wstrb[i])
-              mem[wa][8 * i +: 8] <= wdata[8 * i +: 8];
-          end
-          if (wstrb[STRB_WIDTH-1])
-            mem[wa][8*(STRB_WIDTH-1) +: LAST_LANE_BITS] <= wdata[8*(STRB_WIDTH-1) +: LAST_LANE_BITS];
-        end
-        `else
+    // Write with per-lane strobes; last lane may be narrower than 8 bits.
+    if (wvalid) begin
+      `ifndef SYNTHESIS
+      if (wa < DEPTH) begin
         for (i = 0; i < STRB_WIDTH - 1; i = i + 1) begin
           if (wstrb[i])
             mem[wa][8 * i +: 8] <= wdata[8 * i +: 8];
         end
         if (wstrb[STRB_WIDTH-1])
           mem[wa][8*(STRB_WIDTH-1) +: LAST_LANE_BITS] <= wdata[8*(STRB_WIDTH-1) +: LAST_LANE_BITS];
-        `endif
       end
+      `else
+      for (i = 0; i < STRB_WIDTH - 1; i = i + 1) begin
+        if (wstrb[i])
+          mem[wa][8 * i +: 8] <= wdata[8 * i +: 8];
+      end
+      if (wstrb[STRB_WIDTH-1])
+        mem[wa][8*(STRB_WIDTH-1) +: LAST_LANE_BITS] <= wdata[8*(STRB_WIDTH-1) +: LAST_LANE_BITS];
+      `endif
+    end
 
-      // Registered read.
-      if (ren) begin
-        `ifndef SYNTHESIS
-        if (ra < DEPTH) begin
-          rd_word = mem[ra];
-          rdata <= rd_word;
-        end else begin
-          rdata <= {DATA_WIDTH{1'b0}};
-        end
-        `else
+    // Registered read.
+    if (ren) begin
+      `ifndef SYNTHESIS
+      if (ra < DEPTH) begin
         rd_word = mem[ra];
         rdata <= rd_word;
-        `endif
+      end else begin
+        rdata <= {DATA_WIDTH{1'b0}};
       end
+      `else
+      rd_word = mem[ra];
+      rdata <= rd_word;
+      `endif
     end
   end
 endmodule
