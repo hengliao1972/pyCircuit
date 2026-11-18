@@ -34,26 +34,30 @@ int main() {
   Wire<1> clk{0}, rst{0}, en{1};
 
   std::vector<Wire<8>> rd(kRegLanes), rinit(kRegLanes), rqRef(kRegLanes),
-      rqLoop(kRegLanes);
+      rqLoop(kRegLanes), rqFused(kRegLanes);
   std::vector<pyc_reg<8>> regRef;
   regRef.reserve(kRegLanes);
-  RegLoop<8> regLoop;
+  RegLoop regLoop, fusedLoop;  // fusedLoop: tick-fuse single-phase lanes
   for (unsigned i = 0; i < kRegLanes; ++i) {
     rd[i] = Wire<8>{i * 7 + 3};
     rinit[i] = Wire<8>{i + 1};
     regRef.emplace_back(clk, rst, en, rd[i], rinit[i], rqRef[i]);
-    regLoop.add_lanes({{&rqLoop[i], &rd[i], &rst, &en, &rinit[i]}});
+    regLoop.add_lanes({{rqLoop[i].data(), rd[i].data(), &rst, &en,
+                          rinit[i].data(), 1u}});
+    fusedLoop.add_lanes({{rqFused[i].data(), rd[i].data(), &rst, &en,
+                           rinit[i].data(), 1u}});
   }
 
   std::vector<Wire<8>> dd(kDelayLanes), dinit(kDelayLanes), dqRef(kDelayLanes),
       dqLoop(kDelayLanes);
   std::vector<pyc_delay_line<8, 4>> delayRef;
   delayRef.reserve(kDelayLanes);
-  DelayLoop<8> delayLoop;
+  DelayLoop delayLoop;
   for (unsigned i = 0; i < kDelayLanes; ++i) {
     dd[i] = Wire<8>{i * 3 + 1};
     delayRef.emplace_back(clk, rst, en, dd[i], dinit[i], dqRef[i]);
-    delayLoop.add_lanes({{&dqLoop[i], &dd[i], &rst, &en, &dinit[i], 4u}});
+    delayLoop.add_lanes({{dqLoop[i].data(), dd[i].data(), &rst, &en,
+                          dinit[i].data(), 4u, 1u}});
   }
 
   bool prev = false;
@@ -87,13 +91,36 @@ int main() {
       delayLoop.compute_generic(now);
     }
 
+    // Tick-fuse: direct_commit after a rising edge == two-phase compute+commit.
+    const std::vector<std::uint64_t> fusedDirty =
+        rise ? fusedLoop.direct_commit() : std::vector<std::uint64_t>(3, 0);
+
+    for (unsigned i = 0; i < kRegLanes; ++i) {
+      const bool pend = *regLoop.lane_pending(i);
+      if (pend != *fusedLoop.lane_pending(i) ||
+          (pend &&
+           reinterpret_cast<Wire<8> *>(regLoop.lane_qnext_raw(i))->value() !=
+               reinterpret_cast<Wire<8> *>(fusedLoop.lane_qnext_raw(i))
+                   ->value())) {
+        std::fprintf(stderr, "FUSED WRITE-INTENT MISMATCH cycle %u lane %u\n",
+                     c, i);
+        return 1;
+      }
+    }
+
     // Wake precision: per-lane bitmaps equal the per-object commit results.
     const auto &regDirty = regLoop.commit();
+    fusedLoop.retire();
     const auto delayRes = delayLoop.commit();
     for (unsigned i = 0; i < kRegLanes; ++i) {
       const bool changed = regRef[i].tick_commit();
       if (changed != bit(regDirty, i)) {
         std::fprintf(stderr, "REG WAKE MISMATCH cycle %u lane %u\n", c, i);
+        return 1;
+      }
+      if (bit(fusedDirty, i) != changed ||
+          rqFused[i].value() != rqRef[i].value()) {
+        std::fprintf(stderr, "FUSED MISMATCH cycle %u lane %u\n", c, i);
         return 1;
       }
       ref.mix(rqRef[i].value() + i);
@@ -108,7 +135,7 @@ int main() {
         return 1;
       }
       ref.mix(dqRef[i].value() * (i + 1) + delayRef[i].tap(2).value());
-      loop.mix(dqLoop[i].value() * (i + 1) + delayLoop.lane_tap(i, 2).value());
+      loop.mix(dqLoop[i].value() * (i + 1) + delayLoop.lane_tap<8>(i, 2).value());
     }
     if (ref.v != loop.v) {
       std::fprintf(stderr, "VALUE MISMATCH cycle %u\n", c);

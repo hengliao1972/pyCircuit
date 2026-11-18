@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "pyc_bits.hpp"
+#include "pyc_state_loop.hpp"
 
 namespace pyc::cpp {
 
@@ -451,6 +452,53 @@ public:
     if (Entry *e = const_cast<Entry *>(findById(id))) {
       e->read_u64 = [inst, depth, lsb]() -> std::uint64_t {
         return extract<W, StorageW>(inst->tap(depth), lsb).value();
+      };
+    }
+    return id;
+  }
+
+  // DelayLoop lanes: tap reads go straight through the loop, so no per-lane
+  // view object is needed.
+  template <unsigned W>
+  std::uint64_t addDelayLoopTap(std::string path, DelayLoop *loop,
+                                std::size_t lane, unsigned depth,
+                                bool *write_valid, Wire<W> *write_data) {
+    const std::uint64_t id = addImpl(std::move(path),
+                   ProbeKind::Reg,
+                   /*width_bits=*/W,
+                   static_cast<void *>(loop),
+                   write_valid,
+                   static_cast<const void *>(write_data),
+                   /*write_width_bits=*/W,
+                   /*write_storage_width_bits=*/W,
+                   /*write_lsb_bits=*/0);
+    if (Entry *e = const_cast<Entry *>(findById(id))) {
+      e->read_u64 = [loop, lane, depth]() -> std::uint64_t {
+        return loop->lane_tap<W>(lane, depth).value();
+      };
+    }
+    return id;
+  }
+
+  // Slice a specific delay-line stage: read `extract<W,StorageW>(tap(depth), lsb)`
+  // and route force-writes to that stage's own qNext.
+  template <unsigned W, unsigned StorageW>
+  std::uint64_t addDelayLoopTapSlice(std::string path, DelayLoop *loop,
+                                     std::size_t lane, unsigned depth,
+                                     unsigned lsb, bool *write_valid,
+                                     Wire<StorageW> *write_data) {
+    const std::uint64_t id = addImpl(std::move(path),
+                   ProbeKind::Reg,
+                   /*width_bits=*/W,
+                   static_cast<void *>(loop),
+                   write_valid,
+                   static_cast<const void *>(write_data),
+                   /*write_width_bits=*/W,
+                   /*write_storage_width_bits=*/StorageW,
+                   /*write_lsb_bits=*/lsb);
+    if (Entry *e = const_cast<Entry *>(findById(id))) {
+      e->read_u64 = [loop, lane, depth, lsb]() -> std::uint64_t {
+        return extract<W, StorageW>(loop->lane_tap<StorageW>(lane, depth), lsb).value();
       };
     }
     return id;

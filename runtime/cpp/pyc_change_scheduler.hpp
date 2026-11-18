@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace pyc::cpp {
 
@@ -114,6 +116,42 @@ private:
   }
 
   std::array<std::uint64_t, kWords> words_{};
+};
+
+// Tick-fuse table-driven wake: iterate only the set bits of a fused loop's
+// per-lane dirty bitmap and replay each dirty lane's precomputed fanout
+// (word, mask) pairs, one load+or+store per pair. Generated simulators emit
+// `offsets`/`entries` as compile-time constants so the fused commit walk is
+// one tiny loop instead of one emitted branch per lane.
+template <std::size_t Lanes, std::size_t Entries>
+struct FusedLaneWake {
+  // Prefix bounds into `entries`: lane i's fanout is entries[offsets[i],
+  // offsets[i+1]). Lanes with no comb fanout contribute nothing.
+  std::array<unsigned, Lanes + 1> offsets{};
+  std::array<std::pair<unsigned, std::uint64_t>, Entries> entries{};
+
+  template <std::size_t Capacity>
+  void apply(const std::vector<std::uint64_t> &dirty,
+             DirtyBitset<Capacity> &comb) const noexcept {
+    constexpr std::size_t kWords = (Lanes + 63) / 64;
+    // Bits above Lanes in the last word address no offsets entry; mask them
+    // so apply stays in-bounds whatever the dirty bitmap contains.
+    constexpr std::uint64_t kValidBits =
+        (Lanes % 64) == 0 ? ~std::uint64_t{0}
+                          : (std::uint64_t{1} << (Lanes % 64)) - 1;
+    for (std::size_t w = 0; w < kWords; ++w) {
+      std::uint64_t bits =
+          dirty[w] & (w + 1 == kWords ? kValidBits : ~std::uint64_t{0});
+      while (bits) {
+        const unsigned lane =
+            static_cast<unsigned>(w * 64) +
+            static_cast<unsigned>(__builtin_ctzll(bits));
+        bits &= bits - 1;
+        for (unsigned k = offsets[lane]; k != offsets[lane + 1]; ++k)
+          comb.markWordUnchecked(entries[k].first, entries[k].second);
+      }
+    }
+  }
 };
 
 } // namespace pyc::cpp

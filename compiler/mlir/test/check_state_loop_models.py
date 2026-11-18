@@ -36,9 +36,30 @@ def main() -> None:
                 header = temp / f"{source}.{mode}.hpp"
                 emit(args.pycc, HERE / source, header, flag)
                 text = header.read_text(encoding="utf-8")
-                looped = "RegLoop<" in text or "DelayLoop<" in text
+                looped = "RegLoop " in text or "DelayLoop " in text
                 if looped != (mode == "loop"):
                     raise AssertionError(f"{source} {mode}: loop lowering={looped}")
+                i = text.find("if (_pyc_fused_rise)")
+                j = text.find("void tick_commit()")
+                if mode == "loop" and i >= 0 and j > i:
+                    # The fused commit must stay single-phase and table-
+                    # driven: direct_commit() with no per-lane emitted dirty
+                    # tests. A fused loop whose lanes feed no comb (all
+                    # fanout retimed away) legitimately emits a bare
+                    # direct_commit() — the empty wake table + apply() would
+                    # be dead code — so only pair tables with .apply() when
+                    # one is emitted.
+                    seg = text[i:j]
+                    if "direct_commit()" not in seg or \
+                            "_pyc_commit_changed_" in seg or \
+                            ("FusedLaneWake<" in seg and ".apply(" not in seg):
+                        raise AssertionError(
+                            f"{source}: fused wake missing table-driven walk")
+                for line in text.splitlines():
+                    if "FusedLaneWake" in line and \
+                            line.count("{") != line.count("}"):
+                        raise AssertionError(
+                            f"{source}: unbalanced FusedLaneWake table line")
                 binary = temp / f"{source}.{mode}.bin"
                 compile_cpp(args.cxx, header, binary, HERE / driver)
                 outputs[mode] = result([str(binary)])
