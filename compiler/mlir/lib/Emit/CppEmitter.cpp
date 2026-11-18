@@ -2407,11 +2407,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 
     os << "  pyc::cpp::pyc_byte_mem<" << addrW << ", " << dataW << ", " << depth << "> " << instName << ";\n";
     os << "  bool " << instName << "_eval_cache_valid = false;\n";
-    os << "  " << cppType(mem.getRst().getType()) << " " << instName << "_eval_cache_rst{};\n";
-    os << "  std::uint64_t " << instName << "_eval_cache_rst_ver = 1ull;\n";
-    os << "  std::uint64_t " << instName << "_eval_cache_rst_seen_ver = 0ull;\n";
-    os << "  std::uint64_t " << instName << "_eval_cache_rst_fp = 0ull;\n";
-    os << "  " << cppType(mem.getRaddr().getType()) << " " << instName << "_eval_cache_raddr{};\n";
+      os << "  " << cppType(mem.getRaddr().getType()) << " " << instName << "_eval_cache_raddr{};\n";
     os << "  std::uint64_t " << instName << "_eval_cache_raddr_ver = 1ull;\n";
     os << "  std::uint64_t " << instName << "_eval_cache_raddr_seen_ver = 0ull;\n";
     if (addrW <= 64)
@@ -2613,7 +2609,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << (firstInit ? " :\n" : ",\n");
     firstInit = false;
     std::string instName = byteMemInstName.lookup(mem.getOperation());
-    os << "      " << instName << "(" << nt.get(mem.getClk()) << ", " << nt.get(mem.getRst()) << ", " << nt.get(mem.getRaddr())
+    os << "      " << instName << "(" << nt.get(mem.getClk()) << ", " << nt.get(mem.getRaddr())
        << ", " << nt.get(mem.getRdata()) << ", " << nt.get(mem.getWvalid()) << ", " << nt.get(mem.getWaddr()) << ", "
        << nt.get(mem.getWdata()) << ", " << nt.get(mem.getWstrb()) << ")";
   }
@@ -2703,7 +2699,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     auto depth = depthAttr.getValue().getZExtValue();
     std::string instName = syncMemInstName.lookup(mem.getOperation());
     os << "    " << instName << " = new pyc::cpp::pyc_sync_mem<" << addrW << ", " << dataW << ", " << depth << ">("
-       << nt.get(mem.getClk()) << ", " << nt.get(mem.getRst()) << ", " << nt.get(mem.getRen()) << ", "
+       << nt.get(mem.getClk()) << ", " << nt.get(mem.getRen()) << ", "
        << nt.get(mem.getRaddr()) << ", " << nt.get(mem.getRdata()) << ", " << nt.get(mem.getWvalid()) << ", "
        << nt.get(mem.getWaddr()) << ", " << nt.get(mem.getWdata()) << ", " << nt.get(mem.getWstrb()) << ");\n";
   }
@@ -2720,7 +2716,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     auto depth = depthAttr.getValue().getZExtValue();
     std::string instName = syncMemDPInstName.lookup(mem.getOperation());
     os << "    " << instName << " = new pyc::cpp::pyc_sync_mem_dp<" << addrW << ", " << dataW << ", " << depth << ">("
-       << nt.get(mem.getClk()) << ", " << nt.get(mem.getRst()) << ", " << nt.get(mem.getRen0()) << ", "
+       << nt.get(mem.getClk()) << ", " << nt.get(mem.getRen0()) << ", "
        << nt.get(mem.getRaddr0()) << ", " << nt.get(mem.getRdata0()) << ", " << nt.get(mem.getRen1()) << ", "
        << nt.get(mem.getRaddr1()) << ", " << nt.get(mem.getRdata1()) << ", " << nt.get(mem.getWvalid()) << ", "
        << nt.get(mem.getWaddr()) << ", " << nt.get(mem.getWdata()) << ", " << nt.get(mem.getWstrb()) << ");\n";
@@ -3386,7 +3382,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       [&](pyc::ByteMemOp mem, llvm::StringRef indent, llvm::StringRef changedAnyVar = llvm::StringRef()) {
     std::string instName = byteMemInstName.lookup(mem.getOperation());
     std::string changedFlag = instName + "_eval_cache_changed";
-    std::string rst = nt.get(mem.getRst());
     std::string raddr = nt.get(mem.getRaddr());
     std::string wvalid = nt.get(mem.getWvalid());
     std::string waddr = nt.get(mem.getWaddr());
@@ -3401,8 +3396,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << indent << changedAnyVar << " = true;\n";
     os << indent << "#else\n";
     os << indent << "bool " << changedFlag << " = !" << instName << "_eval_cache_valid;\n";
-    os << indent << "if (!" << changedFlag << " && (" << instName << "_eval_cache_rst != " << rst << ")) "
-       << changedFlag << " = true;\n";
     os << indent << "if (!" << changedFlag << " && (" << instName << "_eval_cache_raddr != " << raddr << ")) "
        << changedFlag << " = true;\n";
     os << indent << "if (!" << changedFlag << " && (" << instName << "_eval_cache_wvalid != " << wvalid << ")) "
@@ -3419,7 +3412,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (!changedAnyVar.empty())
       os << indent << "if (" << changedFlag << ") " << changedAnyVar << " = true;\n";
     os << indent << "if (" << changedFlag << ") {\n";
-    os << indent << "  " << instName << "_eval_cache_rst = " << rst << ";\n";
     os << indent << "  " << instName << "_eval_cache_raddr = " << raddr << ";\n";
     os << indent << "  " << instName << "_eval_cache_wvalid = " << wvalid << ";\n";
     os << indent << "  " << instName << "_eval_cache_waddr = " << waddr << ";\n";

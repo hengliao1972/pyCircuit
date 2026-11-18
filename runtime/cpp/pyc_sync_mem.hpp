@@ -28,15 +28,14 @@ public:
   static constexpr unsigned StrbWidth = (DataWidth + 7) / 8;
 
   pyc_sync_mem(Wire<1> &clk,
-               Wire<1> &rst,
-               Wire<1> &ren,
+                              Wire<1> &ren,
                Wire<AddrWidth> &raddr,
                Wire<DataWidth> &rdata,
                Wire<1> &wvalid,
                Wire<AddrWidth> &waddr,
                Wire<DataWidth> &wdata,
                Wire<StrbWidth> &wstrb)
-      : clk(clk), rst(rst), ren(ren), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata),
+      : clk(clk), ren(ren), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata),
         wstrb(wstrb) {}
 
   struct MemWatchEvent {
@@ -124,12 +123,6 @@ public:
     if (!posedge)
       return;
 
-    if (rst.toBool()) {
-      pendingRead = true;
-      rdataNext = Wire<DataWidth>(0);
-      return;
-    }
-
     if (wvalid.toBool()) {
       pendingWrite = true;
       latchedWaddr = toIndex(waddr);
@@ -195,7 +188,6 @@ public:
 
 public:
   Wire<1> &clk;
-  Wire<1> &rst;
 
   Wire<1> &ren;
   Wire<AddrWidth> &raddr;
@@ -283,7 +275,6 @@ public:
   static constexpr change_mask_t kReadData1Changed = change_mask_t{1} << 1;
 
   pyc_sync_mem_dp(Wire<1> &clk,
-                  Wire<1> &rst,
                   Wire<1> &ren0,
                   Wire<AddrWidth> &raddr0,
                   Wire<DataWidth> &rdata0,
@@ -294,7 +285,7 @@ public:
                   Wire<AddrWidth> &waddr,
                   Wire<DataWidth> &wdata,
                   Wire<StrbWidth> &wstrb)
-      : clk(clk), rst(rst), ren0(ren0), raddr0(raddr0), rdata0(rdata0), ren1(ren1), raddr1(raddr1), rdata1(rdata1),
+      : clk(clk), ren0(ren0), raddr0(raddr0), rdata0(rdata0), ren1(ren1), raddr1(raddr1), rdata1(rdata1),
         wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb) {}
 
   struct MemWatchEvent {
@@ -375,14 +366,6 @@ public:
     pendingRead1 = false;
     if (!posedge)
       return;
-
-    if (rst.toBool()) {
-      pendingRead0 = true;
-      pendingRead1 = true;
-      rdata0Next = Wire<DataWidth>(0);
-      rdata1Next = Wire<DataWidth>(0);
-      return;
-    }
 
     if (wvalid.toBool()) {
       pendingWrite = true;
@@ -472,7 +455,6 @@ public:
 
 public:
   Wire<1> &clk;
-  Wire<1> &rst;
 
   Wire<1> &ren0;
   Wire<AddrWidth> &raddr0;
