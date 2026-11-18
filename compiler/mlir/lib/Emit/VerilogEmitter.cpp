@@ -1223,7 +1223,24 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
           return r.emitError("verilog emitter only supports integer reg data type");
 
         auto emitReg = [&](llvm::StringRef suffix, llvm::StringRef instanceSuffix) {
-          os << "pyc_reg #(.WIDTH(" << *width << ")) " << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          std::string initParam;
+          bool usePortInit = true;
+          if (auto *initDef = r.getInit().getDefiningOp()) {
+            if (auto constOp = dyn_cast<pyc::ConstantOp>(initDef)) {
+              initParam = ", .INIT(" + vLiteral(constOp.getValueAttr(),
+                                                 constOp.getType()) + ")";
+              usePortInit = false;
+            }
+          }
+          if (usePortInit) {
+            // non-constant init: use the init port path
+            os << "pyc_reg #(.WIDTH(" << *width << "), .USE_INIT_PORT(1)) "
+               << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          } else {
+            // constant init: use the INIT parameter path (no init port)
+            os << "pyc_reg #(.WIDTH(" << *width << ")" << initParam << ") "
+               << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          }
           os << "  .clk(" << nt.get(r.getClk()) << "),\n";
           os << "  .rst(" << nt.get(r.getRst()) << "),\n";
           os << "  .en(" << nt.get(r.getEn()) << "),\n";
