@@ -603,7 +603,7 @@ static std::string delayTapReadExpr(
       const int64_t raw = idAttr.getValue().getSExtValue();
       const unsigned dw = bitWidth(delay.getQ().getType());
       if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
-        const int64_t key = raw * 65536 + static_cast<int64_t>(dw) * 256 +
+        const int64_t key = raw * 256 +
                             da.getValue().getZExtValue();
         auto it = delayLoopLines.find(key);
         if (it != delayLoopLines.end()) {
@@ -613,7 +613,8 @@ static std::string delayTapReadExpr(
               break;
             ++lane;
           }
-          return "delay_loop_" + std::to_string(key) + ".lane_tap(" +
+          return "delay_loop_" + std::to_string(key) + ".lane_tap<" +
+                 std::to_string(dw) + ">(" +
                  std::to_string(lane) + "u, " + std::to_string(depth) + "u)";
         }
       }
@@ -1609,7 +1610,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 
   // DelayLoop buckets: key = (clk, width, depth); vector delays stay per-object.
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::DelayLineOp>> delayLoopLines;
-  llvm::DenseMap<int64_t, std::pair<unsigned, unsigned>> delayLoopShape;
   llvm::SmallVector<pyc::DelayLineOp> unloopedDelays;
   for (pyc::DelayLineOp dl : delayLines) {
     auto idAttr = dl->getAttrOfType<IntegerAttr>("pyc.loop_id");
@@ -1618,11 +1618,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       unloopedDelays.push_back(dl);
       continue;
     }
-    unsigned w = bitWidth(dl.getQ().getType());
     const int64_t raw = idAttr.getValue().getSExtValue();
-    const int64_t key = raw * 65536 + static_cast<int64_t>(w) * 256 +
+    const int64_t key = raw * 256 +
                         depthAttr.getValue().getZExtValue();
-    delayLoopShape.try_emplace(key, std::make_pair(w, depthAttr.getValue().getZExtValue()));
     delayLoopLines[key].push_back(dl);
   }
   llvm::SmallVector<int64_t> delayLoopIds;
@@ -1644,7 +1642,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         const int64_t raw = idAttr.getValue().getSExtValue();
         const unsigned dw = bitWidth(delay.getQ().getType());
         if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
-          const int64_t key = raw * 65536 + static_cast<int64_t>(dw) * 256 +
+          const int64_t key = raw * 256 +
                               da.getValue().getZExtValue();
           auto it = delayLoopLines.find(key);
           if (it != delayLoopLines.end()) {
@@ -1656,7 +1654,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             }
             const std::string loop = "delay_loop_" + std::to_string(key);
             return {"", loop + ".lane_pending(" + std::to_string(lane) + "u)",
-                    loop + ".lane_qnext(" + std::to_string(lane) + "u)"};
+                    "reinterpret_cast<pyc::cpp::Wire<" + std::to_string(dw) +
+                        "> *>(" + loop + ".lane_qnext_raw(" +
+                        std::to_string(lane) + "u))"};
           }
         }
       }
@@ -2241,8 +2241,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                       const int64_t raw = idAttr.getValue().getSExtValue();
                       const unsigned dw = bitWidth(srcDelay.getQ().getType());
                       if (auto da = srcDelay->getAttrOfType<IntegerAttr>("depth")) {
-                        const int64_t key = raw * 65536 +
-                                            static_cast<int64_t>(dw) * 256 +
+                        const int64_t key = raw * 256 +
                                             da.getValue().getZExtValue();
                         if (auto it = delayLoopLines.find(key);
                             it != delayLoopLines.end()) {
@@ -2256,8 +2255,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                               "delay_loop_" + std::to_string(key);
                           loopPend = loop + ".lane_pending(" +
                                      std::to_string(lane) + "u)";
-                          loopQNext = loop + ".lane_qnext(" +
-                                      std::to_string(lane) + "u)";
+                          loopQNext = "reinterpret_cast<pyc::cpp::Wire<" +
+                                      std::to_string(dw) + "> *>(" + loop +
+                                      ".lane_qnext_raw(" +
+                                      std::to_string(lane) + "u))";
                           tapViewRef = "&delay_tap_view_" +
                                        std::to_string(key) + "_" +
                                        std::to_string(lane);
@@ -2282,13 +2283,17 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             // as the DelayInst argument (same tap()/pending interface), with
             // write-intent from the loop lane.
             if (lsb == 0 && width == storageWidth) {
-              const bool loopedW = tapWriteNext.rfind("delay_loop_", 0) == 0;
+              const bool loopedW =
+                  tapWriteNext.rfind("delay_loop_", 0) == 0 ||
+                  tapWriteNext.rfind("reinterpret_cast<", 0) == 0;
               os << "    reg.addRegLazyTap<" << width << ">(reg_path("
                  << cppStringLiteral(field) << "), " << tapViewRef << ", "
                  << tapDepth << "u, " << (loopPend.empty() ? ("&" + inst + "->pending") : loopPend)
                  << ", " << (loopedW ? tapWriteNext : ("&" + tapWriteNext)) << ");\n";
             } else {
-              const bool loopedW2 = tapWriteNext.rfind("delay_loop_", 0) == 0;
+              const bool loopedW2 =
+                  tapWriteNext.rfind("delay_loop_", 0) == 0 ||
+                  tapWriteNext.rfind("reinterpret_cast<", 0) == 0;
               os << "    reg.addRegLazyTapSlice<" << width << ", "
                  << storageWidth << ">(reg_path(" << cppStringLiteral(field)
                  << "), " << tapViewRef << ", " << tapDepth << "u, " << lsb
@@ -2423,13 +2428,13 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "  pyc::cpp::RegLoop " << regLoopName(loopId) << ";\n";
   }
   for (int64_t dbk : delayLoopIds) {
-    os << "  pyc::cpp::DelayLoop<" << delayLoopShape[dbk].first
-       << "> delay_loop_" << dbk << ";\n";
+    os << "  pyc::cpp::DelayLoop delay_loop_" << dbk << ";\n";
     // One stable TapView per lane: probe lambdas keep a pointer to it, so it
     // must live and die with this instance (not a function-local static).
     for (size_t lane = 0; lane < delayLoopLines[dbk].size(); ++lane)
-      os << "  pyc::cpp::DelayLoop<" << delayLoopShape[dbk].first
-         << ">::TapView delay_tap_view_" << dbk << "_" << lane << "{&delay_loop_"
+      os << "  pyc::cpp::DelayLoop::TapView<"
+         << bitWidth(delayLoopLines[dbk][lane].getQ().getType())
+         << "> delay_tap_view_" << dbk << "_" << lane << "{&delay_loop_"
          << dbk << ", " << lane << "u};\n";
   }
   std::string fastClkName;
@@ -2785,10 +2790,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         os << ", ";
       firstDL = false;
       auto da = dl->getAttrOfType<IntegerAttr>("depth");
-      os << "{&" << nt.get(dl.getQ()) << ", &" << nt.get(dl.getNext())
-         << ", &" << nt.get(dl.getRst()) << ", &" << nt.get(dl.getEn())
-         << ", &" << nt.get(dl.getInit()) << ", "
-         << da.getValue().getZExtValue() << "u}";
+      const unsigned words =
+          (bitWidth(dl.getQ().getType()) + 63u) / 64u;
+      os << "{" << nt.get(dl.getQ()) << ".data(), " << nt.get(dl.getNext())
+         << ".data(), &" << nt.get(dl.getRst()) << ", &" << nt.get(dl.getEn())
+         << ", " << nt.get(dl.getInit()) << ".data(), "
+         << da.getValue().getZExtValue() << "u, " << words << "u}";
     }
     os << "});\n";
   }
@@ -4157,27 +4164,27 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       std::string tapExpr;
       if (auto idAttr = delay->getAttrOfType<IntegerAttr>("pyc.loop_id")) {
         if (!isa<VectorType>(delay.getQ().getType())) {
-          // Locate the owning loop by width; the tap's own depth is NOT part
-          // of the loop key (it indexes the stage, not the loop).
-          const unsigned w = bitWidth(delay.getQ().getType());
-          for (int64_t dbk : delayLoopIds) {
-            if (delayLoopShape[dbk].first != w)
-              continue;
-            auto it = delayLoopLines.find(dbk);
-            if (it == delayLoopLines.end())
-              continue;
-            long lane = 0;
-            bool hit = false;
-            for (pyc::DelayLineOp c : it->second) {
-              if (c == delay) { hit = true; break; }
-              ++lane;
+          // The tap's own depth indexes the stage, not the loop; the loop
+          // key is (clock id, lane depth).
+          if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
+            const unsigned w = bitWidth(delay.getQ().getType());
+            const int64_t key =
+                idAttr.getValue().getSExtValue() * 256 +
+                da.getValue().getZExtValue();
+            auto it = delayLoopLines.find(key);
+            if (it != delayLoopLines.end()) {
+              long lane = 0;
+              bool hit = false;
+              for (pyc::DelayLineOp c : it->second) {
+                if (c == delay) { hit = true; break; }
+                ++lane;
+              }
+              if (hit)
+                tapExpr = "delay_loop_" + std::to_string(key) +
+                          ".lane_tap_next<" + std::to_string(w) + ">(" +
+                          std::to_string(lane) + "u, " +
+                          std::to_string(depth.getValue().getZExtValue()) + "u)";
             }
-            if (!hit)
-              continue;
-            tapExpr = "delay_loop_" + std::to_string(dbk) +
-                      ".lane_tap_next(" + std::to_string(lane) + "u, " +
-                      std::to_string(depth.getValue().getZExtValue()) + "u)";
-            break;
           }
         }
       }

@@ -152,30 +152,30 @@ private:
   bool clkPrev_ = false;
 };
 
-template <unsigned Width>
-struct DelayLoopLane {
-  Wire<Width> *q;
-  Wire<Width> *d;
-  Wire<1> *rst;
-  Wire<1> *en;
-  const Wire<Width> *init;
-  unsigned depth;  // verifier-guaranteed > 1
-};
-
-// Per-lane depth varies, so stage storage is per-lane vectors and the ring
-// index is per-lane state; everything else is loop-continuous.
-template <unsigned Width>
+// Width-erased DelayLoop: lanes of different widths share one loop (the
+// emitter groups by clock and depth only). Per-lane depth and width vary,
+// so stage rings, sampled and qNext are per-lane word vectors of
+// lane.words entries; tap reads build a Wire<W> on the fly via the
+// explicit template argument the emitter knows.
 class DelayLoop {
 public:
-  using Lane = DelayLoopLane<Width>;
+  struct Lane {
+    std::uint64_t *q;
+    std::uint64_t *d;
+    Wire<1> *rst;
+    Wire<1> *en;
+    const std::uint64_t *init;
+    unsigned depth;  // verifier-guaranteed > 1
+    unsigned words;  // ceil(width / 64)
+  };
 
   void add_lanes(std::initializer_list<Lane> lanes) {
     for (const Lane &lane : lanes) {
       lanes_.push_back(lane);
-      stages_.emplace_back(lane.depth);
+      stages_.emplace_back(std::size_t(lane.depth) * lane.words, 0);
       head_.push_back(0);
-      sampled_.emplace_back();
-      qNext_.emplace_back();
+      sampled_.emplace_back(lane.words, 0);
+      qNext_.emplace_back(lane.words, 0);
       pendingReset_.push_back(0);
       pending_.push_back(0);
     }
@@ -185,7 +185,6 @@ public:
 
   std::size_t size() const { return lanes_.size(); }
 
-  // Caller guarantees a 0->1 edge just occurred on this loop's clock.
   void compute_rise() {
     clkPrev_ = true;
     const std::size_t n = lanes_.size();
@@ -195,11 +194,16 @@ public:
       const bool e = lane.en->toBool();
       pendingReset_[i] = r;
       pending_[i] = static_cast<char>(r | e);
-      if (r)
-        qNext_[i] = *lane.init;
-      else if (e) {
-        sampled_[i] = *lane.d;
-        qNext_[i] = stages_[i][next_head(i, lane.depth)];
+      if (r) {
+        for (unsigned w = 0; w < lane.words; ++w)
+          qNext_[i][w] = lane.init[w];
+      } else if (e) {
+        for (unsigned w = 0; w < lane.words; ++w)
+          sampled_[i][w] = lane.d[w];
+        const std::uint64_t *stage =
+            stages_[i].data() + std::size_t(next_head(i, lane.depth)) * lane.words;
+        for (unsigned w = 0; w < lane.words; ++w)
+          qNext_[i][w] = stage[w];
       }
     }
   }
@@ -216,9 +220,6 @@ public:
 
   void negedge() { clkPrev_ = false; clear_pending(); }
 
-  // Applies pending edges; returns {tail_dirty, advanced} bitmaps. `advanced`
-  // has a bit set for every lane whose history advanced this commit (tap
-  // consumers wake on it), matching has_pending() per lane.
   struct CommitResult {
     const std::vector<std::uint64_t> &tailDirty;
     const std::vector<std::uint64_t> &advanced;
@@ -231,17 +232,25 @@ public:
     for (std::size_t i = 0; i < n; ++i) {
       if (__builtin_expect(pending_[i] != 0, 0)) {
         const Lane &lane = lanes_[i];
-        Wire<Width> &q = *lane.q;
-        const bool changed = q != qNext_[i];
+        std::uint64_t *q = lane.q;
+        const std::uint64_t *next = qNext_[i].data();
+        bool changed = false;
+        for (unsigned w = 0; w < lane.words; ++w) {
+          changed |= q[w] != next[w];
+          q[w] = next[w];
+        }
         if (pendingReset_[i]) {
           for (unsigned s = 0; s < lane.depth; ++s)
-            stages_[i][s] = *lane.init;
+            for (unsigned w = 0; w < lane.words; ++w)
+              stages_[i][std::size_t(s) * lane.words + w] = lane.init[w];
           head_[i] = 0;
         } else {
-          stages_[i][head_[i]] = sampled_[i];
+          std::uint64_t *stage =
+              stages_[i].data() + std::size_t(head_[i]) * lane.words;
+          for (unsigned w = 0; w < lane.words; ++w)
+            stage[w] = sampled_[i][w];
           head_[i] = next_head(i, lane.depth);
         }
-        q = qNext_[i];
         pending_[i] = 0;
         advanced_[i >> 6] |= std::uint64_t{1} << (i & 63);
         if (changed)
@@ -251,50 +260,73 @@ public:
     return CommitResult{dirty_, advanced_};
   }
 
-  // Probe write-intent bindings (mirror pyc_delay_line::pending/qNext).
   bool *lane_pending(std::size_t i) {
     return reinterpret_cast<bool *>(&pending_[i]);
   }
-  Wire<Width> *lane_qnext(std::size_t i) { return &qNext_[i]; }
+  // Per-lane segment of lane.words entries; callers reinterpret it as
+  // Wire<W> (Bits is standard-layout with words_ as its only member).
+  void *lane_qnext_raw(std::size_t i) { return qNext_[i].data(); }
 
-  // Lightweight per-lane tap view: satisfies the DelayInst interface used by
-  // ProbeRegistry::addRegLazyTap* (tap(depth) / has_pending() / pending /
-  // qNext members). Held by value in generated probe registration code.
-  struct TapView {
-    const DelayLoop *loop;
-    std::size_t lane;
-    Wire<Width> tap(unsigned depth) const { return loop->tap(lane, depth); }
-    bool has_pending() const { return loop->pending_[lane] != 0; }
-    bool *pending_ptr() const {
-      return reinterpret_cast<bool *>(const_cast<char *>(&loop->pending_[lane]));
-    }
-    const Wire<Width> *qnext() const { return &loop->qNext_[lane]; }
-  };
-
-  // Committed tap read for lane i (mirror pyc_delay_line::tap).
+  // Committed tap read for lane i (mirror pyc_delay_line::tap); the
+  // emitter passes the width it knows as an explicit template argument.
+  template <unsigned Width>
   Wire<Width> lane_tap(std::size_t i, unsigned depth) const {
-    return tap(i, depth);
+    Wire<Width> out;
+    tapWords(i, depth, out.data());
+    return out;
   }
 
   // tap_next for per-tap _qNext wires: recompute exactly like
   // pyc_delay_line::tap_next for lane i.
+  template <unsigned Width>
   Wire<Width> lane_tap_next(std::size_t i, unsigned depth) const {
     const Lane &lane = lanes_[i];
-    if (pendingReset_[i])
-      return *lane.init;
+    if (pendingReset_[i]) {
+      Wire<Width> out;
+      for (unsigned w = 0; w < lane.words; ++w)
+        out.data()[w] = lane.init[w];
+      return out;
+    }
     if (!pending_[i])
-      return tap(i, depth);
-    return depth == 1 ? sampled_[i] : tap(i, depth - 1);
+      return lane_tap<Width>(i, depth);
+    if (depth == 1) {
+      Wire<Width> out;
+      for (unsigned w = 0; w < lane.words; ++w)
+        out.data()[w] = sampled_[i][w];
+      return out;
+    }
+    return lane_tap<Width>(i, depth - 1);
   }
 
+  // Lightweight per-lane tap view: satisfies the DelayInst interface used by
+  // ProbeRegistry::addRegLazyTap* (tap(depth) / has_pending() / pending /
+  // qNext members). Held by value in generated probe registration code.
+  template <unsigned Width>
+  struct TapView {
+    const DelayLoop *loop;
+    std::size_t lane;
+    Wire<Width> tap(unsigned depth) const { return loop->lane_tap<Width>(lane, depth); }
+    bool has_pending() const { return loop->pending_[lane] != 0; }
+    bool *pending_ptr() const {
+      return reinterpret_cast<bool *>(const_cast<char *>(&loop->pending_[lane]));
+    }
+    const Wire<Width> *qnext() const {
+      return reinterpret_cast<const Wire<Width> *>(loop->qNext_[lane].data());
+    }
+  };
+
 private:
-  Wire<Width> tap(std::size_t i, unsigned depth) const {
+  void tapWords(std::size_t i, unsigned depth, std::uint64_t *out) const {
+    const Lane &lane = lanes_[i];
     // Caller passes 1..Depth (verifier-guaranteed); ring layout matches
     // pyc_delay_line::stages/head.
-    unsigned idx = head_[i] + lanes_[i].depth - depth;
-    if (idx >= lanes_[i].depth)
-      idx -= lanes_[i].depth;
-    return stages_[i][idx];
+    unsigned idx = head_[i] + lane.depth - depth;
+    if (idx >= lane.depth)
+      idx -= lane.depth;
+    const std::uint64_t *stage =
+        stages_[i].data() + std::size_t(idx) * lane.words;
+    for (unsigned w = 0; w < lane.words; ++w)
+      out[w] = stage[w];
   }
   unsigned next_head(std::size_t i, unsigned depth) const {
     unsigned h = head_[i] + 1u;
@@ -303,10 +335,10 @@ private:
   void clear_pending() { pending_.assign(lanes_.size(), 0); }
 
   std::vector<Lane> lanes_;
-  std::vector<std::vector<Wire<Width>>> stages_;
+  std::vector<std::vector<std::uint64_t>> stages_;
   std::vector<unsigned> head_;
-  std::vector<Wire<Width>> sampled_;
-  std::vector<Wire<Width>> qNext_;
+  std::vector<std::vector<std::uint64_t>> sampled_;
+  std::vector<std::vector<std::uint64_t>> qNext_;
   std::vector<char> pending_;       // 0/1, stable address via lane_pending
   std::vector<char> pendingReset_;  // 0/1
   std::vector<std::uint64_t> dirty_;
@@ -315,3 +347,4 @@ private:
 };
 
 }  // namespace pyc::cpp
+

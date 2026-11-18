@@ -52,11 +52,12 @@ int main() {
       dqLoop(kDelayLanes);
   std::vector<pyc_delay_line<8, 4>> delayRef;
   delayRef.reserve(kDelayLanes);
-  DelayLoop<8> delayLoop;
+  DelayLoop delayLoop;
   for (unsigned i = 0; i < kDelayLanes; ++i) {
     dd[i] = Wire<8>{i * 3 + 1};
     delayRef.emplace_back(clk, rst, en, dd[i], dinit[i], dqRef[i]);
-    delayLoop.add_lanes({{&dqLoop[i], &dd[i], &rst, &en, &dinit[i], 4u}});
+    delayLoop.add_lanes({{dqLoop[i].data(), dd[i].data(), &rst, &en,
+                          dinit[i].data(), 4u, 1u}});
   }
 
   bool prev = false;
@@ -134,7 +135,7 @@ int main() {
         return 1;
       }
       ref.mix(dqRef[i].value() * (i + 1) + delayRef[i].tap(2).value());
-      loop.mix(dqLoop[i].value() * (i + 1) + delayLoop.lane_tap(i, 2).value());
+      loop.mix(dqLoop[i].value() * (i + 1) + delayLoop.lane_tap<8>(i, 2).value());
     }
     if (ref.v != loop.v) {
       std::fprintf(stderr, "VALUE MISMATCH cycle %u\n", c);
