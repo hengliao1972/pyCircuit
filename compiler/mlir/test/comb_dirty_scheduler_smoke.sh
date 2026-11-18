@@ -104,10 +104,17 @@ if grep -q '_pyc_comb_1_input_0' "${state_cpp}"; then
   echo "fail: dirty comb still polls register Q instead of commit fanout" >&2
   exit 1
 fi
-# State-optimize shifts temp numbering, so match the pattern, not reg_4.
-grep -qE '_pyc_commit_changed_pyc_reg_[0-9]+_inst' "${state_cpp}"
-grep -qE 'if \(_pyc_commit_changed_pyc_reg_[0-9]+_inst\)' "${state_cpp}"
-grep -q '_pyc_comb_dirty.markWordUnchecked' "${state_cpp}"
+# Register commit wake is table-driven since the FusedLaneWake walk: the
+# reg's q fanout lives in a constexpr table applied on the commit bitmap
+# (fused direct_commit or phased commit), instead of per-lane emitted
+# commit-changed aliases. The state fixture's only reg is fused, so the
+# per-lane names are gone by construction. A fused loop with no comb
+# fanout at all legitimately emits a bare direct_commit() instead.
+grep -q 'FusedLaneWake<' "${state_cpp}"
+grep -qE '\.apply\(reg_loop_[0-9]+\.(direct_commit|commit)\(\), _pyc_comb_dirty\)' "${state_cpp}"
+# No markWordUnchecked assertion here: with one comb per module the state
+# fixture has no comb→comb fanout; that contract is covered by the main
+# fixture's _pyc_direct_fanout_ table assertion above.
 "${CXX}" -std=c++17 -O0 \
   -I"${state_dir}" -I"${ROOT}/.pycircuit_out/toolchain/install/include" \
   "${STATE_DRIVER}" \

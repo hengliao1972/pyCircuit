@@ -42,14 +42,17 @@ def main() -> None:
                 i = text.find("if (_pyc_fused_rise)")
                 j = text.find("void tick_commit()")
                 if mode == "loop" and i >= 0 and j > i:
-                    # The fused wake must be the table-driven set-bit walk:
-                    # one FusedLaneWake table + .apply() per fused loop, with
-                    # no per-lane emitted dirty tests in between.
+                    # The fused commit must stay single-phase and table-
+                    # driven: direct_commit() with no per-lane emitted dirty
+                    # tests. A fused loop whose lanes feed no comb (all
+                    # fanout retimed away) legitimately emits a bare
+                    # direct_commit() — the empty wake table + apply() would
+                    # be dead code — so only pair tables with .apply() when
+                    # one is emitted.
                     seg = text[i:j]
                     if "direct_commit()" not in seg or \
-                            "FusedLaneWake<" not in seg or \
-                            ".apply(" not in seg or \
-                            "_pyc_commit_changed_" in seg:
+                            "_pyc_commit_changed_" in seg or \
+                            ("FusedLaneWake<" in seg and ".apply(" not in seg):
                         raise AssertionError(
                             f"{source}: fused wake missing table-driven walk")
                 for line in text.splitlines():

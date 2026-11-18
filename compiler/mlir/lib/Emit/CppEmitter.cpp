@@ -4359,23 +4359,26 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         collectFanoutWordMasks(r.getQ(), *schedule, combIndex, wakeEntries);
       }
       wakeOffsets.push_back(wakeEntries.size());
+      if (wakeEntries.empty()) {
+        // No comb fanout at all (e.g. a fixture whose only state is one
+        // fused reg): the wake table would be empty and apply() dead code —
+        // and _pyc_comb_dirty is not declared when the function has no
+        // combs. Commit directly.
+        os << "      " << loop << ".direct_commit();\n";
+        continue;
+      }
       std::string wake = "_pyc_fused_wake_" + loop;
       os << "      static constexpr pyc::cpp::FusedLaneWake<"
          << wakeOffsets.size() - 1 << ", " << wakeEntries.size() << "> "
          << wake << "{{{";
       llvm::interleaveComma(wakeOffsets, os,
                             [&](unsigned o) { os << o << "u"; });
-      if (wakeEntries.empty()) {
-        // std::array<T, 0> initializes from {} — no element braces.
-        os << "}},{{}}};\n";
-      } else {
-        os << "}},{{";
-        llvm::interleaveComma(wakeEntries, os, [&](const auto &e) {
-          os << "{" << e.first << "u, 0x" << llvm::utohexstr(e.second)
-             << "ull}";
-        });
-        os << "}}};\n";
-      }
+      os << "}},{{";
+      llvm::interleaveComma(wakeEntries, os, [&](const auto &e) {
+        os << "{" << e.first << "u, 0x" << llvm::utohexstr(e.second)
+           << "ull}";
+      });
+      os << "}}};\n";
       os << "      " << wake << ".apply(" << loop
          << ".direct_commit(), _pyc_comb_dirty);\n";
     }
