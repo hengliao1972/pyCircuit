@@ -946,6 +946,8 @@ class Module:
             self._finalized = True
             for fn in list(self._finalizers):
                 fn()
+            # After user/queue finalizers so late assigns can still be folded.
+            self._after_finalizers()
 
         arg_sig = ", ".join(f"{sig.ref}: {sig.ty}" for _, sig in self._args)
         res_types = [v.ty for _, v in self._results]
@@ -979,6 +981,10 @@ class Module:
         return "module {\n" + self.emit_func_mlir() + "}\n"
 
     # --- finalizers ---
+    def _after_finalizers(self) -> None:
+        """Hook for Circuit to emit folded assigns after other finalizers."""
+        return
+
     def add_finalizer(self, fn: Callable[[], None]) -> None:
         if self._finalized:
             raise RuntimeError("cannot add finalizers after emit_mlir()")

@@ -1,5 +1,7 @@
 #include "pyc/Emit/VerilogEmitter.h"
 
+#include "pyc/Emit/WireDriverCheck.h"
+
 #include "pyc/Dialect/PYC/PYCOps.h"
 #include "pyc/Dialect/PYC/PYCTypes.h"
 
@@ -913,6 +915,8 @@ static bool topoSortCombOps(ArrayRef<Operation *> ops, NameTable &nt, llvm::Smal
 
 static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmitterOptions &opts) {
   (void)opts;
+  if (failed(rejectMultipleWireDrivers(f)))
+    return failure();
   NameTable nt;
   std::vector<std::string> outNames;
   outNames.reserve(f.getNumResults());

@@ -30,6 +30,15 @@ All frontend-emitted `.pyc` files are stamped with a required module attribute:
 
 If the backend sees a missing/mismatched contract marker, `pycc` fails early.
 
+## Multiple wire drivers
+
+`Circuit.assign` / `Reg.set` fold successive updates in the frontend: one
+`pyc.assign` per destination (`when=` accumulates a mux chain; plain
+`m.assign` last-write-wins). A leftover multi-`pyc.assign` on the same wire
+in IR is rejected by the C++ and Verilog emitters
+(`has multiple drivers for the same wire`). Remaining true multi-drive must
+use an explicit net (Decision 0137).
+
 ## Useful commands
 
 Run hygiene scan (from repository root):
