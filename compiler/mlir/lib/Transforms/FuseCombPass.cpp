@@ -14,6 +14,9 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 
+#include <map>
+#include <numeric>
+
 using namespace mlir;
 
 namespace pyc {
@@ -152,6 +155,130 @@ static void hoistSources(Block &block) {
   }
 }
 
+// Ports and delay taps are polled on every pass by each comb reading them.
+// Read them through one comb instead, so the other combs wake on dirty bits.
+static void latchPolledInputs(ArrayRef<Operation *> run) {
+  llvm::SetVector<Value> polled;
+  for (Operation *op : run)
+    for (Value v : op->getOperands())
+      if ((!v.getDefiningOp() || v.getDefiningOp<pyc::DelayTapOp>()) &&
+          isa<IntegerType, VectorType>(v.getType()))
+        polled.insert(v);
+  if (polled.empty())
+    return;
+  OpBuilder builder(run.front());
+  auto latch = builder.create<pyc::CombOp>(
+      run.front()->getLoc(), ValueRange(polled.getArrayRef()).getTypes(), polled.getArrayRef());
+  Block *body = new Block();
+  latch.getBody().push_back(body);
+  for (Value v : polled)
+    body->addArgument(v.getType(), latch.getLoc());
+  OpBuilder::atBlockEnd(body).create<pyc::YieldOp>(latch.getLoc(), body->getArguments());
+  llvm::DenseSet<Operation *> inRun(run.begin(), run.end());
+  for (auto [i, v] : llvm::enumerate(polled))
+    Value(v).replaceUsesWithIf(latch.getResult(i),
+                               [&](OpOperand &use) { return inRun.contains(use.getOwner()); });
+}
+
+// Split a combinational run into groups that wake on their own inputs, and
+// lay them out before `end`, adding each group's first op to cuts.  Ops are
+// grouped by the set of run inputs they read through any path.  An operand
+// reads a subset of what its user reads, so ordering groups by set size and
+// then id is topological.  A group whose users, or whose operands, all lie
+// in one other group then joins it under that group's key, which keeps the
+// order topological; visiting groups from the far side keeps each one's
+// edges complete at its turn.
+static void splitRun(ArrayRef<Operation *> run, Operation *end,
+                     llvm::DenseSet<Operation *> &cuts) {
+  if (run.size() < 2)
+    return;
+  latchPolledInputs(run);
+  std::map<std::vector<unsigned>, unsigned> sigIds;
+  std::vector<const std::vector<unsigned> *> sigs;
+  llvm::DenseMap<Value, unsigned> inputs;
+  llvm::DenseMap<Operation *, unsigned> group;
+  for (Operation *op : run) {
+    std::vector<unsigned> sig, one, merged;
+    for (Value v : op->getOperands()) {
+      Operation *def = v.getDefiningOp();
+      if (def && isa<pyc::ConstantOp>(def))
+        continue;
+      auto it = group.find(def);
+      if (it == group.end())
+        one = {inputs.try_emplace(v, inputs.size()).first->second};
+      const std::vector<unsigned> &add = it == group.end() ? one : *sigs[it->second];
+      merged.clear();
+      std::set_union(sig.begin(), sig.end(), add.begin(), add.end(),
+                     std::back_inserter(merged));
+      sig.swap(merged);
+    }
+    auto [it, fresh] = sigIds.try_emplace(std::move(sig), sigs.size());
+    if (fresh)
+      sigs.push_back(&it->first);
+    group[op] = it->second;
+  }
+
+  unsigned n = sigs.size();
+  std::vector<unsigned> parent(n);
+  std::iota(parent.begin(), parent.end(), 0);
+  llvm::SmallVector<std::pair<unsigned, unsigned>> edges;
+  for (Operation *op : run)
+    for (Value v : op->getOperands())
+      if (auto it = group.find(v.getDefiningOp()); it != group.end() && it->second != group[op])
+        edges.emplace_back(it->second, group[op]);
+  auto find = [&](unsigned g) {
+    while (parent[g] != g)
+      g = parent[g] = parent[parent[g]];
+    return g;
+  };
+  auto key = [&](unsigned g) { return std::make_pair(sigs[g]->size(), g); };
+  auto joinSole = [&](bool toUser) {
+    std::vector<llvm::SmallVector<unsigned, 2>> next(n);
+    for (auto [from, to] : edges)
+      if (unsigned a = find(from), b = find(to); a != b)
+        toUser ? next[a].push_back(b) : next[b].push_back(a);
+    llvm::SmallVector<unsigned> roots;
+    for (unsigned g = 0; g < n; ++g)
+      if (find(g) == g)
+        roots.push_back(g);
+    llvm::sort(roots, [&](unsigned a, unsigned b) { return (key(a) < key(b)) != toUser; });
+    for (unsigned g : roots) {
+      if (next[g].empty())
+        continue;
+      unsigned to = find(next[g].front());
+      if (llvm::all_of(next[g], [&](unsigned u) { return find(u) == to; }))
+        parent[g] = to;
+    }
+  };
+  joinSole(true);
+  joinSole(false);
+
+  llvm::SmallVector<std::pair<std::pair<size_t, unsigned>, unsigned>> order;
+  for (auto [i, op] : llvm::enumerate(run))
+    order.emplace_back(key(find(group[op])), i);
+  llvm::sort(order);
+  for (auto [i, entry] : llvm::enumerate(order)) {
+    Operation *op = run[entry.second];
+    op->moveBefore(end);
+    if (i == 0 || order[i - 1].first != entry.first)
+      cuts.insert(op);
+  }
+}
+
+static llvm::DenseSet<Operation *> splitRuns(Block &block) {
+  llvm::DenseSet<Operation *> cuts;
+  llvm::SmallVector<Operation *> run;
+  for (Operation &op : llvm::make_early_inc_range(block)) {
+    if (isFusableCombOp(&op)) {
+      run.push_back(&op);
+      continue;
+    }
+    splitRun(run, &op, cuts);
+    run.clear();
+  }
+  return cuts;
+}
+
 struct FuseCombPass : public PassWrapper<FuseCombPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(FuseCombPass)
 
@@ -170,11 +297,11 @@ struct FuseCombPass : public PassWrapper<FuseCombPass, OperationPass<func::FuncO
     for (Block &b : f.getBody()) {
       detachObservationAttrs(b);
       hoistSources(b);
-      fuseBlock(b);
+      fuseBlock(b, splitRuns(b));
     }
   }
 
-  void fuseBlock(Block &block) {
+  void fuseBlock(Block &block, const llvm::DenseSet<Operation *> &cuts) {
     llvm::SmallVector<Operation *> run;
     llvm::DenseSet<Operation *> inRun;
 
@@ -205,7 +332,7 @@ struct FuseCombPass : public PassWrapper<FuseCombPass, OperationPass<func::FuncO
 
     for (Operation &op : llvm::make_early_inc_range(block)) {
       if (isFusableCombOp(&op)) {
-        if (readsWireDrivenInRun(&op))
+        if (cuts.contains(&op) || readsWireDrivenInRun(&op))
           flushRun();
         run.push_back(&op);
         inRun.insert(&op);

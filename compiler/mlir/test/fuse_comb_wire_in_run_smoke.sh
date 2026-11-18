@@ -15,7 +15,7 @@ fi
   --pyc-fuse-comb | python3 -c '
 import sys
 ir = sys.stdin.read()
-if ir.count("pyc.comb(") != 2:
+if ir.count("pyc.comb(") != 3:
     raise SystemExit(f"fail: run was not cut at the wire read\n{ir}")
 '
 

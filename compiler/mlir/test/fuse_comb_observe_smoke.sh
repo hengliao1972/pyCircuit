@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Gate for fuse-comb barriers: a broadcast, an observed name or a state op must not split
-# a run; the name moves to a leaf alias of the fused result.
+# a run; the name moves to a leaf alias of the fused result.  Ports enter
+# through a leading comb that only forwards them.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -16,11 +17,11 @@ fi
 import re, sys
 ir = sys.stdin.read()
 combs = ir.count("pyc.comb(")
-body = re.search(r"pyc\.comb\(.*?\n    \}", ir, re.S).group(0)
-if (combs != 1 or body.count("pyc.not") != 3 or "v_broadcast_dim" not in body
+body = re.findall(r"pyc\.comb\(.*?\n    \}", ir, re.S)[-1]
+if (combs != 2 or body.count("pyc.not") != 3 or "v_broadcast_dim" not in body
         or "pyc.alias" in body):
     raise SystemExit(f"fail: run did not fuse into one comb\n{ir}")
-leaves = re.findall(r"pyc\.alias %0#\d+ \{pyc\.name = \"(\w+)\"\}", ir)
+leaves = re.findall(r"pyc\.alias %\d+#\d+ \{pyc\.name = \"(\w+)\"\}", ir)
 if sorted(leaves) != ["fwd", "mid"] or ir.count("pyc.alias") != 2:
     raise SystemExit(f"fail: names are not leaf aliases\n{ir}")
 '
@@ -30,7 +31,7 @@ if sorted(leaves) != ["fwd", "mid"] or ir.count("pyc.alias") != 2:
 import re, sys
 ir = sys.stdin.read()
 reg = re.search(r"= pyc\.reg %\w+, %\w+, (%\d+), (%\d+), (%\d+)", ir)
-ok = (ir.count("pyc.comb(") == 1 and reg and ir.index("pyc.reg") < ir.index("pyc.comb(")
+ok = (ir.count("pyc.comb(") == 2 and reg and ir.index("pyc.reg") < ir.index("pyc.comb(")
       and re.search(reg.group(2) + r" = pyc\.wire", ir)
       and all(re.search(reg.group(i) + r" = pyc\.constant", ir) for i in (1, 3))
       and "pyc.constant" in ir[ir.index("pyc.comb("):])

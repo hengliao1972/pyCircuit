@@ -242,6 +242,8 @@ jobs:
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
             bash compiler/mlir/test/fuse_comb_wire_in_run_smoke.sh
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+            bash compiler/mlir/test/fuse_comb_split_smoke.sh
+          PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
             bash compiler/mlir/test/fuse_comb_observe_smoke.sh
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
             bash compiler/mlir/test/state_delay_chain_smoke.sh
