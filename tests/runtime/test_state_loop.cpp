@@ -145,7 +145,6 @@ int main() {
     // The dirty bitmaps are consumed in place by the wake walk in generated
     // code; this test reads them directly, so reset them explicitly.
     regLoop.clearDirty();
-    mixedLoop.clearDirty();
     fusedLoop.clearDirty();
   }
 
@@ -171,9 +170,16 @@ int main() {
           dirty[b >> 6] |= std::uint64_t{1} << (b & 63);
       }
       pyc::cpp::DirtyBitset<96 * 64> a{}, b{};
+      const std::vector<std::uint64_t> roundDirty = dirty;
       wake.apply(dirty, a);
+      // Consuming wake: the bitmap must be fully cleared after apply.
+      for (std::size_t w = 0; w < dirty.size(); ++w)
+        if (dirty[w] != 0) {
+          std::fprintf(stderr, "FLAT WAKE NOT CONSUMED round %d\n", round);
+          return 1;
+        }
       for (unsigned l = 0; l < kLanes; ++l)
-        if (dirty[l >> 6] >> (l & 63) & 1)
+        if (roundDirty[l >> 6] >> (l & 63) & 1)
           b.markWordUnchecked(wake.entries[l].first, wake.entries[l].second);
       if (a.count() != b.count()) {
         std::fprintf(stderr, "FLAT WAKE MISMATCH round %d\n", round);

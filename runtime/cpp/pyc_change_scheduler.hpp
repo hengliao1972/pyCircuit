@@ -170,8 +170,11 @@ template <std::size_t Lanes>
 struct FlatLaneWake {
   std::array<std::pair<unsigned, std::uint64_t>, Lanes> entries{};
 
+  // Consuming wake, same contract as FusedLaneWake::apply: every dirty
+  // word is cleared as it is read, so the producing loop (RegLoop::
+  // commit/direct_commit) does not memset the bitmap up front.
   template <std::size_t Capacity>
-  void apply(const std::vector<std::uint64_t> &dirty,
+  void apply(std::vector<std::uint64_t> &dirty,
              DirtyBitset<Capacity> &comb) const noexcept {
     constexpr std::size_t kWords = (Lanes + 63) / 64;
     // Bits above Lanes in the last word address no entry; mask them so
@@ -183,6 +186,7 @@ struct FlatLaneWake {
       const std::uint64_t wordMask =
           (w + 1 == kWords) ? kValidBits : ~std::uint64_t{0};
       const std::uint64_t bits = dirty[w] & wordMask;
+      dirty[w] = 0;
       if (bits == 0)
         continue;
       const unsigned base = static_cast<unsigned>(w * 64);
