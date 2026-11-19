@@ -56,10 +56,10 @@ def main() -> None:
                         raise AssertionError(
                             f"{source}: fused wake missing table-driven walk")
                 for line in text.splitlines():
-                    if "FusedLaneWake" in line and \
+                    if "LaneWake" in line and \
                             line.count("{") != line.count("}"):
                         raise AssertionError(
-                            f"{source}: unbalanced FusedLaneWake table line")
+                            f"{source}: unbalanced LaneWake table line")
                 # The phased commit walk is table-driven too: no per-lane
                 # emitted dirty tests on a reg loop's commit bitmap remain.
                 if mode == "loop" and "_pyc_loop_dirty_" in text:

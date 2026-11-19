@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "pyc_bits.hpp"
+#include "pyc_change_scheduler.hpp"
 #include "pyc_primitives.hpp"
 #include "pyc_state_loop.hpp"
 
@@ -140,6 +141,39 @@ int main() {
     if (ref.v != loop.v) {
       std::fprintf(stderr, "VALUE MISMATCH cycle %u\n", c);
       return 1;
+    }
+  }
+
+  // FlatLaneWake: single-fanout dispatch wake must mark exactly what a
+  // naive per-lane walk marks, across empty / all-ones / mixed words
+  // (130 lanes covers a partial last word).
+  {
+    constexpr unsigned kLanes = 130;
+    pyc::cpp::FlatLaneWake<kLanes> wake{};
+    for (unsigned i = 0; i < kLanes; ++i)
+      wake.entries[i] = {(i * 7u) % 96u, std::uint64_t{1} << (i % 64)};
+    std::mt19937_64 rng(7);
+    const std::size_t words = (kLanes + 63) / 64;
+    for (int round = 0; round < 200; ++round) {
+      std::vector<std::uint64_t> dirty(words, 0);
+      const unsigned mode = round % 4;
+      for (unsigned b = 0; b < kLanes; ++b) {
+        const bool set = mode == 0   ? false
+                         : mode == 1 ? true
+                         : mode == 2 ? (b % 2) == 0
+                                     : (rng() & 1);
+        if (set)
+          dirty[b >> 6] |= std::uint64_t{1} << (b & 63);
+      }
+      pyc::cpp::DirtyBitset<96 * 64> a{}, b{};
+      wake.apply(dirty, a);
+      for (unsigned l = 0; l < kLanes; ++l)
+        if (dirty[l >> 6] >> (l & 63) & 1)
+          b.markWordUnchecked(wake.entries[l].first, wake.entries[l].second);
+      if (a.count() != b.count()) {
+        std::fprintf(stderr, "FLAT WAKE MISMATCH round %d\n", round);
+        return 1;
+      }
     }
   }
 
