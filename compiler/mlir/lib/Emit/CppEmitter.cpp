@@ -4446,10 +4446,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   for (int64_t loopId : fusedRegLoopIds)
     os << "    " << regLoopName(loopId) << ".retire();\n";
   // RegLoop commit: per-lane dirty bitmap keeps the change-driven wake as
-  // precise as the per-reg path. The wake itself is table-driven (same
-  // constexpr FusedLaneWake shape as the fused walk): commit()'s bitmap
-  // feeds one set-bit iteration over per-lane fanout tables, replacing one
-  // emitted branch per lane.
+  // precise as the per-reg path.
   for (int64_t loopId : phasedRegLoopIds) {
     std::string loop = regLoopName(loopId);
     llvm::SmallVector<unsigned> wakeOffsets;
@@ -4460,20 +4457,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     wakeOffsets.push_back(wakeEntries.size());
     if (wakeEntries.empty()) {
-      // Same zero-fanout guard as the fused walk: no combs fed means no
-      // _pyc_comb_dirty reference (it is only declared when the function
-      // has combs) and the table would be dead code. Commit directly.
       os << "    " << loop << ".commit();\n";
       continue;
     }
     std::string wake = "_pyc_commit_wake_" + loop;
     const unsigned laneCount = wakeOffsets.size() - 1;
     if (wakeEntries.size() == laneCount) {
-      // Exactly one fanout entry per lane (the common phased-loop shape):
-      // drop the offsets indirection entirely — the flat table is indexed
-      // by lane and its apply dispatches per 64-lane word (empty skip /
-      // all-ones stream / set-bit walk), which keeps dense bitmaps within
-      // ~8% of per-lane emission while sparse bitmaps stay ~25x faster.
       os << "    static constexpr pyc::cpp::FlatLaneWake<" << laneCount
          << "> " << wake << "{{{";
       llvm::interleaveComma(wakeEntries, os, [&](const auto &e) {
@@ -4482,8 +4471,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       });
       os << "}}};\n";
     } else {
-      // Some lane fans out to several combs (or none): keep the
-      // offsets/entries form that supports variable per-lane fanout.
       os << "    static constexpr pyc::cpp::FusedLaneWake<" << laneCount
          << ", " << wakeEntries.size() << "> " << wake << "{{{";
       llvm::interleaveComma(wakeOffsets, os,
