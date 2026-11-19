@@ -226,6 +226,8 @@ private:
     return (rem == 0) ? 8 : rem;
   }
 
+public:
+  // Byte-strobe merge, exposed for the runtime equivalence test.
   static constexpr Wire<DataWidth> applyStrb(Wire<DataWidth> oldV, Wire<DataWidth> newV, Wire<StrbWidth> strb) {
     if constexpr (DataWidth <= 64) {
       std::uint64_t out = oldV.value();
@@ -267,6 +269,7 @@ private:
     return v;
   }
 
+private:
   std::array<Wire<DataWidth>, DepthEntries> mem_{};
 
   bool watch_enabled_ = false;
