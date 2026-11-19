@@ -275,3 +275,4 @@ docs/gates
 /eda/scripts/
 /eda/designs/
 /eda/tests/
+.local-bin/
