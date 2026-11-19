@@ -1054,7 +1054,6 @@ int main() {
 
   // ---- sync_mem: entry-addressed ----
   Wire<1> clk(0);
-  Wire<1> rst(0);
   Wire<1> ren(0);
   Wire<8> raddr(0);
   Wire<32> rdata(0);
@@ -1063,7 +1062,7 @@ int main() {
   Wire<32> wdata(0);
   Wire<4> wstrb(0);
 
-  pyc_sync_mem<8, 32, 16> sm(clk, rst, ren, raddr, rdata, wvalid, waddr, wdata, wstrb);
+  pyc_sync_mem<8, 32, 16> sm(clk, ren, raddr, rdata, wvalid, waddr, wdata, wstrb);
   sm.pokeEntry(3, 0x11223344u);
 
   const std::uint64_t h0 = sm.mem_hash();
@@ -1130,7 +1129,7 @@ int main() {
   Wire<32> bwdata(0);
   Wire<4> bwstrb(0);
 
-  pyc_byte_mem<8, 32, 64> bm(clk, rst, braddr, brdata, bwvalid, bwaddr, bwdata, bwstrb);
+  pyc_byte_mem<8, 32, 64> bm(clk, braddr, brdata, bwvalid, bwaddr, bwdata, bwstrb);
   bm.mem_watch(0, 63);
 
   // Force a read recompute after enabling watch.

@@ -27,7 +27,8 @@ static bool isResetType(Type t) { return isa<pyc::ResetType>(t); }
 static bool isIntType(Type t) { return isa<IntegerType>(t); }
 
 static bool isSequentialCut(Operation *op) {
-  return isa<pyc::RegOp, pyc::FifoOp, pyc::ByteMemOp, pyc::SyncMemOp, pyc::SyncMemDPOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op);
+  return isa<pyc::RegOp, pyc::DelayLineOp, pyc::FifoOp, pyc::ByteMemOp, pyc::SyncMemOp,
+             pyc::SyncMemDPOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op);
 }
 
 struct FuncClockSummary {
@@ -171,6 +172,12 @@ public:
         // Sequential cut points define clock domains.
         if (auto r = dyn_cast<pyc::RegOp>(def)) {
           out = domOfClock(r.getClk());
+          domVisiting_.erase(v);
+          domMemo_.try_emplace(v, out);
+          return out;
+        }
+        if (auto delay = dyn_cast<pyc::DelayLineOp>(def)) {
+          out = domOfClock(delay.getClk());
           domVisiting_.erase(v);
           domMemo_.try_emplace(v, out);
           return out;
@@ -578,6 +585,10 @@ public:
     func.walk([&](Operation *op) {
       if (auto r = dyn_cast<pyc::RegOp>(op)) {
         checkSampled(op, r.getClk(), {r.getEn(), r.getNext(), r.getInit()});
+        return;
+      }
+      if (auto delay = dyn_cast<pyc::DelayLineOp>(op)) {
+        checkSampled(op, delay.getClk(), {delay.getEn(), delay.getNext(), delay.getInit()});
         return;
       }
       if (auto f = dyn_cast<pyc::FifoOp>(op)) {
