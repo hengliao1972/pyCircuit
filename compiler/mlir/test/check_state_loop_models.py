@@ -60,6 +60,11 @@ def main() -> None:
                             line.count("{") != line.count("}"):
                         raise AssertionError(
                             f"{source}: unbalanced FusedLaneWake table line")
+                # The phased commit walk is table-driven too: no per-lane
+                # emitted dirty tests on a reg loop's commit bitmap remain.
+                if mode == "loop" and "_pyc_loop_dirty_" in text:
+                    raise AssertionError(
+                        f"{source}: stale per-lane reg loop commit walk")
                 binary = temp / f"{source}.{mode}.bin"
                 compile_cpp(args.cxx, header, binary, HERE / driver)
                 outputs[mode] = result([str(binary)])
