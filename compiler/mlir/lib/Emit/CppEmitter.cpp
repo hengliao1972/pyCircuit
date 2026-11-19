@@ -2492,10 +2492,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   if (fastEdge) {
     os << "  bool _pyc_clk_prev = false;\n";
     os << "  bool _pyc_seq_armed = false;\n";
-    // Fall-commit gate: when tick_commit runs after only a falling edge (no
-    // preceding rise/unchanged tick_compute on this module), every local
-    // reg/delay-line has pending==0, so the walk is a no-op. tick_compute
-    // arms the flag; tick_commit consumes it.
     os << "  bool _pyc_commit_needed = false;\n";
   }
   for (auto delay : delayLines) {
@@ -4402,9 +4398,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                            (indent + "  ").str());
     os << indent << "}\n";
   };
-  // fall-commit-gate: on a falling edge the local reg/delay walk is
-  // provably empty (the rising tick_commit consumed every pending bit and
-  // _pyc_seq_armed), so wrap only this module's local walk in a flag check.
   const bool gateLocalCommit = fastEdge;
   if (gateLocalCommit) {
     os << "    if (_pyc_commit_needed) {\n";
