@@ -72,6 +72,14 @@ public:
         regBits = satAddMul(regBits, hardwareBitCount(r.getQ().getType()), 1);
         return;
       }
+      if (auto delay = dyn_cast<pyc::DelayLineOp>(op)) {
+        // An IR delay line is compact syntax, not one hardware register.
+        // Preserve resource accounting by charging every logical stage.
+        int64_t depth = depthAttr(op);
+        regCount = satAddMul(regCount, depth, 1);
+        regBits = satAddMul(regBits, hardwareBitCount(delay.getQ().getType()), depth);
+        return;
+      }
 
       auto addMem = [&](Type dataTy) {
         memCount += 1;
