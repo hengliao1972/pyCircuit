@@ -1,7 +1,9 @@
 #include "pyc_change_scheduler.hpp"
+#include "pyc_sync_mem.hpp"
 
 #include <cassert>
 #include <cstdint>
+#include <random>
 #include <vector>
 
 using pyc::cpp::DirtyBitset;
@@ -68,8 +70,50 @@ void testFusedLaneWake() {
 
 } // namespace
 
+// The word-mask applyStrb must reproduce the strobe semantics bit-by-bit:
+// lane i covers 8*i..8*i+bits(i); a set strobe bit takes newV's lane, a
+// clear one keeps oldV's. Random strobes/values over widths that exercise
+// the <=64 fast path, the >64 word path, and a trailing partial lane.
+template <unsigned Width>
+void checkApplyStrbWidth(std::mt19937_64 &rng) {
+  using Mem = pyc::cpp::pyc_sync_mem<4, Width, 4>;
+  constexpr unsigned kStrbWidth = Mem::StrbWidth;
+  using D = pyc::cpp::Wire<Width>;
+  using S = pyc::cpp::Wire<kStrbWidth>;
+  for (int round = 0; round < 300; ++round) {
+    D oldV(0), newV(0);
+    for (unsigned b = 0; b < Width; ++b) {
+      if (rng() & 1) oldV = pyc::cpp::detail::setBit(oldV, b);
+      if (rng() & 1) newV = pyc::cpp::detail::setBit(newV, b);
+    }
+    S strb(0);
+    for (unsigned i = 0; i < kStrbWidth; ++i) {
+      if (rng() & 1)
+        strb = pyc::cpp::detail::setBit(strb, i);
+    }
+    const D got = Mem::applyStrb(oldV, newV, strb);
+    for (unsigned b = 0; b < Width; ++b) {
+      const unsigned lane = b / 8;
+      const bool laneOn = strb.bit(lane);
+      const bool expect = laneOn ? newV.bit(b) : oldV.bit(b);
+      assert(got.bit(b) == expect);
+    }
+  }
+}
+
+void testSyncMemApplyStrb() {
+  std::mt19937_64 rng(1234);
+  checkApplyStrbWidth<16u>(rng);   // single word, <=64 fast path
+  checkApplyStrbWidth<64u>(rng);   // exactly one word, full lanes
+  checkApplyStrbWidth<72u>(rng);   // two words, trailing partial lane
+  checkApplyStrbWidth<128u>(rng);  // two full words
+  checkApplyStrbWidth<520u>(rng);  // nine words, partial lane
+  checkApplyStrbWidth<1024u>(rng); // sixteen full words
+}
+
 int main() {
   testDirtyBitset();
   testFusedLaneWake();
+  testSyncMemApplyStrb();
   return 0;
 }
