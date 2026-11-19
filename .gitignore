@@ -275,4 +275,7 @@ docs/gates
 /eda/scripts/
 /eda/designs/
 /eda/tests/
+# local A/B artifacts (fall-commit-gate)
+.cppircuit_out/
 .local-bin/
+cpp-ab/
