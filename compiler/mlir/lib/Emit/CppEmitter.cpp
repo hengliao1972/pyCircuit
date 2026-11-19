@@ -4449,27 +4449,41 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   // precise as the per-reg path.
   for (int64_t loopId : phasedRegLoopIds) {
     std::string loop = regLoopName(loopId);
-    os << "    const auto &_pyc_loop_dirty_" << regLoopId(loopId) << " = " << loop
-       << ".commit();\n";
-    unsigned lane = 0;
+    llvm::SmallVector<unsigned> wakeOffsets;
+    llvm::SmallVector<std::pair<unsigned, uint64_t>> wakeEntries;
     for (pyc::RegOp r : regLoopRegs[loopId]) {
-      // Named per-lane commit-changed alias keeps the comb-dirty smoke
-      // assertions meaningful under the loop lowering (same pattern as the
-      // per-reg path); the condition is unchanged.
-      std::string changed =
-          "_pyc_commit_changed_" + nt.get(r.getQ()) + "_inst";
-      const std::string word = "_pyc_loop_dirty_" + regLoopId(loopId) +
-                               "[" + std::to_string(lane >> 6) + "u]";
-      openLaneWord(lane, word);
-      os << "      const bool " << changed << " = ((" << word << " >> "
-         << (lane & 63) << "u) & 1u);\n";
-      os << "      if (" << changed << ") {\n";
-      emitMetadataCombFanout(r.getQ(), os, *schedule, combIndex, nt, "        ");
-      os << "      }\n";
-      ++lane;
+      wakeOffsets.push_back(wakeEntries.size());
+      collectFanoutWordMasks(r.getQ(), *schedule, combIndex, wakeEntries);
     }
-    if (lane)
-      os << "    }\n";
+    wakeOffsets.push_back(wakeEntries.size());
+    if (wakeEntries.empty()) {
+      os << "    " << loop << ".commit();\n";
+      continue;
+    }
+    std::string wake = "_pyc_commit_wake_" + loop;
+    const unsigned laneCount = wakeOffsets.size() - 1;
+    if (wakeEntries.size() == laneCount) {
+      os << "    static constexpr pyc::cpp::FlatLaneWake<" << laneCount
+         << "> " << wake << "{{{";
+      llvm::interleaveComma(wakeEntries, os, [&](const auto &e) {
+        os << "{" << e.first << "u, 0x" << llvm::utohexstr(e.second)
+           << "ull}";
+      });
+      os << "}}};\n";
+    } else {
+      os << "    static constexpr pyc::cpp::FusedLaneWake<" << laneCount
+         << ", " << wakeEntries.size() << "> " << wake << "{{{";
+      llvm::interleaveComma(wakeOffsets, os,
+                            [&](unsigned o) { os << o << "u"; });
+      os << "}},{{";
+      llvm::interleaveComma(wakeEntries, os, [&](const auto &e) {
+        os << "{" << e.first << "u, 0x" << llvm::utohexstr(e.second)
+           << "ull}";
+      });
+      os << "}}};\n";
+    }
+    os << "    " << wake << ".apply(" << loop
+       << ".commit(), _pyc_comb_dirty);\n";
   }
   for (auto r : regs) {
     std::string key = nt.get(r.getQ()) + "_inst";
