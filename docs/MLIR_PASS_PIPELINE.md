@@ -32,7 +32,7 @@
 | 14 | `pyc-unroll-vector` | function | 将 Vector 计算、连接和状态展开为标量 lane 操作。 | `--unroll-vector` |
 | 15 | `pyc-eliminate-wires` | function | 消除可直接替换的 `pyc.wire` / `pyc.assign` 中间连接。 | 始终 |
 | 16 | `pyc-eliminate-dead-state` | function | 删除对可观察行为无影响的寄存器、存储等状态；带外部可读身份的状态视为活。 | 始终 |
-| 17 | `pyc-state-optimize` | function | 统一结构化状态优化（仅 C++）：死状态清理 → retiming（pass 内 canonicalize+CSE）→ 死状态清理 → 直连 delay-line/tap 成链与等价 history 共享。被删状态的 name/debug/probe/trace 身份全程挂到 survivor 的只读 alias。 | `--emit=cpp` |
+| 17 | `pyc-state-optimize` | function | 统一结构化状态优化（仅 C++）：死状态清理 → DFS 归并 retiming（分叉公共级数上游化、额外级数贴分支，含预算守卫退化）→ retiming（pass 内 canonicalize+CSE）→ 死状态清理 → 直连 delay-line/tap 成链与等价 history 共享。被删状态的 name/debug/probe/trace 身份全程挂到 survivor 的只读 alias。 | `--emit=cpp` |
 | 18 | `pyc-slp-pack-wires` | function | 将可识别的同构标量 lane 重新打包成 Vector 操作。 | 未启用 `--unroll-vector` |
 | 19 | `pyc-comb-canonicalize` | function | PYC 组合图结构化简（mux、wire、get/create 重建）并将结构化 Vec 拆成 lane 级运算，使 dialect folder 能折叠可知 lane。 | 始终 |
 | 20 | `pyc-check-comb-cycles` | module | 构建组合依赖图并拒绝组合环。 | 始终 |

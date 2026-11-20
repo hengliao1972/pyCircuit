@@ -251,6 +251,9 @@ jobs:
             bash compiler/mlir/test/state_retime_smoke.sh
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
           PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            bash compiler/mlir/test/fork_merge_retime_smoke.sh
+          PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
             bash compiler/mlir/test/state_codegen_smoke.sh
           PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
           PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \

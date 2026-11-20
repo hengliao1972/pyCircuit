@@ -48,6 +48,11 @@ std::unique_ptr<::mlir::Pass> createVectorUnrollPass();
 /// Phase runners shared with the unified StateOptimizePass. Defined next to
 /// the passes whose cores they drive.
 void runRetimePipelines(::mlir::func::FuncOp function);
+/// DFS-merge retiming: share the common register stages of each fork
+/// upstream and leave extra stages on the branch edge. See
+/// docs/reg_upstream_dfs_merge_plan.md.
+void runForkMergeRetime(::mlir::func::FuncOp function);
+std::unique_ptr<::mlir::Pass> createForkMergeRetimePass();
 void runDelayChainFormAndShare(::mlir::func::FuncOp function);
 void runEliminateDeadState(::mlir::func::FuncOp function);
 

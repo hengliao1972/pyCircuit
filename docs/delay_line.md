@@ -21,7 +21,7 @@ frontend 为平衡周期插入的 `_v5_bal_*` 串行寄存器链，在 C++ model
 
 ## 3. `pyc-state-optimize` 流程（仅 `--emit=cpp`）
 
-`pyc-eliminate-dead-state` → `pyc-retime-pipelines` → canonicalize+CSE（pass 内）→
+`pyc-eliminate-dead-state` → `pyc-fork-merge-retime` → `pyc-retime-pipelines` → canonicalize+CSE（pass 内）→
 `pyc-eliminate-dead-state` → `pyc-combine-delay-chains`（成链 + 等价 history 共享）。
 
 - **成链**：`consumer.next` 只经透明 alias 到达前驱 `q`，且 clk/rst/en/init 等价；

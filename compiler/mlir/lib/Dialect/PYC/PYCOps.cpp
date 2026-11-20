@@ -46,7 +46,11 @@ ParseResult ConstantOp::parse(OpAsmParser &parser, OperationState &result) {
 }
 
 void ConstantOp::print(OpAsmPrinter &p) {
-  p << " " << getValueAttr().getValue().getZExtValue() << " : " << getType();
+  // Unsigned decimal of any width: getZExtValue() asserts above 64 bits, and
+  // streaming the APInt would print it as a signed value.
+  llvm::SmallString<40> value;
+  getValueAttr().getValue().toStringUnsigned(value);
+  p << " " << value << " : " << getType();
 }
 
 OpFoldResult ConstantOp::fold(FoldAdaptor) { return getValueAttr(); }
