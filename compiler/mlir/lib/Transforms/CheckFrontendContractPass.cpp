@@ -355,8 +355,6 @@ public:
           llvm::StringRef opKind{};
           if (isa<pyc::ByteMemOp>(op))
             opKind = "byte_mem";
-          else if (isa<pyc::SyncMem2WOp>(op))
-            opKind = "sync_mem_2w";
           else if (isa<pyc::SyncMemNMOp>(op))
             opKind = "sync_mem_nm";
           else

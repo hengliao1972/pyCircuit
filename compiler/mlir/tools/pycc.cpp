@@ -902,7 +902,7 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
     }
 
     const auto syncMemNMs = collectMemNames([](Operation &op) {
-      return isa<pyc::SyncMemNMOp>(op) || isa<pyc::SyncMem2WOp>(op);
+      return isa<pyc::SyncMemNMOp>(op);
     });
     for (const auto &name : syncMemNMs) {
       ProbeManifestEntry e;
@@ -1130,7 +1130,6 @@ static LogicalResult emitPrimitivesFile(llvm::StringRef outPath, llvm::StringRef
       "pyc_reg.v",
       "pyc_fifo.v",
       "pyc_byte_mem.v",
-      "pyc_sync_mem_2w.v",
       "pyc_sync_mem_nm.v",
       "pyc_async_fifo.v",
       "pyc_cdc_sync.v",

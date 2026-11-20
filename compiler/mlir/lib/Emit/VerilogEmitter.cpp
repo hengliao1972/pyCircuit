@@ -796,11 +796,6 @@ static std::string opSortKey(Operation *op, NameTable &nt) {
       return sanitizeId(nameAttr.getValue());
     return nt.get(mem.getRdata());
   }
-  if (auto mem = dyn_cast<pyc::SyncMem2WOp>(op)) {
-    if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
-      return sanitizeId(nameAttr.getValue());
-    return nt.get(mem.getRdata());
-  }
   if (auto mem = dyn_cast<pyc::SyncMemNMOp>(op)) {
     if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
       return sanitizeId(nameAttr.getValue());
@@ -1069,7 +1064,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         seqInstOps.push_back(&op);
         continue;
       }
-      if (isa<pyc::SyncMem2WOp, pyc::SyncMemNMOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op)) {
+      if (isa<pyc::SyncMemNMOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op)) {
         seqInstOps.push_back(&op);
         continue;
       }
@@ -1311,38 +1306,6 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << ");\n";
         continue;
       }
-      if (auto mem = dyn_cast<pyc::SyncMem2WOp>(op)) {
-        auto addrTy = dyn_cast<IntegerType>(mem.getRaddr().getType());
-        auto dataTy = dyn_cast<IntegerType>(mem.getRdata().getType());
-        if (!addrTy || !dataTy)
-          return mem.emitError("verilog emitter only supports integer sync_mem_2w types");
-
-        auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
-        if (!depthAttr)
-          return mem.emitError("missing integer attribute `depth`");
-        auto depth = depthAttr.getValue().getZExtValue();
-
-        std::string inst = nt.get(mem.getRdata()) + "_inst";
-        if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
-          inst = sanitizeId(nameAttr.getValue());
-
-        os << "pyc_sync_mem_2w #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
-           << "), .DEPTH(" << depth << ")) " << inst << " (\n";
-        os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .ren(" << nt.get(mem.getRen()) << "),\n";
-        os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
-        os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
-        os << "  .wvalid0(" << nt.get(mem.getWvalid0()) << "),\n";
-        os << "  .waddr0(" << nt.get(mem.getWaddr0()) << "),\n";
-        os << "  .wdata0(" << nt.get(mem.getWdata0()) << "),\n";
-        os << "  .wstrb0(" << nt.get(mem.getWstrb0()) << "),\n";
-        os << "  .wvalid1(" << nt.get(mem.getWvalid1()) << "),\n";
-        os << "  .waddr1(" << nt.get(mem.getWaddr1()) << "),\n";
-        os << "  .wdata1(" << nt.get(mem.getWdata1()) << "),\n";
-        os << "  .wstrb1(" << nt.get(mem.getWstrb1()) << ")\n";
-        os << ");\n";
-        continue;
-      }
       if (auto mem = dyn_cast<pyc::SyncMemNMOp>(op)) {
         auto addrTy = dyn_cast<IntegerType>(mem.getRaddrs()[0].getType());
         auto dataTy = dyn_cast<IntegerType>(mem.getRdatas()[0].getType());
@@ -1451,7 +1414,6 @@ LogicalResult emitVerilog(ModuleOp module, llvm::raw_ostream &os, const VerilogE
     os << "`include \"pyc_reg.v\"\n";
     os << "`include \"pyc_fifo.v\"\n\n";
     os << "`include \"pyc_byte_mem.v\"\n\n";
-    os << "`include \"pyc_sync_mem_2w.v\"\n";
     os << "`include \"pyc_sync_mem_nm.v\"\n";
     os << "`include \"pyc_async_fifo.v\"\n";
     os << "`include \"pyc_cdc_sync.v\"\n\n";

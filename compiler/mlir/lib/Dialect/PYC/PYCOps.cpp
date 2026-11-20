@@ -1127,49 +1127,6 @@ LogicalResult ByteMemOp::verify() {
   return success();
 }
 
-LogicalResult SyncMem2WOp::verify() {
-  auto raddrTy = dyn_cast<IntegerType>(getRaddr().getType());
-  auto waddr0Ty = dyn_cast<IntegerType>(getWaddr0().getType());
-  auto waddr1Ty = dyn_cast<IntegerType>(getWaddr1().getType());
-  if (!raddrTy || !waddr0Ty || !waddr1Ty)
-    return emitOpError("only supports integer address types");
-  if (raddrTy != waddr0Ty || raddrTy != waddr1Ty)
-    return emitOpError("raddr/waddr0/waddr1 types must match");
-
-  auto data0Ty = dyn_cast<IntegerType>(getWdata0().getType());
-  auto data1Ty = dyn_cast<IntegerType>(getWdata1().getType());
-  auto rdataTy = dyn_cast<IntegerType>(getRdata().getType());
-  if (!data0Ty || !data1Ty || !rdataTy)
-    return emitOpError("only supports integer data types");
-  if (data0Ty != data1Ty || data0Ty != rdataTy)
-    return emitOpError("rdata type must match wdata types");
-
-  unsigned dataW = data0Ty.getWidth();
-  if (dataW == 0)
-    return emitOpError("data width must be >= 1");
-
-  auto strb0Ty = dyn_cast<IntegerType>(getWstrb0().getType());
-  auto strb1Ty = dyn_cast<IntegerType>(getWstrb1().getType());
-  if (!strb0Ty || !strb1Ty)
-    return emitOpError("only supports integer wstrb types");
-  if (strb0Ty.getWidth() != ((dataW + 7) / 8) ||
-      strb1Ty.getWidth() != ((dataW + 7) / 8))
-    return emitOpError("wstrb widths must be ceil(data_width / 8)");
-
-  auto depthAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
-  if (!depthAttr)
-    return emitOpError("requires integer attribute `depth` (entries)");
-  if (depthAttr.getValue().getSExtValue() <= 0)
-    return emitOpError("depth must be > 0");
-
-  if (auto nameAttr = (*this)->getAttrOfType<StringAttr>("name")) {
-    if (nameAttr.getValue().empty())
-      return emitOpError("name must be non-empty when provided");
-  }
-
-  return success();
-}
-
 LogicalResult SyncMemNMOp::verify() {
   auto rdAttr = (*this)->getAttrOfType<IntegerAttr>("rd_ports");
   auto wrAttr = (*this)->getAttrOfType<IntegerAttr>("wr_ports");

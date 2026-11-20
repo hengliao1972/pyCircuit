@@ -347,26 +347,6 @@ def PYC_ByteMemOp : PYC_Op<"byte_mem", [MemoryEffects<[MemRead, MemWrite]>,
   let assemblyFormat = "$clk `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
 }
 
-def PYC_SyncMem2WOp : PYC_Op<"sync_mem_2w", [MemoryEffects<[MemRead, MemWrite]>,
-                                              AllTypesMatch<["raddr", "waddr0", "waddr1"]>,
-                                              AllTypesMatch<["wdata0", "wdata1", "rdata"]>,
-                                              AllTypesMatch<["wstrb0", "wstrb1"]>]> {
-  let summary = "Synchronous 1R2W memory (dual-write, registered output; write port 1 wins same-address conflicts, prototype)";
-  let arguments = (ins PYC_ClockType:$clk,
-                        I1:$ren,
-                        AnyInteger:$raddr,
-                        I1:$wvalid0,
-                        AnyInteger:$waddr0,
-                        AnyInteger:$wdata0,
-                        AnyInteger:$wstrb0,
-                        I1:$wvalid1,
-                        AnyInteger:$waddr1,
-                        AnyInteger:$wdata1,
-                        AnyInteger:$wstrb1);
-  let results = (outs AnyInteger:$rdata);
-  let hasVerifier = 1;
-}
-
 def PYC_SyncMemNMOp : PYC_Op<"sync_mem_nm", [MemoryEffects<[MemRead, MemWrite]>, AttrSizedOperandSegments]> {
   let summary = "Synchronous NxM memory (N registered read ports, M write ports; higher write index wins same-address write conflicts; read_mode=forward returns the last matching same-edge write, read_mode=old returns pre-write data, prototype)";
   let arguments = (ins Variadic<I1>:$rens,
