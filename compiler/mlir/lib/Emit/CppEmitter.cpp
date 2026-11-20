@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <tuple>
 #include <limits>
 #include <optional>
 #include <string>
@@ -1602,6 +1604,13 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   llvm::DenseSet<int64_t> fusedRegLoops; // loops whose lanes are all fused
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::RegOp>> regLoopRegs;
   llvm::SmallVector<pyc::RegOp> unloopedRegs;
+  // Control refinement: lanes share one RegLoop only when their (rst, en)
+  // wires match too (clk is already the loop id), so every emitted loop has
+  // uniform control pointers and the runtime sharedCtrl_ fast path always
+  // applies. Groups are numbered by first appearance; the rewritten
+  // pyc.loop_id below keeps every consumer consistent.
+  std::map<std::tuple<int64_t, const void *, const void *>, int64_t>
+      regCtrlGroups;
   for (pyc::RegOp r : regs) {
     auto idAttr = r->getAttrOfType<IntegerAttr>("pyc.loop_id");
     if (!idAttr) {
@@ -1612,7 +1621,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     // Fused (single-phase) and phased lanes live in separate loops; widths
     // mix inside one width-erased RegLoopDyn (per-lane word count).
     const bool fused = fusedRegOps.count(r.getOperation());
-    const int64_t key = id * 2 + fused;
+    const auto cgKey = std::make_tuple(
+        id, r.getRst().getAsOpaquePointer(), r.getEn().getAsOpaquePointer());
+    const auto [git, inserted] = regCtrlGroups.try_emplace(
+        cgKey, static_cast<int64_t>(regCtrlGroups.size()));
+    const int64_t key = git->second * 2 + fused;
     if (fused)
       fusedRegLoops.insert(key);
     regLoopRegs[key].push_back(r);
@@ -1638,6 +1651,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   // vector delays stay per-object.
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::DelayLineOp>> delayLoopLines;
   llvm::SmallVector<pyc::DelayLineOp> unloopedDelays;
+  // Same control refinement as RegLoop: (rst, en) must match within one
+  // DelayLoop. The rewritten pyc.loop_id carries the refined group id, so
+  // every raw*256+depth recomputation downstream stays consistent.
+  std::map<std::tuple<int64_t, const void *, const void *>, int64_t>
+      delayCtrlGroups;
   for (pyc::DelayLineOp dl : delayLines) {
     auto idAttr = dl->getAttrOfType<IntegerAttr>("pyc.loop_id");
     auto depthAttr = dl->getAttrOfType<IntegerAttr>("depth");
@@ -1646,8 +1664,15 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       continue;
     }
     const int64_t raw = idAttr.getValue().getSExtValue();
-    const int64_t key = raw * 256 +
-                        depthAttr.getValue().getZExtValue();
+    const auto cgKey = std::make_tuple(
+        raw, dl.getRst().getAsOpaquePointer(), dl.getEn().getAsOpaquePointer());
+    const auto [git, inserted] = delayCtrlGroups.try_emplace(
+        cgKey, static_cast<int64_t>(delayCtrlGroups.size()));
+    dl->setAttr("pyc.loop_id",
+                IntegerAttr::get(IntegerType::get(dl->getContext(), 64),
+                                 git->second));
+    const int64_t key =
+        git->second * 256 + depthAttr.getValue().getZExtValue();
     delayLoopLines[key].push_back(dl);
   }
   llvm::SmallVector<int64_t> delayLoopIds;

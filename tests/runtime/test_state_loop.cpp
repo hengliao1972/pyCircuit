@@ -35,10 +35,14 @@ int main() {
   Wire<1> clk{0}, rst{0}, en{1};
 
   std::vector<Wire<8>> rd(kRegLanes), rinit(kRegLanes), rqRef(kRegLanes),
-      rqLoop(kRegLanes), rqFused(kRegLanes);
+      rqLoop(kRegLanes), rqFused(kRegLanes), rqMix(kRegLanes);
   std::vector<pyc_reg<8>> regRef;
   regRef.reserve(kRegLanes);
   RegLoop regLoop, fusedLoop;  // fusedLoop: tick-fuse single-phase lanes
+  // mixedLoop: alternating en pointers -> non-uniform control path; en2
+  // always carries the same value as en, so results must match regLoop.
+  Wire<1> en2{1};
+  RegLoop mixedLoop;
   for (unsigned i = 0; i < kRegLanes; ++i) {
     rd[i] = Wire<8>{i * 7 + 3};
     rinit[i] = Wire<8>{i + 1};
@@ -47,6 +51,8 @@ int main() {
                           rinit[i].data(), 1u}});
     fusedLoop.add_lanes({{rqFused[i].data(), rd[i].data(), &rst, &en,
                            rinit[i].data(), 1u}});
+    mixedLoop.add_lanes({{rqMix[i].data(), rd[i].data(), &rst,
+                          (i & 1) ? &en2 : &en, rinit[i].data(), 1u}});
   }
 
   std::vector<Wire<8>> dd(kDelayLanes), dinit(kDelayLanes), dqRef(kDelayLanes),
@@ -68,6 +74,7 @@ int main() {
     clk = Wire<1>{now ? 1u : 0u};
     rst = Wire<1>{(c % 89) == 7 ? 1u : 0u};
     en = Wire<1>{(c % 13) == 9 ? 0u : 1u};
+    en2 = en;
     for (unsigned i = 0; i < kRegLanes; ++i)
       if (rng() % 3 == 0) rd[i] = Wire<8>{rng() & 0xFFu};
     for (unsigned i = 0; i < kDelayLanes; ++i)
@@ -79,16 +86,19 @@ int main() {
       for (auto &r : regRef) r.posedge_tick_compute();
       for (auto &r : delayRef) r.posedge_tick_compute();
       regLoop.compute_rise();
+      mixedLoop.compute_rise();
       delayLoop.compute_rise();
     } else if (fall) {
       for (auto &r : regRef) r.negedge_update();
       for (auto &r : delayRef) r.negedge_update();
       regLoop.negedge();
+      mixedLoop.negedge();
       delayLoop.negedge();
     } else {
       for (auto &r : regRef) r.tick_compute();
       for (auto &r : delayRef) r.tick_compute();
       regLoop.compute_generic(now);
+      mixedLoop.compute_generic(now);
       delayLoop.compute_generic(now);
     }
 
@@ -111,6 +121,7 @@ int main() {
 
     // Wake precision: per-lane bitmaps equal the per-object commit results.
     const auto &regDirty = regLoop.commit();
+    const auto &mixDirty = mixedLoop.commit();
     fusedLoop.retire();
     const auto delayRes = delayLoop.commit();
     for (unsigned i = 0; i < kRegLanes; ++i) {
@@ -122,6 +133,11 @@ int main() {
       if (bit(fusedDirty, i) != changed ||
           rqFused[i].value() != rqRef[i].value()) {
         std::fprintf(stderr, "FUSED MISMATCH cycle %u lane %u\n", c, i);
+        return 1;
+      }
+      if (bit(mixDirty, i) != changed || rqMix[i].value() != rqRef[i].value()) {
+        std::fprintf(stderr, "NON-UNIFORM CTRL MISMATCH cycle %u lane %u\n",
+                     c, i);
         return 1;
       }
       ref.mix(rqRef[i].value() + i);
