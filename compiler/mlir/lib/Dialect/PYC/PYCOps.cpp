@@ -1127,30 +1127,60 @@ LogicalResult ByteMemOp::verify() {
   return success();
 }
 
-LogicalResult SyncMemOp::verify() {
-  auto addrTy = dyn_cast<IntegerType>(getRaddr().getType());
-  auto waddrTy = dyn_cast<IntegerType>(getWaddr().getType());
-  if (!addrTy || !waddrTy)
+LogicalResult SyncMemNMOp::verify() {
+  auto rdAttr = (*this)->getAttrOfType<IntegerAttr>("rd_ports");
+  auto wrAttr = (*this)->getAttrOfType<IntegerAttr>("wr_ports");
+  if (!rdAttr || !wrAttr)
+    return emitOpError("requires integer attributes `rd_ports`/`wr_ports`");
+  int64_t R = rdAttr.getValue().getSExtValue();
+  int64_t W = wrAttr.getValue().getSExtValue();
+  if (R <= 0 || R > 64)
+    return emitOpError("rd_ports must be in 1..64");
+  if (W <= 0)
+    return emitOpError("wr_ports must be > 0");
+  if ((int64_t)getRens().size() != R || (int64_t)getRaddrs().size() != R)
+    return emitOpError("rens/raddrs sizes must equal rd_ports");
+  if ((int64_t)getResultTypes().size() != R)
+    return emitOpError("result count must equal rd_ports");
+  if ((int64_t)getWvalids().size() != W || (int64_t)getWaddrs().size() != W ||
+      (int64_t)getWdatas().size() != W || (int64_t)getWstrbs().size() != W)
+    return emitOpError("write operand group sizes must equal wr_ports");
+
+  auto mode = getReadMode();
+  if (mode != "forward" && mode != "old")
+    return emitOpError("read_mode must be \"forward\" or \"old\"");
+
+  auto addrTy = dyn_cast<IntegerType>(getRaddrs()[0].getType());
+  if (!addrTy)
     return emitOpError("only supports integer address types");
-  if (addrTy != waddrTy)
-    return emitOpError("waddr type must match raddr type");
+  for (auto v : getRaddrs())
+    if (v.getType() != addrTy)
+      return emitOpError("all raddrs must share one type");
+  for (auto v : getWaddrs())
+    if (v.getType() != addrTy)
+      return emitOpError("all waddrs must match raddr type");
 
-  auto dataTy = dyn_cast<IntegerType>(getWdata().getType());
-  auto rdataTy = dyn_cast<IntegerType>(getRdata().getType());
-  if (!dataTy || !rdataTy)
+  auto dataTy = dyn_cast<IntegerType>(getWdatas()[0].getType());
+  if (!dataTy)
     return emitOpError("only supports integer data types");
-  if (dataTy != rdataTy)
-    return emitOpError("rdata type must match wdata type");
-
   unsigned dataW = dataTy.getWidth();
   if (dataW == 0)
     return emitOpError("data width must be >= 1");
+  for (auto v : getWdatas())
+    if (v.getType() != dataTy)
+      return emitOpError("all wdatas must share one type");
+  for (auto ty : getResultTypes())
+    if (ty != dataTy)
+      return emitOpError("all rdatas must match wdata type");
 
-  auto strbTy = dyn_cast<IntegerType>(getWstrb().getType());
+  auto strbTy = dyn_cast<IntegerType>(getWstrbs()[0].getType());
   if (!strbTy)
     return emitOpError("only supports integer wstrb types");
   if (strbTy.getWidth() != ((dataW + 7) / 8))
     return emitOpError("wstrb width must be ceil(data_width / 8)");
+  for (auto v : getWstrbs())
+    if (v.getType() != strbTy)
+      return emitOpError("all wstrbs must share one type");
 
   auto depthAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
   if (!depthAttr)
@@ -1162,48 +1192,6 @@ LogicalResult SyncMemOp::verify() {
     if (nameAttr.getValue().empty())
       return emitOpError("name must be non-empty when provided");
   }
-
-  return success();
-}
-
-LogicalResult SyncMemDPOp::verify() {
-  auto addrTy0 = dyn_cast<IntegerType>(getRaddr0().getType());
-  auto addrTy1 = dyn_cast<IntegerType>(getRaddr1().getType());
-  auto waddrTy = dyn_cast<IntegerType>(getWaddr().getType());
-  if (!addrTy0 || !addrTy1 || !waddrTy)
-    return emitOpError("only supports integer address types");
-  if (addrTy0 != addrTy1 || addrTy0 != waddrTy)
-    return emitOpError("raddr0/raddr1/waddr types must match");
-
-  auto dataTy = dyn_cast<IntegerType>(getWdata().getType());
-  auto rdataTy0 = dyn_cast<IntegerType>(getRdata0().getType());
-  auto rdataTy1 = dyn_cast<IntegerType>(getRdata1().getType());
-  if (!dataTy || !rdataTy0 || !rdataTy1)
-    return emitOpError("only supports integer data types");
-  if (dataTy != rdataTy0 || dataTy != rdataTy1)
-    return emitOpError("rdata types must match wdata type");
-
-  unsigned dataW = dataTy.getWidth();
-  if (dataW == 0)
-    return emitOpError("data width must be >= 1");
-
-  auto strbTy = dyn_cast<IntegerType>(getWstrb().getType());
-  if (!strbTy)
-    return emitOpError("only supports integer wstrb types");
-  if (strbTy.getWidth() != ((dataW + 7) / 8))
-    return emitOpError("wstrb width must be ceil(data_width / 8)");
-
-  auto depthAttr = (*this)->getAttrOfType<IntegerAttr>("depth");
-  if (!depthAttr)
-    return emitOpError("requires integer attribute `depth` (entries)");
-  if (depthAttr.getValue().getSExtValue() <= 0)
-    return emitOpError("depth must be > 0");
-
-  if (auto nameAttr = (*this)->getAttrOfType<StringAttr>("name")) {
-    if (nameAttr.getValue().empty())
-      return emitOpError("name must be non-empty when provided");
-  }
-
   return success();
 }
 

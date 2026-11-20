@@ -44,8 +44,7 @@ static bool dependsOn(Value root, Value target) {
 
 // Ops whose wire inputs are not read combinationally within eval_comb_pass.
 static bool isWireReadCut(Operation *op) {
-  return isa<pyc::AssignOp, pyc::RegOp, pyc::DelayLineOp, pyc::SyncMemOp,
-             pyc::SyncMemDPOp, pyc::CdcSyncOp>(op);
+  return isa<pyc::AssignOp, pyc::RegOp, pyc::DelayLineOp, pyc::SyncMemNMOp, pyc::CdcSyncOp>(op);
 }
 
 // Stable topological sort in which a combinational reader of a wire also

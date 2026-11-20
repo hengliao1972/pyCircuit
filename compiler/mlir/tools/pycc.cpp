@@ -901,8 +901,10 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
         return failure();
     }
 
-    const auto syncMems = collectMemNames([](Operation &op) { return isa<pyc::SyncMemOp>(op); });
-    for (const auto &name : syncMems) {
+    const auto syncMemNMs = collectMemNames([](Operation &op) {
+      return isa<pyc::SyncMemNMOp>(op);
+    });
+    for (const auto &name : syncMemNMs) {
       ProbeManifestEntry e;
       e.instance_path = canonInstPath;
       e.field_path = name;
@@ -916,23 +918,6 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
       if (failed(addEntry(std::move(e))))
         return failure();
     }
-
-    const auto syncMemDPs = collectMemNames([](Operation &op) { return isa<pyc::SyncMemDPOp>(op); });
-    for (const auto &name : syncMemDPs) {
-      ProbeManifestEntry e;
-      e.instance_path = canonInstPath;
-      e.field_path = name;
-      e.canonical_path = canonInstPath + ":" + name;
-      e.module = sym;
-      e.kind = "state";
-      e.subkind = "mem";
-      e.dir = "mem";
-      e.width_bits = 0;
-      e.ty = "mem";
-      if (failed(addEntry(std::move(e))))
-        return failure();
-    }
-
     struct ChildInfo {
       std::string name;
       std::string seg;
@@ -1145,8 +1130,7 @@ static LogicalResult emitPrimitivesFile(llvm::StringRef outPath, llvm::StringRef
       "pyc_reg.v",
       "pyc_fifo.v",
       "pyc_byte_mem.v",
-      "pyc_sync_mem.v",
-      "pyc_sync_mem_dp.v",
+      "pyc_sync_mem_nm.v",
       "pyc_async_fifo.v",
       "pyc_cdc_sync.v",
   };

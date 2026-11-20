@@ -83,7 +83,7 @@ void testFusedLaneWake() {
 // the <=64 fast path, the >64 word path, and a trailing partial lane.
 template <unsigned Width>
 void checkApplyStrbWidth(std::mt19937_64 &rng) {
-  using Mem = pyc::cpp::pyc_sync_mem<4, Width, 4>;
+  using Mem = pyc::cpp::pyc_sync_mem_nm<4, Width, 4, 1, 1, true>;
   constexpr unsigned kStrbWidth = Mem::StrbWidth;
   using D = pyc::cpp::Wire<Width>;
   using S = pyc::cpp::Wire<kStrbWidth>;

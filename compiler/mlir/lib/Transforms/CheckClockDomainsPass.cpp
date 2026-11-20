@@ -27,8 +27,7 @@ static bool isResetType(Type t) { return isa<pyc::ResetType>(t); }
 static bool isIntType(Type t) { return isa<IntegerType>(t); }
 
 static bool isSequentialCut(Operation *op) {
-  return isa<pyc::RegOp, pyc::DelayLineOp, pyc::FifoOp, pyc::ByteMemOp, pyc::SyncMemOp,
-             pyc::SyncMemDPOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op);
+  return isa<pyc::RegOp, pyc::DelayLineOp, pyc::FifoOp, pyc::ByteMemOp, pyc::SyncMemNMOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op);
 }
 
 struct FuncClockSummary {
@@ -188,13 +187,7 @@ public:
           domMemo_.try_emplace(v, out);
           return out;
         }
-        if (auto m = dyn_cast<pyc::SyncMemOp>(def)) {
-          out = domOfClock(m.getClk());
-          domVisiting_.erase(v);
-          domMemo_.try_emplace(v, out);
-          return out;
-        }
-        if (auto m = dyn_cast<pyc::SyncMemDPOp>(def)) {
+        if (auto m = dyn_cast<pyc::SyncMemNMOp>(def)) {
           out = domOfClock(m.getClk());
           domVisiting_.erase(v);
           domMemo_.try_emplace(v, out);
@@ -595,14 +588,15 @@ public:
         checkSampled(op, f.getClk(), {f.getInValid(), f.getInData(), f.getOutReady()});
         return;
       }
-      if (auto m = dyn_cast<pyc::SyncMemOp>(op)) {
-        checkSampled(op, m.getClk(), {m.getRen(), m.getRaddr(), m.getWvalid(), m.getWaddr(), m.getWdata(), m.getWstrb()});
-        return;
-      }
-      if (auto m = dyn_cast<pyc::SyncMemDPOp>(op)) {
-        checkSampled(op,
-                     m.getClk(),
-                     {m.getRen0(), m.getRaddr0(), m.getRen1(), m.getRaddr1(), m.getWvalid(), m.getWaddr(), m.getWdata(), m.getWstrb()});
+      if (auto m = dyn_cast<pyc::SyncMemNMOp>(op)) {
+        SmallVector<Value, 32> sampled;
+        sampled.append(m.getRens().begin(), m.getRens().end());
+        sampled.append(m.getRaddrs().begin(), m.getRaddrs().end());
+        sampled.append(m.getWvalids().begin(), m.getWvalids().end());
+        sampled.append(m.getWaddrs().begin(), m.getWaddrs().end());
+        sampled.append(m.getWdatas().begin(), m.getWdatas().end());
+        sampled.append(m.getWstrbs().begin(), m.getWstrbs().end());
+        checkSampled(op, m.getClk(), sampled);
         return;
       }
       if (auto m = dyn_cast<pyc::ByteMemOp>(op)) {

@@ -32,7 +32,7 @@ static int64_t addReachableDepth(int64_t lhs, int64_t rhs) {
 }
 
 static bool isHardSequentialCut(Operation *op) {
-  return isa<pyc::RegOp, pyc::DelayLineOp, pyc::SyncMemOp, pyc::SyncMemDPOp,
+  return isa<pyc::RegOp, pyc::DelayLineOp, pyc::SyncMemNMOp,
              pyc::AsyncFifoOp, pyc::CdcSyncOp>(op);
 }
 

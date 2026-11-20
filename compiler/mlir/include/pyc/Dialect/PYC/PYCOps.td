@@ -347,38 +347,18 @@ def PYC_ByteMemOp : PYC_Op<"byte_mem", [MemoryEffects<[MemRead, MemWrite]>,
   let assemblyFormat = "$clk `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
 }
 
-def PYC_SyncMemOp : PYC_Op<"sync_mem", [MemoryEffects<[MemRead, MemWrite]>,
-                                       AllTypesMatch<["raddr", "waddr"]>,
-                                       AllTypesMatch<["wdata", "rdata"]>]> {
-  let summary = "Synchronous 1R1W memory (registered read data, prototype)";
-  let arguments = (ins PYC_ClockType:$clk,
-                       I1:$ren,
-                       AnyInteger:$raddr,
-                       I1:$wvalid,
-                       AnyInteger:$waddr,
-                       AnyInteger:$wdata,
-                       AnyInteger:$wstrb);
-  let results = (outs AnyInteger:$rdata);
+def PYC_SyncMemNMOp : PYC_Op<"sync_mem_nm", [MemoryEffects<[MemRead, MemWrite]>, AttrSizedOperandSegments]> {
+  let summary = "Synchronous NxM memory (N registered read ports, M write ports; higher write index wins same-address write conflicts; read_mode=forward returns the last matching same-edge write, read_mode=old returns pre-write data, prototype)";
+  let arguments = (ins Variadic<I1>:$rens,
+                        Variadic<AnyInteger>:$raddrs,
+                        Variadic<I1>:$wvalids,
+                        Variadic<AnyInteger>:$waddrs,
+                        Variadic<AnyInteger>:$wdatas,
+                        Variadic<AnyInteger>:$wstrbs,
+                        PYC_ClockType:$clk,
+                        DefaultValuedStrAttr<StrAttr, "forward">:$read_mode);
+  let results = (outs Variadic<AnyInteger>:$rdatas);
   let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $ren `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
-}
-
-def PYC_SyncMemDPOp : PYC_Op<"sync_mem_dp", [MemoryEffects<[MemRead, MemWrite]>,
-                                            AllTypesMatch<["raddr0", "raddr1", "waddr"]>,
-                                            AllTypesMatch<["wdata", "rdata0", "rdata1"]>]> {
-  let summary = "Synchronous 2R1W memory (dual-read, registered outputs, prototype)";
-  let arguments = (ins PYC_ClockType:$clk,
-                       I1:$ren0,
-                       AnyInteger:$raddr0,
-                       I1:$ren1,
-                       AnyInteger:$raddr1,
-                       I1:$wvalid,
-                       AnyInteger:$waddr,
-                       AnyInteger:$wdata,
-                       AnyInteger:$wstrb);
-  let results = (outs AnyInteger:$rdata0, AnyInteger:$rdata1);
-  let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $ren0 `,` $raddr0 `,` $ren1 `,` $raddr1 `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr0) `,` type($rdata0) `,` type($wstrb)";
 }
 
 def PYC_AsyncFifoOp : PYC_Op<"async_fifo", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch<["in_data", "out_data"]>]> {

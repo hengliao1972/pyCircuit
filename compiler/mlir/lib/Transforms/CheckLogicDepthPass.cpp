@@ -26,8 +26,7 @@ static bool isSequentialOp(Operation *op) {
              pyc::DelayLineOp,
              pyc::FifoOp,
              pyc::ByteMemOp,
-             pyc::SyncMemOp,
-             pyc::SyncMemDPOp,
+             pyc::SyncMemNMOp,
              pyc::AsyncFifoOp,
              pyc::CdcSyncOp>(op);
 }

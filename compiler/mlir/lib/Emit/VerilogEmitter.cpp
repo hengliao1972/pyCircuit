@@ -796,15 +796,10 @@ static std::string opSortKey(Operation *op, NameTable &nt) {
       return sanitizeId(nameAttr.getValue());
     return nt.get(mem.getRdata());
   }
-  if (auto mem = dyn_cast<pyc::SyncMemOp>(op)) {
+  if (auto mem = dyn_cast<pyc::SyncMemNMOp>(op)) {
     if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
       return sanitizeId(nameAttr.getValue());
-    return nt.get(mem.getRdata());
-  }
-  if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op)) {
-    if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
-      return sanitizeId(nameAttr.getValue());
-    return nt.get(mem.getRdata0());
+    return nt.get(mem.getRdatas()[0]);
   }
   if (!op->getResults().empty())
     return nt.get(op->getResult(0));
@@ -1069,7 +1064,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         seqInstOps.push_back(&op);
         continue;
       }
-      if (isa<pyc::SyncMemOp, pyc::SyncMemDPOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op)) {
+      if (isa<pyc::SyncMemNMOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op)) {
         seqInstOps.push_back(&op);
         continue;
       }
@@ -1311,62 +1306,43 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << ");\n";
         continue;
       }
-      if (auto mem = dyn_cast<pyc::SyncMemOp>(op)) {
-        auto addrTy = dyn_cast<IntegerType>(mem.getRaddr().getType());
-        auto dataTy = dyn_cast<IntegerType>(mem.getRdata().getType());
+      if (auto mem = dyn_cast<pyc::SyncMemNMOp>(op)) {
+        auto addrTy = dyn_cast<IntegerType>(mem.getRaddrs()[0].getType());
+        auto dataTy = dyn_cast<IntegerType>(mem.getRdatas()[0].getType());
         if (!addrTy || !dataTy)
-          return mem.emitError("verilog emitter only supports integer sync_mem types");
-
+          return mem.emitError("verilog emitter only supports integer sync_mem_nm types");
         auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
         if (!depthAttr)
           return mem.emitError("missing integer attribute `depth`");
         auto depth = depthAttr.getValue().getZExtValue();
-
-        std::string inst = nt.get(mem.getRdata()) + "_inst";
+        unsigned rp = mem.getRens().size();
+        unsigned wp = mem.getWvalids().size();
+        std::string inst = nt.get(mem.getRdatas()[0]);
         if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
           inst = sanitizeId(nameAttr.getValue());
-
-        os << "pyc_sync_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
-           << "), .DEPTH(" << depth << ")) " << inst << " (\n";
+        // Pack port groups LSB-first (port k = bits [k*W +: W]); the
+        // concatenation lists the high index first.
+        auto pack = [&](auto range) {
+          std::string cat;
+          for (auto v : llvm::reverse(range)) {
+            if (!cat.empty())
+              cat += ", ";
+            cat += nt.get(v);
+          }
+          return "{" + cat + "}";
+        };
+        os << "pyc_sync_mem_nm #(.ADDR_WIDTH(" << addrTy.getWidth()
+           << "), .DATA_WIDTH(" << dataTy.getWidth() << "), .DEPTH(" << depth
+           << "), .R_PORTS(" << rp << "), .W_PORTS(" << wp << "), .READ_MODE("
+           << (mem.getReadMode() == "old" ? 1 : 0) << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .ren(" << nt.get(mem.getRen()) << "),\n";
-        os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
-        os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
-        os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
-        os << "  .waddr(" << nt.get(mem.getWaddr()) << "),\n";
-        os << "  .wdata(" << nt.get(mem.getWdata()) << "),\n";
-        os << "  .wstrb(" << nt.get(mem.getWstrb()) << ")\n";
-        os << ");\n";
-        continue;
-      }
-      if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op)) {
-        auto addrTy = dyn_cast<IntegerType>(mem.getRaddr0().getType());
-        auto dataTy = dyn_cast<IntegerType>(mem.getRdata0().getType());
-        if (!addrTy || !dataTy)
-          return mem.emitError("verilog emitter only supports integer sync_mem_dp types");
-
-        auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
-        if (!depthAttr)
-          return mem.emitError("missing integer attribute `depth`");
-        auto depth = depthAttr.getValue().getZExtValue();
-
-        std::string inst = nt.get(mem.getRdata0()) + "_inst";
-        if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
-          inst = sanitizeId(nameAttr.getValue());
-
-        os << "pyc_sync_mem_dp #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
-           << "), .DEPTH(" << depth << ")) " << inst << " (\n";
-        os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .ren0(" << nt.get(mem.getRen0()) << "),\n";
-        os << "  .raddr0(" << nt.get(mem.getRaddr0()) << "),\n";
-        os << "  .rdata0(" << nt.get(mem.getRdata0()) << "),\n";
-        os << "  .ren1(" << nt.get(mem.getRen1()) << "),\n";
-        os << "  .raddr1(" << nt.get(mem.getRaddr1()) << "),\n";
-        os << "  .rdata1(" << nt.get(mem.getRdata1()) << "),\n";
-        os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
-        os << "  .waddr(" << nt.get(mem.getWaddr()) << "),\n";
-        os << "  .wdata(" << nt.get(mem.getWdata()) << "),\n";
-        os << "  .wstrb(" << nt.get(mem.getWstrb()) << ")\n";
+        os << "  .rens(" << pack(mem.getRens()) << "),\n";
+        os << "  .raddrs(" << pack(mem.getRaddrs()) << "),\n";
+        os << "  .rdatas(" << pack(mem.getRdatas()) << "),\n";
+        os << "  .wvalids(" << pack(mem.getWvalids()) << "),\n";
+        os << "  .waddrs(" << pack(mem.getWaddrs()) << "),\n";
+        os << "  .wdatas(" << pack(mem.getWdatas()) << "),\n";
+        os << "  .wstrbs(" << pack(mem.getWstrbs()) << ")\n";
         os << ");\n";
         continue;
       }
@@ -1438,8 +1414,7 @@ LogicalResult emitVerilog(ModuleOp module, llvm::raw_ostream &os, const VerilogE
     os << "`include \"pyc_reg.v\"\n";
     os << "`include \"pyc_fifo.v\"\n\n";
     os << "`include \"pyc_byte_mem.v\"\n\n";
-    os << "`include \"pyc_sync_mem.v\"\n";
-    os << "`include \"pyc_sync_mem_dp.v\"\n";
+    os << "`include \"pyc_sync_mem_nm.v\"\n";
     os << "`include \"pyc_async_fifo.v\"\n";
     os << "`include \"pyc_cdc_sync.v\"\n\n";
   }

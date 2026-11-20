@@ -55,7 +55,7 @@ std::size_t semanticValueHash(Value value) {
 
 bool isStatefulConsumer(Operation *op) {
   return isa<pyc::RegOp, pyc::DelayLineOp, pyc::FifoOp,
-             pyc::ByteMemOp, pyc::SyncMemOp, pyc::SyncMemDPOp,
+             pyc::ByteMemOp, pyc::SyncMemNMOp,
              pyc::AsyncFifoOp, pyc::CdcSyncOp, pyc::InstanceOp>(op);
 }
 

@@ -73,13 +73,8 @@ void runEliminateDeadState(func::FuncOp function) {
           toErase.push_back(op);
         return;
       }
-      if (auto mem = dyn_cast<pyc::SyncMemOp>(op)) {
-        if (mem.getRdata().use_empty())
-          toErase.push_back(op);
-        return;
-      }
-      if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op)) {
-        if (mem.getRdata0().use_empty() && mem.getRdata1().use_empty())
+      if (auto mem = dyn_cast<pyc::SyncMemNMOp>(op)) {
+        if (llvm::all_of(mem.getRdatas(), [](Value v) { return v.use_empty(); }))
           toErase.push_back(op);
         return;
       }
