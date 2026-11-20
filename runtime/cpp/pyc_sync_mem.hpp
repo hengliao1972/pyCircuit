@@ -11,64 +11,34 @@
 #include "pyc_bits.hpp"
 
 namespace pyc::cpp {
-
-// Synchronous 1R1W memory with registered read output.
-//
-// - `DepthEntries` is in entries (not bytes).
-// - Read output updates on the next posedge of `clk` when `ren` is asserted.
-// - Write occurs on posedge when `wvalid` is asserted, with byte enables `wstrb`.
-// - Read-during-write to the same address returns the pre-write data (old-data).
-// - Addresses are low-bit indexed into host `size_t`; out-of-range indices read as 0
-//   and writes are dropped.
+// write-first (transparent) read: a same-edge write to the read address is
+// forwarded to the read output (port 1 wins conflicts), matching register
+// file Mem semantics (Yosys RD_TRANSPARENCY_MASK=1). Write port 0 applies
+// first; port 1 wins same-address same-cycle write conflicts.
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries>
-class pyc_sync_mem {
+class pyc_sync_mem_2w {
 public:
-  static_assert(DataWidth > 0, "pyc_sync_mem requires DataWidth > 0");
-  static_assert(DepthEntries > 0, "pyc_sync_mem DepthEntries must be > 0");
+  static_assert(DataWidth > 0, "pyc_sync_mem_2w requires DataWidth > 0");
+  static_assert(DepthEntries > 0, "pyc_sync_mem_2w DepthEntries must be > 0");
   static constexpr unsigned StrbWidth = (DataWidth + 7) / 8;
+  using change_mask_t = std::uint8_t;
+  static constexpr change_mask_t kReadDataChanged = change_mask_t{1} << 0;
 
-  pyc_sync_mem(Wire<1> &clk,
-                              Wire<1> &ren,
-               Wire<AddrWidth> &raddr,
-               Wire<DataWidth> &rdata,
-               Wire<1> &wvalid,
-               Wire<AddrWidth> &waddr,
-               Wire<DataWidth> &wdata,
-               Wire<StrbWidth> &wstrb)
-      : clk(clk), ren(ren), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata),
-        wstrb(wstrb) {}
-
-  struct MemWatchEvent {
-    enum class Kind : std::uint8_t { Read = 0, Write = 1 };
-    Kind kind = Kind::Read;
-    std::uint8_t port = 0; // reserved for multi-port memories
-    std::size_t addr = 0;
-    Wire<DataWidth> data{};
-    Wire<StrbWidth> strb{};
-  };
-
-  // Decision 0006: memory observability supports hash/watch/dump.
-  //
-  // Notes:
-  // - For sync memories, `addr` is in entries (not bytes).
-  // - Watch events are recorded on the active clock edge:
-  //   - read events when `ren` is asserted
-  //   - write events when `wvalid` is asserted (data is the committed value)
-  void mem_watch(std::size_t lo, std::size_t hi) {
-    if (lo > hi)
-      std::swap(lo, hi);
-    watch_enabled_ = true;
-    watch_lo_ = lo;
-    watch_hi_ = hi;
-    watch_events_.clear();
-  }
-  void mem_watch_disable() {
-    watch_enabled_ = false;
-    watch_events_.clear();
-  }
-  bool mem_watch_enabled() const { return watch_enabled_; }
-  void mem_watch_clear() { watch_events_.clear(); }
-  const std::vector<MemWatchEvent> &mem_watch_events() const { return watch_events_; }
+  pyc_sync_mem_2w(Wire<1> &clk,
+                  Wire<1> &ren,
+                  Wire<AddrWidth> &raddr,
+                  Wire<DataWidth> &rdata,
+                  Wire<1> &wvalid0,
+                  Wire<AddrWidth> &waddr0,
+                  Wire<DataWidth> &wdata0,
+                  Wire<StrbWidth> &wstrb0,
+                  Wire<1> &wvalid1,
+                  Wire<AddrWidth> &waddr1,
+                  Wire<DataWidth> &wdata1,
+                  Wire<StrbWidth> &wstrb1)
+      : clk(clk), ren(ren), raddr(raddr), rdata(rdata),
+        wvalid0(wvalid0), waddr0(waddr0), wdata0(wdata0), wstrb0(wstrb0),
+        wvalid1(wvalid1), waddr1(waddr1), wdata1(wdata1), wstrb1(wstrb1) {}
 
   std::uint64_t mem_hash(std::size_t lo = 0, std::size_t hi = (DepthEntries > 0 ? DepthEntries - 1 : 0)) const {
     if (DepthEntries == 0)
@@ -77,57 +47,36 @@ public:
       std::swap(lo, hi);
     if (hi >= DepthEntries)
       hi = DepthEntries - 1;
-
-    std::uint64_t h = 1469598103934665603ull; // FNV-1a offset basis
-    for (std::size_t i = lo; i <= hi; ++i) {
+    std::uint64_t h = 1469598103934665603ull;
+    for (std::size_t i = lo; i <= hi; ++i)
       for (unsigned w = 0; w < Wire<DataWidth>::kWords; ++w) {
         h ^= mem_[i].word(w);
-        h *= 1099511628211ull; // FNV-1a prime
+        h *= 1099511628211ull;
       }
-    }
     return h;
-  }
-
-  void mem_dump(std::ostream &os, std::size_t lo = 0, std::size_t hi = (DepthEntries > 0 ? DepthEntries - 1 : 0)) const {
-    if (DepthEntries == 0)
-      return;
-    if (lo > hi)
-      std::swap(lo, hi);
-    if (hi >= DepthEntries)
-      hi = DepthEntries - 1;
-
-    auto dumpHex = [&](Wire<DataWidth> v) {
-      os << "0x";
-      const unsigned hexDigits = (DataWidth + 3u) / 4u;
-      const unsigned words = Wire<DataWidth>::kWords;
-      for (int wi = static_cast<int>(words) - 1; wi >= 0; --wi) {
-        const std::uint64_t word = v.word(static_cast<unsigned>(wi));
-        const unsigned wordDigits = (wi == static_cast<int>(words) - 1) ? ((hexDigits - 1) % 16u + 1u) : 16u;
-        os << std::hex << std::setw(static_cast<int>(wordDigits)) << std::setfill('0') << word << std::dec;
-      }
-    };
-
-    for (std::size_t i = lo; i <= hi; ++i) {
-      os << "{\"addr\":" << i << ",\"data\":\"";
-      dumpHex(mem_[i]);
-      os << "\"}\n";
-    }
   }
 
   void tick_compute() {
     bool clkNow = clk.toBool();
     bool posedge = (!clkPrev) && clkNow;
     clkPrev = clkNow;
-    pendingWrite = false;
+    pendingWrite0 = false;
+    pendingWrite1 = false;
     pendingRead = false;
     if (!posedge)
       return;
 
-    if (wvalid.toBool()) {
-      pendingWrite = true;
-      latchedWaddr = toIndex(waddr);
-      latchedWdata = wdata;
-      latchedWstrb = wstrb;
+    if (wvalid0.toBool()) {
+      pendingWrite0 = true;
+      latchedWaddr0 = toIndex(waddr0);
+      latchedWdata0 = wdata0;
+      latchedWstrb0 = wstrb0;
+    }
+    if (wvalid1.toBool()) {
+      pendingWrite1 = true;
+      latchedWaddr1 = toIndex(waddr1);
+      latchedWdata1 = wdata1;
+      latchedWstrb1 = wstrb1;
     }
 
     if (ren.toBool()) {
@@ -136,46 +85,39 @@ public:
       Wire<DataWidth> v = Wire<DataWidth>(0);
       if (latchedRaddr < DepthEntries)
         v = mem_[latchedRaddr];
-      rdataNext = v;
-      if (watch_enabled_ && latchedRaddr >= watch_lo_ && latchedRaddr <= watch_hi_) {
-        MemWatchEvent ev;
-        ev.kind = MemWatchEvent::Kind::Read;
-        ev.port = 0;
-        ev.addr = latchedRaddr;
-        ev.data = v;
-        ev.strb = Wire<StrbWidth>(0);
-        watch_events_.push_back(ev);
+      // Write-first (transparent) read: a same-edge write to the read
+      // address is forwarded (port 1 wins), matching register-file Mem
+      // semantics (Yosys RD_TRANSPARENCY_MASK=1).
+      if (latchedRaddr < DepthEntries) {
+        if (pendingWrite0 && latchedWaddr0 == latchedRaddr)
+          v = applyStrb(v, latchedWdata0, latchedWstrb0);
+        if (pendingWrite1 && latchedWaddr1 == latchedRaddr)
+          v = applyStrb(v, latchedWdata1, latchedWstrb1);
       }
+      rdataNext = v;
     }
   }
 
-  // Writes retain their existing side effects; the return value only reports
-  // whether the registered read output changed.
-  bool tick_commit() {
-    bool changed = false;
-    if (pendingWrite && (latchedWaddr < DepthEntries)) {
-      Wire<DataWidth> committed = applyStrb(mem_[latchedWaddr], latchedWdata, latchedWstrb);
-      mem_[latchedWaddr] = committed;
-      if (watch_enabled_ && latchedWaddr >= watch_lo_ && latchedWaddr <= watch_hi_) {
-        MemWatchEvent ev;
-        ev.kind = MemWatchEvent::Kind::Write;
-        ev.port = 0;
-        ev.addr = latchedWaddr;
-        ev.data = committed;
-        ev.strb = latchedWstrb;
-        watch_events_.push_back(ev);
-      }
-    }
+  // The single bit reports a semantic change on the registered read port.
+  change_mask_t tick_commit() {
+    change_mask_t changed = 0;
+    if (pendingWrite0 && (latchedWaddr0 < DepthEntries))
+      mem_[latchedWaddr0] =
+          applyStrb(mem_[latchedWaddr0], latchedWdata0, latchedWstrb0);
+    if (pendingWrite1 && (latchedWaddr1 < DepthEntries))
+      mem_[latchedWaddr1] =
+          applyStrb(mem_[latchedWaddr1], latchedWdata1, latchedWstrb1);
     if (pendingRead) {
-      changed = rdata != rdataNext;
+      if (rdata != rdataNext)
+        changed |= kReadDataChanged;
       rdata = rdataNext;
     }
-    pendingWrite = false;
+    pendingWrite0 = false;
+    pendingWrite1 = false;
     pendingRead = false;
     return changed;
   }
 
-  // Convenience for testbenches.
   void pokeEntry(std::size_t addr, Wire<DataWidth> value) {
     if (addr < DepthEntries)
       mem_[addr] = value;
@@ -193,18 +135,27 @@ public:
   Wire<AddrWidth> &raddr;
   Wire<DataWidth> &rdata;
 
-  Wire<1> &wvalid;
-  Wire<AddrWidth> &waddr;
-  Wire<DataWidth> &wdata;
-  Wire<StrbWidth> &wstrb;
+  Wire<1> &wvalid0;
+  Wire<AddrWidth> &waddr0;
+  Wire<DataWidth> &wdata0;
+  Wire<StrbWidth> &wstrb0;
+
+  Wire<1> &wvalid1;
+  Wire<AddrWidth> &waddr1;
+  Wire<DataWidth> &wdata1;
+  Wire<StrbWidth> &wstrb1;
 
   bool clkPrev = false;
-  bool pendingWrite = false;
+  bool pendingWrite0 = false;
+  bool pendingWrite1 = false;
   bool pendingRead = false;
-  std::size_t latchedWaddr = 0;
+  std::size_t latchedWaddr0 = 0;
+  std::size_t latchedWaddr1 = 0;
   std::size_t latchedRaddr = 0;
-  Wire<DataWidth> latchedWdata{};
-  Wire<StrbWidth> latchedWstrb{};
+  Wire<DataWidth> latchedWdata0{};
+  Wire<StrbWidth> latchedWstrb0{};
+  Wire<DataWidth> latchedWdata1{};
+  Wire<StrbWidth> latchedWstrb1{};
   Wire<DataWidth> rdataNext{};
 
 private:
@@ -226,8 +177,6 @@ private:
     return (rem == 0) ? 8 : rem;
   }
 
-public:
-  // Byte-strobe merge, exposed for the runtime equivalence test.
   static constexpr Wire<DataWidth> applyStrb(Wire<DataWidth> oldV, Wire<DataWidth> newV, Wire<StrbWidth> strb) {
     if constexpr (DataWidth <= 64) {
       std::uint64_t out = oldV.value();
@@ -241,9 +190,6 @@ public:
       }
       return Wire<DataWidth>(out);
     }
-    // Word-level lane masks: build one 64-bit mask per destination word from
-    // the strobe bits that map into it, then a single AND/OR merge per word.
-    // O(kWords) instead of the previous O(StrbWidth * 8 * kWords) bit loop.
     Wire<DataWidth> v = oldV;
     constexpr unsigned kLanesPerWord = 64u / 8u;
     constexpr unsigned kWords = Wire<DataWidth>::kWords;
@@ -269,232 +215,143 @@ public:
     return v;
   }
 
-private:
   std::array<Wire<DataWidth>, DepthEntries> mem_{};
-
-  bool watch_enabled_ = false;
-  std::size_t watch_lo_ = 0;
-  std::size_t watch_hi_ = 0;
-  std::vector<MemWatchEvent> watch_events_{};
 };
 
-// Synchronous 2R1W memory (dual read ports) with registered read outputs.
-template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries>
-class pyc_sync_mem_dp {
+
+// Synchronous NxM memory: N registered read ports, M write ports (write
+// index order applies; higher index wins same-address conflicts).
+// OldData=false (read_mode=forward): each read port forwards the last
+// matching same-edge write. OldData=true (read_mode=old): read-during-write
+// returns the pre-write data, like pyc_sync_mem / a plain SRAM.
+template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries,
+          unsigned RPorts, unsigned WPorts, bool OldData = false>
+class pyc_sync_mem_nm {
 public:
-  static_assert(DataWidth > 0, "pyc_sync_mem_dp requires DataWidth > 0");
-  static_assert(DepthEntries > 0, "pyc_sync_mem_dp DepthEntries must be > 0");
+  static_assert(DataWidth > 0, "pyc_sync_mem_nm requires DataWidth > 0");
+  static_assert(DepthEntries > 0, "pyc_sync_mem_nm DepthEntries must be > 0");
+  static_assert(RPorts > 0 && RPorts <= 64, "pyc_sync_mem_nm RPorts in 1..64");
+  static_assert(WPorts > 0, "pyc_sync_mem_nm WPorts must be > 0");
   static constexpr unsigned StrbWidth = (DataWidth + 7) / 8;
-  using change_mask_t = std::uint8_t;
-  static constexpr change_mask_t kReadData0Changed = change_mask_t{1} << 0;
-  static constexpr change_mask_t kReadData1Changed = change_mask_t{1} << 1;
+  using change_mask_t = std::uint64_t;
 
-  pyc_sync_mem_dp(Wire<1> &clk,
-                  Wire<1> &ren0,
-                  Wire<AddrWidth> &raddr0,
-                  Wire<DataWidth> &rdata0,
-                  Wire<1> &ren1,
-                  Wire<AddrWidth> &raddr1,
-                  Wire<DataWidth> &rdata1,
-                  Wire<1> &wvalid,
-                  Wire<AddrWidth> &waddr,
-                  Wire<DataWidth> &wdata,
-                  Wire<StrbWidth> &wstrb)
-      : clk(clk), ren0(ren0), raddr0(raddr0), rdata0(rdata0), ren1(ren1), raddr1(raddr1), rdata1(rdata1),
-        wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb) {}
-
-  struct MemWatchEvent {
-    enum class Kind : std::uint8_t { Read = 0, Write = 1 };
-    Kind kind = Kind::Read;
-    std::uint8_t port = 0; // 0/1 for read ports; 0 for writes
-    std::size_t addr = 0;
-    Wire<DataWidth> data{};
-    Wire<StrbWidth> strb{};
-  };
-
-  void mem_watch(std::size_t lo, std::size_t hi) {
-    if (lo > hi)
-      std::swap(lo, hi);
-    watch_enabled_ = true;
-    watch_lo_ = lo;
-    watch_hi_ = hi;
-    watch_events_.clear();
+  pyc_sync_mem_nm(Wire<1> &clk,
+                  const Wire<1> *const *rens,
+                  const Wire<AddrWidth> *const *raddrs,
+                  Wire<DataWidth> *const *rdatas,
+                  const Wire<1> *const *wvalids,
+                  const Wire<AddrWidth> *const *waddrs,
+                  const Wire<DataWidth> *const *wdatas,
+                  const Wire<StrbWidth> *const *wstrbs)
+      : clk(clk) {
+    for (unsigned i = 0; i < RPorts; ++i) {
+      ren[i] = rens[i];
+      raddr[i] = raddrs[i];
+      rdata[i] = rdatas[i];
+    }
+    for (unsigned k = 0; k < WPorts; ++k) {
+      wvalid[k] = wvalids[k];
+      waddr[k] = waddrs[k];
+      wdata[k] = wdatas[k];
+      wstrb[k] = wstrbs[k];
+    }
   }
-  void mem_watch_disable() {
-    watch_enabled_ = false;
-    watch_events_.clear();
-  }
-  bool mem_watch_enabled() const { return watch_enabled_; }
-  void mem_watch_clear() { watch_events_.clear(); }
-  const std::vector<MemWatchEvent> &mem_watch_events() const { return watch_events_; }
 
   std::uint64_t mem_hash(std::size_t lo = 0, std::size_t hi = (DepthEntries > 0 ? DepthEntries - 1 : 0)) const {
-    if (DepthEntries == 0)
-      return 0;
-    if (lo > hi)
-      std::swap(lo, hi);
-    if (hi >= DepthEntries)
-      hi = DepthEntries - 1;
-
+    if (lo > hi) std::swap(lo, hi);
+    if (hi >= DepthEntries) hi = DepthEntries - 1;
     std::uint64_t h = 1469598103934665603ull;
-    for (std::size_t i = lo; i <= hi; ++i) {
+    for (std::size_t i = lo; i <= hi; ++i)
       for (unsigned w = 0; w < Wire<DataWidth>::kWords; ++w) {
         h ^= mem_[i].word(w);
         h *= 1099511628211ull;
       }
-    }
     return h;
-  }
-
-  void mem_dump(std::ostream &os, std::size_t lo = 0, std::size_t hi = (DepthEntries > 0 ? DepthEntries - 1 : 0)) const {
-    if (DepthEntries == 0)
-      return;
-    if (lo > hi)
-      std::swap(lo, hi);
-    if (hi >= DepthEntries)
-      hi = DepthEntries - 1;
-
-    auto dumpHex = [&](Wire<DataWidth> v) {
-      os << "0x";
-      const unsigned hexDigits = (DataWidth + 3u) / 4u;
-      const unsigned words = Wire<DataWidth>::kWords;
-      for (int wi = static_cast<int>(words) - 1; wi >= 0; --wi) {
-        const std::uint64_t word = v.word(static_cast<unsigned>(wi));
-        const unsigned wordDigits = (wi == static_cast<int>(words) - 1) ? ((hexDigits - 1) % 16u + 1u) : 16u;
-        os << std::hex << std::setw(static_cast<int>(wordDigits)) << std::setfill('0') << word << std::dec;
-      }
-    };
-
-    for (std::size_t i = lo; i <= hi; ++i) {
-      os << "{\"addr\":" << i << ",\"data\":\"";
-      dumpHex(mem_[i]);
-      os << "\"}\n";
-    }
   }
 
   void tick_compute() {
     bool clkNow = clk.toBool();
     bool posedge = (!clkPrev) && clkNow;
     clkPrev = clkNow;
-    pendingWrite = false;
-    pendingRead0 = false;
-    pendingRead1 = false;
-    if (!posedge)
-      return;
-
-    if (wvalid.toBool()) {
-      pendingWrite = true;
-      latchedWaddr = toIndex(waddr);
-      latchedWdata = wdata;
-      latchedWstrb = wstrb;
-    }
-
-    if (ren0.toBool()) {
-      pendingRead0 = true;
-      latchedRaddr0 = toIndex(raddr0);
-      Wire<DataWidth> v = Wire<DataWidth>(0);
-      if (latchedRaddr0 < DepthEntries)
-        v = mem_[latchedRaddr0];
-      rdata0Next = v;
-      if (watch_enabled_ && latchedRaddr0 >= watch_lo_ && latchedRaddr0 <= watch_hi_) {
-        MemWatchEvent ev;
-        ev.kind = MemWatchEvent::Kind::Read;
-        ev.port = 0;
-        ev.addr = latchedRaddr0;
-        ev.data = v;
-        ev.strb = Wire<StrbWidth>(0);
-        watch_events_.push_back(ev);
+    for (unsigned k = 0; k < WPorts; ++k) {
+      pendingWrite[k] = false;
+      if (posedge && wvalid[k]->toBool()) {
+        pendingWrite[k] = true;
+        latchedWaddr[k] = toIndex(*waddr[k]);
+        latchedWdata[k] = *wdata[k];
+        latchedWstrb[k] = *wstrb[k];
       }
     }
-
-    if (ren1.toBool()) {
-      pendingRead1 = true;
-      latchedRaddr1 = toIndex(raddr1);
+    for (unsigned i = 0; i < RPorts; ++i) {
+      pendingRead[i] = false;
+      rdataNext[i] = Wire<DataWidth>(0);
+      if (!posedge)
+        continue;
+      if (!ren[i]->toBool())
+        continue;
+      pendingRead[i] = true;
+      std::size_t ra = toIndex(*raddr[i]);
       Wire<DataWidth> v = Wire<DataWidth>(0);
-      if (latchedRaddr1 < DepthEntries)
-        v = mem_[latchedRaddr1];
-      rdata1Next = v;
-      if (watch_enabled_ && latchedRaddr1 >= watch_lo_ && latchedRaddr1 <= watch_hi_) {
-        MemWatchEvent ev;
-        ev.kind = MemWatchEvent::Kind::Read;
-        ev.port = 1;
-        ev.addr = latchedRaddr1;
-        ev.data = v;
-        ev.strb = Wire<StrbWidth>(0);
-        watch_events_.push_back(ev);
+      if (ra < DepthEntries) {
+        v = mem_[ra];
+        if constexpr (!OldData) {
+          // read_mode=forward: apply matching same-edge writes in index
+          // order (higher write port wins). read_mode=old skips this and
+          // returns the pre-write data.
+          for (unsigned k = 0; k < WPorts; ++k)
+            if (pendingWrite[k] && latchedWaddr[k] == ra)
+              v = applyStrbNM(v, latchedWdata[k], latchedWstrb[k]);
+        }
       }
+      rdataNext[i] = v;
     }
   }
 
-  // Each bit reports a semantic change on the corresponding registered read port.
+  // Bit i reports a semantic change on read port i.
   change_mask_t tick_commit() {
     change_mask_t changed = 0;
-    if (pendingWrite && (latchedWaddr < DepthEntries)) {
-      Wire<DataWidth> committed = applyStrb(mem_[latchedWaddr], latchedWdata, latchedWstrb);
-      mem_[latchedWaddr] = committed;
-      if (watch_enabled_ && latchedWaddr >= watch_lo_ && latchedWaddr <= watch_hi_) {
-        MemWatchEvent ev;
-        ev.kind = MemWatchEvent::Kind::Write;
-        ev.port = 0;
-        ev.addr = latchedWaddr;
-        ev.data = committed;
-        ev.strb = latchedWstrb;
-        watch_events_.push_back(ev);
+    for (unsigned k = 0; k < WPorts; ++k) {
+      if (pendingWrite[k] && (latchedWaddr[k] < DepthEntries))
+        mem_[latchedWaddr[k]] =
+            applyStrbNM(mem_[latchedWaddr[k]], latchedWdata[k], latchedWstrb[k]);
+      pendingWrite[k] = false;
+    }
+    for (unsigned i = 0; i < RPorts; ++i) {
+      if (pendingRead[i]) {
+        if (*rdata[i] != rdataNext[i])
+          changed |= (change_mask_t{1} << i);
+        *rdata[i] = rdataNext[i];
       }
+      pendingRead[i] = false;
     }
-    if (pendingRead0) {
-      if (rdata0 != rdata0Next)
-        changed |= kReadData0Changed;
-      rdata0 = rdata0Next;
-    }
-    if (pendingRead1) {
-      if (rdata1 != rdata1Next)
-        changed |= kReadData1Changed;
-      rdata1 = rdata1Next;
-    }
-    pendingWrite = false;
-    pendingRead0 = false;
-    pendingRead1 = false;
     return changed;
   }
 
-  void pokeEntry(std::size_t addr, Wire<DataWidth> value) {
+  void pokeEntry(std::size_t addr, std::uint64_t value) {
     if (addr < DepthEntries)
-      mem_[addr] = value;
+      mem_[addr] = Wire<DataWidth>(value);
   }
-  void pokeEntry(std::size_t addr, std::uint64_t value) { pokeEntry(addr, Wire<DataWidth>(value)); }
-  Wire<DataWidth> peekEntryBits(std::size_t addr) const {
-    return (addr < DepthEntries) ? mem_[addr] : Wire<DataWidth>(0);
+  std::uint64_t peekEntry(std::size_t addr) const {
+    return (addr < DepthEntries) ? mem_[addr].value() : 0;
   }
-  std::uint64_t peekEntry(std::size_t addr) const { return peekEntryBits(addr).value(); }
 
 public:
   Wire<1> &clk;
-
-  Wire<1> &ren0;
-  Wire<AddrWidth> &raddr0;
-  Wire<DataWidth> &rdata0;
-
-  Wire<1> &ren1;
-  Wire<AddrWidth> &raddr1;
-  Wire<DataWidth> &rdata1;
-
-  Wire<1> &wvalid;
-  Wire<AddrWidth> &waddr;
-  Wire<DataWidth> &wdata;
-  Wire<StrbWidth> &wstrb;
+  const Wire<1> *ren[RPorts];
+  const Wire<AddrWidth> *raddr[RPorts];
+  Wire<DataWidth> *rdata[RPorts];
+  const Wire<1> *wvalid[WPorts];
+  const Wire<AddrWidth> *waddr[WPorts];
+  const Wire<DataWidth> *wdata[WPorts];
+  const Wire<StrbWidth> *wstrb[WPorts];
 
   bool clkPrev = false;
-  bool pendingWrite = false;
-  bool pendingRead0 = false;
-  bool pendingRead1 = false;
-  std::size_t latchedWaddr = 0;
-  std::size_t latchedRaddr0 = 0;
-  std::size_t latchedRaddr1 = 0;
-  Wire<DataWidth> latchedWdata{};
-  Wire<StrbWidth> latchedWstrb{};
-  Wire<DataWidth> rdata0Next{};
-  Wire<DataWidth> rdata1Next{};
+  bool pendingWrite[WPorts] = {};
+  bool pendingRead[RPorts] = {};
+  std::size_t latchedWaddr[WPorts] = {};
+  Wire<DataWidth> latchedWdata[WPorts] = {};
+  Wire<StrbWidth> latchedWstrb[WPorts] = {};
+  Wire<DataWidth> rdataNext[RPorts] = {};
 
 private:
   static constexpr std::size_t toIndex(Wire<AddrWidth> addr) {
@@ -503,10 +360,9 @@ private:
     constexpr unsigned hostBits = static_cast<unsigned>(sizeof(std::size_t) * 8u);
     constexpr unsigned useBits = (AddrWidth < hostBits) ? AddrWidth : hostBits;
     std::size_t out = 0;
-    for (unsigned i = 0; i < useBits; i++) {
+    for (unsigned i = 0; i < useBits; i++)
       if (addr.bit(i))
         out |= (std::size_t{1} << i);
-    }
     return out;
   }
 
@@ -515,7 +371,7 @@ private:
     return (rem == 0) ? 8 : rem;
   }
 
-  static constexpr Wire<DataWidth> applyStrb(Wire<DataWidth> oldV, Wire<DataWidth> newV, Wire<StrbWidth> strb) {
+  static constexpr Wire<DataWidth> applyStrbNM(Wire<DataWidth> oldV, Wire<DataWidth> newV, Wire<StrbWidth> strb) {
     if constexpr (DataWidth <= 64) {
       std::uint64_t out = oldV.value();
       std::uint64_t src = newV.value();
@@ -528,9 +384,6 @@ private:
       }
       return Wire<DataWidth>(out);
     }
-    // Word-level lane masks: build one 64-bit mask per destination word from
-    // the strobe bits that map into it, then a single AND/OR merge per word.
-    // O(kWords) instead of the previous O(StrbWidth * 8 * kWords) bit loop.
     Wire<DataWidth> v = oldV;
     constexpr unsigned kLanesPerWord = 64u / 8u;
     constexpr unsigned kWords = Wire<DataWidth>::kWords;
@@ -557,11 +410,6 @@ private:
   }
 
   std::array<Wire<DataWidth>, DepthEntries> mem_{};
-
-  bool watch_enabled_ = false;
-  std::size_t watch_lo_ = 0;
-  std::size_t watch_hi_ = 0;
-  std::vector<MemWatchEvent> watch_events_{};
 };
 
 } // namespace pyc::cpp

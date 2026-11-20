@@ -90,13 +90,12 @@ public:
         addMem(m.getRdata().getType());
         return;
       }
-      if (auto m = dyn_cast<pyc::SyncMemOp>(op)) {
+      if (auto m = dyn_cast<pyc::SyncMem2WOp>(op)) {
         addMem(m.getRdata().getType());
         return;
       }
-      if (auto m = dyn_cast<pyc::SyncMemDPOp>(op)) {
-        // Physical storage is shared between read ports; count once.
-        addMem(m.getRdata0().getType());
+      if (auto m = dyn_cast<pyc::SyncMemNMOp>(op)) {
+        addMem(m.getRdatas()[0].getType());
         return;
       }
     });

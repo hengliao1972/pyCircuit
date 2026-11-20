@@ -512,7 +512,7 @@ static bool pinToStruct(Value v) {
   if (isa<pyc::CombOp>(def))
     return true;
   if (isa<pyc::RegOp, pyc::DelayLineOp, pyc::InstanceOp, pyc::FifoOp,
-          pyc::ByteMemOp, pyc::SyncMemOp, pyc::SyncMemDPOp, pyc::AsyncFifoOp,
+          pyc::ByteMemOp, pyc::SyncMem2WOp, pyc::SyncMemNMOp, pyc::AsyncFifoOp,
           pyc::CdcSyncOp>(def))
     return true;
 

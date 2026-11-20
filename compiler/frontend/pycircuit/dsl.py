@@ -830,10 +830,13 @@ class Module:
             raise ValueError("sync_mem name must match [A-Za-z_][A-Za-z0-9_]* (Decision 0025)")
 
         tmp = self._get_next_temp_var()
-        attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
+        attrs = (
+            f'{{depth = {int(depth)}, name = "{name}", rd_ports = 1, wr_ports = 1, '
+            f'read_mode = "old", operandSegmentSizes = array<i32: 1, 1, 1, 1, 1, 1, 1>}}'
+        )
         self._emit(
-            f"{tmp} = pyc.sync_mem {clk.ref}, {ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
-            + f"{attrs} : {raddr.ty}, {wdata.ty}, {wstrb.ty}"
+            f"{tmp} = \"pyc.sync_mem_nm\"({ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref}, {clk.ref}) "
+            + f"{attrs} : (i1, {raddr.ty}, i1, {raddr.ty}, {wdata.ty}, {wstrb.ty}, !pyc.clock) -> {wdata.ty}"
         )
         return Signal(ref=tmp, ty=wdata.ty)
 
@@ -868,10 +871,14 @@ class Module:
 
         out0 = self._get_next_temp_var()
         out1 = self._get_next_temp_var()
-        attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
+        attrs = (
+            f'{{depth = {int(depth)}, name = "{name}", rd_ports = 2, wr_ports = 1, '
+            f'read_mode = "old", operandSegmentSizes = array<i32: 2, 2, 1, 1, 1, 1, 1>}}'
+        )
         self._emit(
-            f"{out0}, {out1} = pyc.sync_mem_dp {clk.ref}, {ren0.ref}, {raddr0.ref}, {ren1.ref}, {raddr1.ref}, "
-            + f"{wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} {attrs} : {raddr0.ty}, {wdata.ty}, {wstrb.ty}"
+            f"{out0}, {out1} = \"pyc.sync_mem_nm\"({ren0.ref}, {ren1.ref}, {raddr0.ref}, {raddr1.ref}, "
+            + f"{wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref}, {clk.ref}) "
+            + f"{attrs} : (i1, i1, {raddr0.ty}, {raddr0.ty}, i1, {raddr0.ty}, {wdata.ty}, {wstrb.ty}, !pyc.clock) -> ({wdata.ty}, {wdata.ty})"
         )
         return Signal(ref=out0, ty=wdata.ty), Signal(ref=out1, ty=wdata.ty)
 
