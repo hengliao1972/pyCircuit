@@ -148,8 +148,7 @@ for required in \
   'kInReadyChanged' \
   'kOutValidChanged' \
   'kOutDataChanged' \
-  'kReadData0Changed' \
-  'kReadData1Changed' \
+  'pyc_sync_mem_nm' \
   '_pyc_commit_changed_' \
   '_pyc_comb_dirty.markWordUnchecked'; do
   if ! grep -q "${required}" "${primitive_cpp}"; then
