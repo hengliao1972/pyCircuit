@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <initializer_list>
 #include <vector>
@@ -44,49 +45,46 @@ public:
     unsigned words;  // ceil(width / 64), from the emitting reg
   };
 
+  // Lane data pointers are stored structure-of-arrays: the hot sampling
+  // loops stream q/d/init/words as contiguous arrays instead of chasing the
+  // interleaved lane struct. rst/en are a single value per loop: the emitter
+  // groups lanes by (clk, rst, en), so every lane of one loop shares the
+  // same control wires by construction.
   void add_lanes(std::initializer_list<Lane> lanes) {
     for (const Lane &lane : lanes) {
-      if (!lanes_.empty() && (lane.rst != lanes_.front().rst ||
-                              lane.en != lanes_.front().en))
-        sharedCtrl_ = false;
-      lanes_.push_back(lane);
+      if (q_.empty()) {
+        rst_ = lane.rst;
+        en_ = lane.en;
+      } else {
+        assert(rst_ == lane.rst && en_ == lane.en &&
+               "RegLoop lanes share one rst/en (emitter grouping invariant)");
+      }
+      q_.push_back(lane.q);
+      d_.push_back(lane.d);
+      init_.push_back(lane.init);
+      words_.push_back(lane.words);
       laneOff_.push_back(qStore_.size());
       qStore_.resize(qStore_.size() + lane.words, 0);
       pending_.push_back(0);
     }
-    dirty_.assign(loop_word_count(lanes_.size()), 0);
+    dirty_.assign(loop_word_count(q_.size()), 0);
   }
 
-  std::size_t size() const { return lanes_.size(); }
+  std::size_t size() const { return q_.size(); }
 
   void compute_rise() {
     clkPrev_ = true;
-    const std::size_t n = lanes_.size();
-    if (sharedCtrl_) {
-      // Every lane samples the same rst/en wires; read them once instead of
-      // two dependent pointer chases per lane (all DavinciTop loops are
-      // uniform). qNext stays written for every lane, as in the generic path.
-      const bool r = lanes_[0].rst->toBool();
-      const bool e = lanes_[0].en->toBool();
-      const bool go = r | e;
-      for (std::size_t i = 0; i < n; ++i) {
-        const Lane &lane = lanes_[i];
-        pending_[i] = static_cast<char>(go);
-        const std::uint64_t *src = r ? lane.init : lane.d;
-        std::uint64_t *next = qStore_.data() + laneOff_[i];
-        for (unsigned w = 0; w < lane.words; ++w)
-          next[w] = src[w];
-      }
-      return;
-    }
+    const std::size_t n = q_.size();
+    // One control read per loop (not per lane): qNext stays written for
+    // every lane, matching the per-object pyc_reg sampling order.
+    const bool r = rst_->toBool();
+    const bool e = en_->toBool();
+    const bool go = r | e;
     for (std::size_t i = 0; i < n; ++i) {
-      const Lane &lane = lanes_[i];
-      const bool r = lane.rst->toBool();
-      const bool e = lane.en->toBool();
-      pending_[i] = static_cast<char>(r | e);
+      pending_[i] = static_cast<char>(go);
+      const std::uint64_t *src = r ? init_[i] : d_[i];
       std::uint64_t *next = qStore_.data() + laneOff_[i];
-      const std::uint64_t *src = r ? lane.init : lane.d;
-      for (unsigned w = 0; w < lane.words; ++w)
+      for (unsigned w = 0; w < words_[i]; ++w)
         next[w] = src[w];
     }
   }
@@ -104,15 +102,14 @@ public:
   void negedge() { clkPrev_ = false; clear_pending(); }
 
   const std::vector<std::uint64_t> &commit() {
-    const std::size_t n = lanes_.size();
+    const std::size_t n = q_.size();
     dirty_.assign(loop_word_count(n), 0);
     for (std::size_t i = 0; i < n; ++i) {
       if (__builtin_expect(pending_[i] != 0, 0)) {
-        const Lane &lane = lanes_[i];
-        std::uint64_t *q = lane.q;
+        std::uint64_t *q = q_[i];
         const std::uint64_t *next = qStore_.data() + laneOff_[i];
         bool changed = false;
-        for (unsigned w = 0; w < lane.words; ++w) {
+        for (unsigned w = 0; w < words_[i]; ++w) {
           changed |= q[w] != next[w];
           q[w] = next[w];
         }
@@ -125,55 +122,31 @@ public:
   }
 
   const std::vector<std::uint64_t> &direct_commit() {
-    const std::size_t n = lanes_.size();
+    const std::size_t n = q_.size();
     clkPrev_ = true;
     dirty_.assign(loop_word_count(n), 0);
-    if (sharedCtrl_) {
-      // Uniform rst/en: one read replaces two dependent loads per lane; a
-      // disabled edge skips the whole lane walk (qNext keeps its last value,
-      // exactly as the generic path's `continue`).
-      const bool r = lanes_[0].rst->toBool();
-      const bool go = r | lanes_[0].en->toBool();
-      if (go) {
-        for (std::size_t i = 0; i < n; ++i) {
-          const Lane &lane = lanes_[i];
-          pending_[i] = 1;
-          const std::uint64_t *src = r ? lane.init : lane.d;
-          std::uint64_t *next = qStore_.data() + laneOff_[i];
-          std::uint64_t *q = lane.q;
-          bool changed = false;
-          for (unsigned w = 0; w < lane.words; ++w) {
-            changed |= q[w] != src[w];
-            next[w] = src[w];
-            q[w] = src[w];
-          }
-          if (changed)
-            dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
+    // One control read per loop; a disabled edge skips the whole lane walk
+    // (qNext keeps its last value, exactly as a per-lane `continue` would).
+    const bool r = rst_->toBool();
+    const bool go = r | en_->toBool();
+    if (go) {
+      for (std::size_t i = 0; i < n; ++i) {
+        pending_[i] = 1;
+        const std::uint64_t *src = r ? init_[i] : d_[i];
+        std::uint64_t *next = qStore_.data() + laneOff_[i];
+        std::uint64_t *q = q_[i];
+        bool changed = false;
+        for (unsigned w = 0; w < words_[i]; ++w) {
+          changed |= q[w] != src[w];
+          next[w] = src[w];
+          q[w] = src[w];
         }
-      } else {
-        for (std::size_t i = 0; i < n; ++i)
-          pending_[i] = 0;
+        if (changed)
+          dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
       }
-      return dirty_;
-    }
-    for (std::size_t i = 0; i < n; ++i) {
-      const Lane &lane = lanes_[i];
-      const bool r = lane.rst->toBool();
-      const bool go = r | lane.en->toBool();
-      pending_[i] = static_cast<char>(go);
-      if (!go)
-        continue;
-      const std::uint64_t *src = r ? lane.init : lane.d;
-      std::uint64_t *next = qStore_.data() + laneOff_[i];
-      std::uint64_t *q = lane.q;
-      bool changed = false;
-      for (unsigned w = 0; w < lane.words; ++w) {
-        changed |= q[w] != src[w];
-        next[w] = src[w];
-        q[w] = src[w];
-      }
-      if (changed)
-        dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
+    } else {
+      for (std::size_t i = 0; i < n; ++i)
+        pending_[i] = 0;
     }
     return dirty_;
   }
@@ -190,15 +163,19 @@ public:
   }
 
 private:
-  void clear_pending() { pending_.assign(lanes_.size(), 0); }
+  void clear_pending() { pending_.assign(q_.size(), 0); }
 
-  std::vector<Lane> lanes_;
+  std::vector<std::uint64_t *> q_;
+  std::vector<std::uint64_t *> d_;
+  Wire<1> *rst_ = nullptr;  // one per loop: lanes are grouped by (clk, rst, en)
+  Wire<1> *en_ = nullptr;
+  std::vector<const std::uint64_t *> init_;
+  std::vector<unsigned> words_;
   std::vector<std::uint64_t> qStore_;
   std::vector<std::size_t> laneOff_;
   std::vector<char> pending_;
   std::vector<std::uint64_t> dirty_;
   bool clkPrev_ = false;
-  bool sharedCtrl_ = true;  // all lanes share one rst and one en pointer
 };
 
 // Width-erased DelayLoop: lanes of different widths share one loop (the
