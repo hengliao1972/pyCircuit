@@ -829,16 +829,14 @@ class Module:
         if not isinstance(name, str) or not name.strip() or not _IDENT_RE.match(name):
             raise ValueError("sync_mem name must match [A-Za-z_][A-Za-z0-9_]* (Decision 0025)")
 
-        tmp = self._get_next_temp_var()
-        attrs = (
-            f'{{depth = {int(depth)}, name = "{name}", rd_ports = 1, wr_ports = 1, '
-            f'read_mode = "old", operandSegmentSizes = array<i32: 1, 1, 1, 1, 1, 1, 1>}}'
-        )
-        self._emit(
-            f"{tmp} = \"pyc.sync_mem_nm\"({ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref}, {clk.ref}) "
-            + f"{attrs} : (i1, {raddr.ty}, i1, {raddr.ty}, {wdata.ty}, {wstrb.ty}, !pyc.clock) -> {wdata.ty}"
-        )
-        return Signal(ref=tmp, ty=wdata.ty)
+        return self.sync_mem_nm(
+            clk,
+            [(ren, raddr)],
+            [(wvalid, waddr, wdata, wstrb)],
+            depth=depth,
+            name=name,
+            read_mode="old",
+        )[0]
 
     def sync_mem_dp(
         self,
@@ -869,18 +867,87 @@ class Module:
         if not isinstance(name, str) or not name.strip() or not _IDENT_RE.match(name):
             raise ValueError("sync_mem_dp name must match [A-Za-z_][A-Za-z0-9_]* (Decision 0025)")
 
-        out0 = self._get_next_temp_var()
-        out1 = self._get_next_temp_var()
+        out0, out1 = self.sync_mem_nm(
+            clk,
+            [(ren0, raddr0), (ren1, raddr1)],
+            [(wvalid, waddr, wdata, wstrb)],
+            depth=depth,
+            name=name,
+            read_mode="old",
+        )
+        return out0, out1
+
+    def sync_mem_nm(
+        self,
+        clk: Signal,
+        read_ports: list[tuple[Signal, Signal]],
+        write_ports: list[tuple[Signal, Signal, Signal, Signal]],
+        *,
+        depth: int,
+        name: str,
+        read_mode: str = "forward",
+    ) -> list[Signal]:
+        """Synchronous N-read x M-write memory with registered read data.
+
+        ``read_ports`` is a list of ``(ren, raddr)``; ``write_ports`` a list of
+        ``(wvalid, waddr, wdata, wstrb)``. Write ports apply in list order, so a
+        later entry wins a same-address same-cycle conflict. ``read_mode`` is
+        ``"forward"`` (a same-edge write to the read address is forwarded to the
+        read output: register-file semantics) or ``"old"`` (the read output is
+        the pre-write entry: plain SRAM semantics). Returns one read-data signal
+        per read port.
+        """
+        if not isinstance(clk.ty, Clock):
+            raise TypeError("sync_mem_nm clk must be !pyc.clock")
+        if not read_ports:
+            raise ValueError("sync_mem_nm needs at least one read port")
+        if not write_ports:
+            raise ValueError("sync_mem_nm needs at least one write port")
+        if read_mode not in ("forward", "old"):
+            raise ValueError('sync_mem_nm read_mode must be "forward" or "old"')
+        if depth <= 0:
+            raise ValueError("sync_mem_nm depth must be > 0")
+        if not isinstance(name, str) or not name.strip() or not _IDENT_RE.match(name):
+            raise ValueError("sync_mem_nm name must match [A-Za-z_][A-Za-z0-9_]* (Decision 0025)")
+
+        addr_ty = read_ports[0][1].ty
+        data_ty = write_ports[0][2].ty
+        strb_ty = write_ports[0][3].ty
+        for ren, raddr in read_ports:
+            if ren.ty != Bits(1):
+                raise TypeError("sync_mem_nm ren must be i1")
+            if raddr.ty != addr_ty:
+                raise TypeError("sync_mem_nm raddrs must have the same type")
+        for wvalid, waddr, wdata, wstrb in write_ports:
+            if wvalid.ty != Bits(1):
+                raise TypeError("sync_mem_nm wvalid must be i1")
+            if waddr.ty != addr_ty:
+                raise TypeError("sync_mem_nm waddr must match raddr type")
+            if wdata.ty != data_ty or wstrb.ty != strb_ty:
+                raise TypeError("sync_mem_nm write ports must share data/strb types")
+
+        rp, wp = len(read_ports), len(write_ports)
+        outs = [self._get_next_temp_var() for _ in range(rp)]
+        operands = [s.ref for s, _ in read_ports] + [a.ref for _, a in read_ports]
+        operands += [v.ref for v, _, _, _ in write_ports]
+        operands += [a.ref for _, a, _, _ in write_ports]
+        operands += [d.ref for _, _, d, _ in write_ports]
+        operands += [t.ref for _, _, _, t in write_ports]
+        operands.append(clk.ref)
+        addr_t, data_t, strb_t = str(addr_ty), str(data_ty), str(strb_ty)
+        op_types = ["i1"] * rp + [addr_t] * rp
+        op_types += ["i1"] * wp + [addr_t] * wp + [data_t] * wp + [strb_t] * wp + ["!pyc.clock"]
         attrs = (
-            f'{{depth = {int(depth)}, name = "{name}", rd_ports = 2, wr_ports = 1, '
-            f'read_mode = "old", operandSegmentSizes = array<i32: 2, 2, 1, 1, 1, 1, 1>}}'
+            f'{{depth = {int(depth)}, name = "{name}", rd_ports = {rp}, wr_ports = {wp}, '
+            f'read_mode = "{read_mode}", '
+            f'operandSegmentSizes = array<i32: {rp}, {rp}, {wp}, {wp}, {wp}, {wp}, 1>}}'
         )
+        res_ty = data_t if rp == 1 else "(" + ", ".join([data_t] * rp) + ")"
         self._emit(
-            f"{out0}, {out1} = \"pyc.sync_mem_nm\"({ren0.ref}, {ren1.ref}, {raddr0.ref}, {raddr1.ref}, "
-            + f"{wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref}, {clk.ref}) "
-            + f"{attrs} : (i1, i1, {raddr0.ty}, {raddr0.ty}, i1, {raddr0.ty}, {wdata.ty}, {wstrb.ty}, !pyc.clock) -> ({wdata.ty}, {wdata.ty})"
+            f"{', '.join(outs)} = \"pyc.sync_mem_nm\"({', '.join(operands)}) "
+            + f"{attrs} : ({', '.join(op_types)}) -> {res_ty}"
         )
-        return Signal(ref=out0, ty=wdata.ty), Signal(ref=out1, ty=wdata.ty)
+        return [Signal(ref=o, ty=data_ty) for o in outs]
 
     def async_fifo(
         self,
