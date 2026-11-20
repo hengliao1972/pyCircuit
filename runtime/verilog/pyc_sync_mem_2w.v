@@ -107,6 +107,5 @@ module pyc_sync_mem_2w #(
         end
         rdata <= rd;
       end
-    end
   end
 endmodule
