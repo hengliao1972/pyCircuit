@@ -2316,19 +2316,14 @@ class Circuit(Module):
         depth: int,
         name: str,
     ) -> Wire:
-        rdata = super().sync_mem(
+        return self.sync_mem_nm(
             clk,
-            Signal.as_sig(ren),
-            Signal.as_sig(raddr),
-            Signal.as_sig(wvalid),
-            Signal.as_sig(waddr),
-            Signal.as_sig(wdata),
-            Signal.as_sig(wstrb),
+            [(ren, raddr)],
+            [(wvalid, waddr, wdata, wstrb)],
             depth=depth,
             name=name,
-        )
-        self._record_struct_state_alloc()
-        return Wire(self, rdata)
+            read_mode="old",
+        )[0]
 
     def sync_mem_dp(
         self,
@@ -2345,21 +2340,47 @@ class Circuit(Module):
         depth: int,
         name: str,
     ) -> tuple[Wire, Wire]:
-        rdata0, rdata1 = super().sync_mem_dp(
+        rdata0, rdata1 = self.sync_mem_nm(
             clk,
-            Signal.as_sig(ren0),
-            Signal.as_sig(raddr0),
-            Signal.as_sig(ren1),
-            Signal.as_sig(raddr1),
-            Signal.as_sig(wvalid),
-            Signal.as_sig(waddr),
-            Signal.as_sig(wdata),
-            Signal.as_sig(wstrb),
+            [(ren0, raddr0), (ren1, raddr1)],
+            [(wvalid, waddr, wdata, wstrb)],
             depth=depth,
             name=name,
+            read_mode="old",
+        )
+        return rdata0, rdata1
+
+    def sync_mem_nm(
+        self,
+        clk: Signal,
+        read_ports: Sequence[tuple[Union[Wire, Reg, Signal], Union[Wire, Reg, Signal]]],
+        write_ports: Sequence[
+            tuple[
+                Union[Wire, Reg, Signal],
+                Union[Wire, Reg, Signal],
+                Union[Wire, Reg, Signal],
+                Union[Wire, Reg, Signal],
+            ]
+        ],
+        *,
+        depth: int,
+        name: str,
+        read_mode: str = "forward",
+    ) -> list[Wire]:
+        """N-read x M-write synchronous memory returning one Wire per read port."""
+        rdatas = super().sync_mem_nm(
+            clk,
+            [(Signal.as_sig(ren), Signal.as_sig(raddr)) for ren, raddr in read_ports],
+            [
+                (Signal.as_sig(wvalid), Signal.as_sig(waddr), Signal.as_sig(wdata), Signal.as_sig(wstrb))
+                for wvalid, waddr, wdata, wstrb in write_ports
+            ],
+            depth=depth,
+            name=name,
+            read_mode=read_mode,
         )
         self._record_struct_state_alloc()
-        return Wire(self, rdata0), Wire(self, rdata1)
+        return [Wire(self, rdata) for rdata in rdatas]
 
     def async_fifo(
         self,
