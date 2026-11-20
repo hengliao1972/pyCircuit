@@ -120,7 +120,7 @@ def icache(
         wr_en_w = wire_of(refill_valid & (refill_way == w_const))
 
         tag_rd.append(m.sync_mem(
-            cd.clk, cd.rst,
+            cd.clk,
             ren=wire_of(s0_fire), raddr=wire_of(s0_set_idx),
             wvalid=wr_en_w, waddr=wire_of(refill_set),
             wdata=wire_of(refill_tag),
@@ -129,7 +129,7 @@ def icache(
         ))
 
         data_rd.append(m.sync_mem(
-            cd.clk, cd.rst,
+            cd.clk,
             ren=wire_of(s0_fire), raddr=wire_of(s0_set_idx),
             wvalid=wr_en_w, waddr=wire_of(refill_set),
             wdata=wire_of(refill_data),

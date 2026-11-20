@@ -8,6 +8,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/Visitors.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -470,6 +471,10 @@ static std::optional<LogicalResult> emitScalarOpAssign(Operation &op, raw_ostrea
          << lsb << "];\n";
     return success();
   }
+  if (isa<pyc::DelayTapOp>(op))
+    return {op.emitError("pyc.delay_tap is not supported by the Verilog "
+                         "backend (delay lines are C++-only; re-emit with "
+                         "--emit=cpp or disable state optimization)")};
   if (auto sh = dyn_cast<pyc::ShliOp>(op)) {
     os << "assign " << nt.get(sh.getResult()) << " = (" << nt.get(sh.getIn()) << " << " << sh.getAmountAttr().getInt()
        << ");\n";
@@ -991,6 +996,16 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
   }
   os << "\n";
 
+  // Reject delay lines early with a clear diagnostic: the Verilog backend
+  // keeps the pre-optimization netlist contract and never emits them.
+  bool sawDelayLine = false;
+  f.walk([&](pyc::DelayLineOp) { sawDelayLine = true; });
+  if (sawDelayLine)
+    return f.emitError("pyc.delay_line is not supported by the Verilog "
+                       "backend (delay lines are C++-only; re-emit with "
+                       "--emit=cpp or disable state optimization)");
+  os << "\n";
+
   // Collect top-level ops for netlist-friendly emission.
   llvm::SmallVector<Operation *> combAssignOps;
   llvm::SmallVector<Operation *> instOps;
@@ -1208,7 +1223,24 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
           return r.emitError("verilog emitter only supports integer reg data type");
 
         auto emitReg = [&](llvm::StringRef suffix, llvm::StringRef instanceSuffix) {
-          os << "pyc_reg #(.WIDTH(" << *width << ")) " << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          std::string initParam;
+          bool usePortInit = true;
+          if (auto *initDef = r.getInit().getDefiningOp()) {
+            if (auto constOp = dyn_cast<pyc::ConstantOp>(initDef)) {
+              initParam = ", .INIT(" + vLiteral(constOp.getValueAttr(),
+                                                 constOp.getType()) + ")";
+              usePortInit = false;
+            }
+          }
+          if (usePortInit) {
+            // non-constant init: use the init port path
+            os << "pyc_reg #(.WIDTH(" << *width << "), .USE_INIT_PORT(1)) "
+               << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          } else {
+            // constant init: use the INIT parameter path (no init port)
+            os << "pyc_reg #(.WIDTH(" << *width << ")" << initParam << ") "
+               << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          }
           os << "  .clk(" << nt.get(r.getClk()) << "),\n";
           os << "  .rst(" << nt.get(r.getRst()) << "),\n";
           os << "  .en(" << nt.get(r.getEn()) << "),\n";
@@ -1219,6 +1251,8 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         };
 
         if (auto vt = dyn_cast<VectorType>(qTy)) {
+          // The primitive has scalar leaf ports, so preserve vector shape by
+          // emitting one delay instance per leaf, as for vector registers.
           SmallVector<int64_t> shape = vectorShape(vt);
           walkVectorIndices(shape, [&](ArrayRef<int64_t> indices) {
             std::string suffix = indexSuffix(indices);
@@ -1268,7 +1302,6 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << "pyc_byte_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth() << "), .DEPTH("
            << depth << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
         os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
         os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
         os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
@@ -1296,7 +1329,6 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << "pyc_sync_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
            << "), .DEPTH(" << depth << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
         os << "  .ren(" << nt.get(mem.getRen()) << "),\n";
         os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
         os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
@@ -1325,7 +1357,6 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << "pyc_sync_mem_dp #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
            << "), .DEPTH(" << depth << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
         os << "  .ren0(" << nt.get(mem.getRen0()) << "),\n";
         os << "  .raddr0(" << nt.get(mem.getRaddr0()) << "),\n";
         os << "  .rdata0(" << nt.get(mem.getRdata0()) << "),\n";

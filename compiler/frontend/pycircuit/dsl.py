@@ -637,19 +637,44 @@ class Module:
             self._emit(f"{lhs}pyc.instance {attrs} : {in_sig} -> {out_sig}")
         return out
 
-    def alias(self, a: Signal, *, name: str | None = None) -> Signal:
+    def alias(
+        self,
+        a: Signal,
+        *,
+        name: str | None = None,
+        generated: str | None = None,
+    ) -> Signal:
         """Alias a value (pure) to attach a debug name in codegen."""
         tmp = self._get_next_temp_var()
-        if name is None:
+        attrs: list[str] = []
+        if generated is not None:
+            attrs.append(f"pyc.generated = {json.dumps(str(generated))}")
+        if name is not None:
+            attrs.append(f"pyc.name = {json.dumps(str(name))}")
+        if not attrs:
             self._emit(f"{tmp} = pyc.alias {a.ref} : {a.ty}")
         else:
-            self._emit(f'{tmp} = pyc.alias {a.ref} {{pyc.name = "{name}"}} : {a.ty}')
+            self._emit(f"{tmp} = pyc.alias {a.ref} {{{', '.join(attrs)}}} : {a.ty}")
         return Signal(ref=tmp, ty=a.ty)
 
-    def new_wire(self, *, width: int, shape: list[int] | None = None, name: str | None = None) -> Signal:
-        return self.new_signal(width=width, shape=shape, name=name)
+    def new_wire(
+        self,
+        *,
+        width: int,
+        shape: list[int] | None = None,
+        name: str | None = None,
+        generated: str | None = None,
+    ) -> Signal:
+        return self.new_signal(width=width, shape=shape, name=name, generated=generated)
         
-    def new_signal(self, *, width: int, shape: list[int] | None = None, name: str | None = None) -> Signal:
+    def new_signal(
+        self,
+        *,
+        width: int,
+        shape: list[int] | None = None,
+        name: str | None = None,
+        generated: str | None = None,
+    ) -> Signal:
         if width <= 0:
             raise ValueError("width must be > 0")
         if shape:
@@ -657,10 +682,15 @@ class Module:
         else: 
             ty = Bits(width)
         tmp = self._get_next_temp_var()
-        if name is None:
+        attrs: list[str] = []
+        if generated is not None:
+            attrs.append(f"pyc.generated = {json.dumps(str(generated))}")
+        if name is not None:
+            attrs.append(f"pyc.name = {json.dumps(str(name))}")
+        if not attrs:
             self._emit(f"{tmp} = pyc.wire : {ty}")
         else:
-            self._emit(f'{tmp} = pyc.wire {{pyc.name = "{name}"}} : {ty}')
+            self._emit(f"{tmp} = pyc.wire {{{', '.join(attrs)}}} : {ty}")
         return Signal(ref=tmp, ty=ty)
 
     def assign(self, dst: Signal, src: Signal) -> None:
@@ -680,7 +710,16 @@ class Module:
             return
         self._emit(f"pyc.assert {cond.ref} {{msg = {json.dumps(s, ensure_ascii=False)}}}")
 
-    def reg(self, clk: Signal, rst: Signal, en: Signal, next_: Signal, init: Signal) -> Signal:
+    def reg(
+        self,
+        clk: Signal,
+        rst: Signal,
+        en: Signal,
+        next_: Signal,
+        init: Signal,
+        *,
+        generated: str | None = None,
+    ) -> Signal:
         if not isinstance(clk.ty, Clock):
             raise TypeError("reg clk must be !pyc.clock")
         if not isinstance(rst.ty, Reset):
@@ -689,7 +728,13 @@ class Module:
             raise TypeError("reg en must be i1")
         self._require_same_ty(next_.ty, init.ty, "reg")
         tmp = self._get_next_temp_var()
-        self._emit(f"{tmp} = pyc.reg {clk.ref}, {rst.ref}, {en.ref}, {next_.ref}, {init.ref} : {next_.ty}")
+        attr_dict = ""
+        if generated is not None:
+            attr_dict = f" {{pyc.generated = {json.dumps(str(generated))}}}"
+        self._emit(
+            f"{tmp} = pyc.reg {clk.ref}, {rst.ref}, {en.ref}, {next_.ref}, "
+            f"{init.ref}{attr_dict} : {next_.ty}"
+        )
         return Signal(ref=tmp, ty=next_.ty)
 
     def fifo(
@@ -724,7 +769,6 @@ class Module:
     def byte_mem(
         self,
         clk: Signal,
-        rst: Signal,
         raddr: Signal,
         wvalid: Signal,
         waddr: Signal,
@@ -737,8 +781,6 @@ class Module:
         """Byte-addressed memory (async read + sync write, prototype)."""
         if not isinstance(clk.ty, Clock):
             raise TypeError("byte_mem clk must be !pyc.clock")
-        if not isinstance(rst.ty, Reset):
-            raise TypeError("byte_mem rst must be !pyc.reset")
         if wvalid.ty != Bits(1):
             raise TypeError("byte_mem wvalid must be i1")
         if raddr.ty != waddr.ty:
@@ -755,7 +797,7 @@ class Module:
         tmp = self._get_next_temp_var()
         attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
         self._emit(
-            f"{tmp} = pyc.byte_mem {clk.ref}, {rst.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
+            f"{tmp} = pyc.byte_mem {clk.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
             + f"{attrs} : {raddr.ty}, {wdata.ty}, {wstrb.ty}"
         )
         return Signal(ref=tmp, ty=wdata.ty)
@@ -763,7 +805,6 @@ class Module:
     def sync_mem(
         self,
         clk: Signal,
-        rst: Signal,
         ren: Signal,
         raddr: Signal,
         wvalid: Signal,
@@ -777,8 +818,6 @@ class Module:
         """Synchronous 1R1W memory (registered read data, prototype)."""
         if not isinstance(clk.ty, Clock):
             raise TypeError("sync_mem clk must be !pyc.clock")
-        if not isinstance(rst.ty, Reset):
-            raise TypeError("sync_mem rst must be !pyc.reset")
         if ren.ty != Bits(1):
             raise TypeError("sync_mem ren must be i1")
         if wvalid.ty != Bits(1):
@@ -793,7 +832,7 @@ class Module:
         tmp = self._get_next_temp_var()
         attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
         self._emit(
-            f"{tmp} = pyc.sync_mem {clk.ref}, {rst.ref}, {ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
+            f"{tmp} = pyc.sync_mem {clk.ref}, {ren.ref}, {raddr.ref}, {wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} "
             + f"{attrs} : {raddr.ty}, {wdata.ty}, {wstrb.ty}"
         )
         return Signal(ref=tmp, ty=wdata.ty)
@@ -801,7 +840,6 @@ class Module:
     def sync_mem_dp(
         self,
         clk: Signal,
-        rst: Signal,
         ren0: Signal,
         raddr0: Signal,
         ren1: Signal,
@@ -817,8 +855,6 @@ class Module:
         """Synchronous 2R1W memory (registered outputs, prototype)."""
         if not isinstance(clk.ty, Clock):
             raise TypeError("sync_mem_dp clk must be !pyc.clock")
-        if not isinstance(rst.ty, Reset):
-            raise TypeError("sync_mem_dp rst must be !pyc.reset")
         if ren0.ty != Bits(1) or ren1.ty != Bits(1):
             raise TypeError("sync_mem_dp ren0/ren1 must be i1")
         if wvalid.ty != Bits(1):
@@ -834,7 +870,7 @@ class Module:
         out1 = self._get_next_temp_var()
         attrs = f'{{depth = {int(depth)}, name = "{name}"}}'
         self._emit(
-            f"{out0}, {out1} = pyc.sync_mem_dp {clk.ref}, {rst.ref}, {ren0.ref}, {raddr0.ref}, {ren1.ref}, {raddr1.ref}, "
+            f"{out0}, {out1} = pyc.sync_mem_dp {clk.ref}, {ren0.ref}, {raddr0.ref}, {ren1.ref}, {raddr1.ref}, "
             + f"{wvalid.ref}, {waddr.ref}, {wdata.ref}, {wstrb.ref} {attrs} : {raddr0.ty}, {wdata.ty}, {wstrb.ty}"
         )
         return Signal(ref=out0, ty=wdata.ty), Signal(ref=out1, ty=wdata.ty)
@@ -901,6 +937,8 @@ class Module:
             self._finalized = True
             for fn in list(self._finalizers):
                 fn()
+            # After user/queue finalizers so late assigns can still be folded.
+            self._after_finalizers()
 
         arg_sig = ", ".join(f"{sig.ref}: {sig.ty}" for _, sig in self._args)
         res_types = [v.ty for _, v in self._results]
@@ -934,6 +972,10 @@ class Module:
         return "module {\n" + self.emit_func_mlir() + "}\n"
 
     # --- finalizers ---
+    def _after_finalizers(self) -> None:
+        """Hook for Circuit to emit folded assigns after other finalizers."""
+        return
+
     def add_finalizer(self, fn: Callable[[], None]) -> None:
         if self._finalized:
             raise RuntimeError("cannot add finalizers after emit_mlir()")
