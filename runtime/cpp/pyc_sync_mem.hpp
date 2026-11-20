@@ -336,6 +336,13 @@ public:
   }
 
 public:
+  // Public strobe-merge helper (byte-lane merge; used by tests).
+  static constexpr Wire<DataWidth> applyStrb(Wire<DataWidth> oldV,
+                                             Wire<DataWidth> newV,
+                                             Wire<StrbWidth> strb) {
+    return applyStrbNM(oldV, newV, strb);
+  }
+
   Wire<1> &clk;
   const Wire<1> *ren[RPorts];
   const Wire<AddrWidth> *raddr[RPorts];
