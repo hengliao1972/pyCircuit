@@ -165,7 +165,7 @@ pyCircuit/
 | `pyc.reg` | `(clk, rst, en, next, init) → q` 时钟寄存器 |
 | `pyc.fifo` | 单时钟 ready/valid FIFO（attr `depth`） |
 | `pyc.byte_mem` | 异步读同步写字节存储 |
-| `pyc.sync_mem` / `pyc.sync_mem_dp` | 同步 1R1W / 2R1W |
+| `pyc.sync_mem_nm` | 同步 N 读 × M 写（attr `depth`/`read_mode`；1R1W 与 2R1W 为其特例） |
 | `pyc.async_fifo` | 双时钟 FIFO |
 | `pyc.cdc_sync` | 多级同步器（attr `stages`） |
 
@@ -286,7 +286,7 @@ endmodule
 |----|------|
 | `pyc.reg` | `pyc_reg #(.WIDTH)` |
 | `pyc.fifo` | `pyc_fifo #(.WIDTH,.DEPTH)` |
-| `pyc.byte_mem` / `sync_mem` / `sync_mem_dp` | `pyc_byte_mem` / `pyc_sync_mem` / `pyc_sync_mem_dp` |
+| `pyc.byte_mem` / `sync_mem_nm` | `pyc_byte_mem` / `pyc_sync_mem_nm #(.ADDR_WIDTH,.DATA_WIDTH,.DEPTH,.R_PORTS,.W_PORTS,.READ_MODE)` |
 | `pyc.async_fifo` / `cdc_sync` | `pyc_async_fifo` / `pyc_cdc_sync #(.WIDTH,.STAGES)` |
 
 ### 向量端口

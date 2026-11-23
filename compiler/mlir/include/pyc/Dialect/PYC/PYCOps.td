@@ -264,7 +264,8 @@ def PYC_ConcatOp : PYC_Op<"concat", [Pure]> {
   let hasFolder = 1;
 }
 
-def PYC_AliasOp : PYC_Op<"alias", [Pure, SameOperandsAndResultType]> {
+def PYC_AliasOp : PYC_Op<"alias", [SameOperandsAndResultType,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "Alias a value (for naming / debug)";
   let arguments = (ins AnyType:$in);
   let results = (outs AnyType:$result);
@@ -300,6 +301,29 @@ def PYC_RegOp : PYC_Op<"reg", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch
   let assemblyFormat = "$clk `,` $rst `,` $en `,` $next `,` $init attr-dict `:` type($q)";
 }
 
+// Compact IR form of DEPTH cascaded registers with common controls. Backends
+// may choose an efficient simulator representation, but retain DEPTH states.
+def PYC_DelayLineOp : PYC_Op<"delay_line", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch<["next", "init", "q"]>]> {
+  let summary = "Fixed-latency delay line with reset + enable";
+  let arguments = (ins PYC_ClockType:$clk, PYC_ResetType:$rst, I1:$en, AnyIntegerOrV:$next, AnyIntegerOrV:$init);
+  let results = (outs AnyIntegerOrV:$q);
+  let hasVerifier = 1;
+  let assemblyFormat = "$clk `,` $rst `,` $en `,` $next `,` $init attr-dict `:` type($q)";
+}
+
+// Read-only view of an internal stage of a fixed-depth delay line.  The
+// producer remains the owner of the storage; this op only exposes the value
+// that would be present after `depth` enabled edges.
+def PYC_DelayTapOp : PYC_Op<"delay_tap",
+    [AllTypesMatch<["line", "tap"]>,
+     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Read-only fixed-depth delay-line tap";
+  let arguments = (ins AnyIntegerOrV:$line);
+  let results = (outs AnyIntegerOrV:$tap);
+  let hasVerifier = 1;
+  let assemblyFormat = "$line attr-dict `:` type($tap)";
+}
+
 def PYC_FifoOp : PYC_Op<"fifo", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch<["in_data", "out_data"]>]> {
   let summary = "Ready/valid FIFO (single-clock, strict handshake)";
   let arguments = (ins PYC_ClockType:$clk, PYC_ResetType:$rst, I1:$in_valid, AnyInteger:$in_data, I1:$out_ready);
@@ -313,7 +337,6 @@ def PYC_ByteMemOp : PYC_Op<"byte_mem", [MemoryEffects<[MemRead, MemWrite]>,
                                        AllTypesMatch<["wdata", "rdata"]>]> {
   let summary = "Byte-addressed memory (async read, sync write, prototype)";
   let arguments = (ins PYC_ClockType:$clk,
-                       PYC_ResetType:$rst,
                        AnyInteger:$raddr,
                        I1:$wvalid,
                        AnyInteger:$waddr,
@@ -321,43 +344,21 @@ def PYC_ByteMemOp : PYC_Op<"byte_mem", [MemoryEffects<[MemRead, MemWrite]>,
                        AnyInteger:$wstrb);
   let results = (outs AnyInteger:$rdata);
   let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $rst `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
+  let assemblyFormat = "$clk `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
 }
 
-def PYC_SyncMemOp : PYC_Op<"sync_mem", [MemoryEffects<[MemRead, MemWrite]>,
-                                       AllTypesMatch<["raddr", "waddr"]>,
-                                       AllTypesMatch<["wdata", "rdata"]>]> {
-  let summary = "Synchronous 1R1W memory (registered read data, prototype)";
-  let arguments = (ins PYC_ClockType:$clk,
-                       PYC_ResetType:$rst,
-                       I1:$ren,
-                       AnyInteger:$raddr,
-                       I1:$wvalid,
-                       AnyInteger:$waddr,
-                       AnyInteger:$wdata,
-                       AnyInteger:$wstrb);
-  let results = (outs AnyInteger:$rdata);
+def PYC_SyncMemNMOp : PYC_Op<"sync_mem_nm", [MemoryEffects<[MemRead, MemWrite]>, AttrSizedOperandSegments]> {
+  let summary = "Synchronous NxM memory (N registered read ports, M write ports; higher write index wins same-address write conflicts; read_mode=forward returns the last matching same-edge write, read_mode=old returns pre-write data, prototype)";
+  let arguments = (ins Variadic<I1>:$rens,
+                        Variadic<AnyInteger>:$raddrs,
+                        Variadic<I1>:$wvalids,
+                        Variadic<AnyInteger>:$waddrs,
+                        Variadic<AnyInteger>:$wdatas,
+                        Variadic<AnyInteger>:$wstrbs,
+                        PYC_ClockType:$clk,
+                        DefaultValuedStrAttr<StrAttr, "forward">:$read_mode);
+  let results = (outs Variadic<AnyInteger>:$rdatas);
   let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $rst `,` $ren `,` $raddr `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr) `,` type($rdata) `,` type($wstrb)";
-}
-
-def PYC_SyncMemDPOp : PYC_Op<"sync_mem_dp", [MemoryEffects<[MemRead, MemWrite]>,
-                                            AllTypesMatch<["raddr0", "raddr1", "waddr"]>,
-                                            AllTypesMatch<["wdata", "rdata0", "rdata1"]>]> {
-  let summary = "Synchronous 2R1W memory (dual-read, registered outputs, prototype)";
-  let arguments = (ins PYC_ClockType:$clk,
-                       PYC_ResetType:$rst,
-                       I1:$ren0,
-                       AnyInteger:$raddr0,
-                       I1:$ren1,
-                       AnyInteger:$raddr1,
-                       I1:$wvalid,
-                       AnyInteger:$waddr,
-                       AnyInteger:$wdata,
-                       AnyInteger:$wstrb);
-  let results = (outs AnyInteger:$rdata0, AnyInteger:$rdata1);
-  let hasVerifier = 1;
-  let assemblyFormat = "$clk `,` $rst `,` $ren0 `,` $raddr0 `,` $ren1 `,` $raddr1 `,` $wvalid `,` $waddr `,` $wdata `,` $wstrb attr-dict `:` type($raddr0) `,` type($rdata0) `,` type($wstrb)";
 }
 
 def PYC_AsyncFifoOp : PYC_Op<"async_fifo", [MemoryEffects<[MemRead, MemWrite]>, AllTypesMatch<["in_data", "out_data"]>]> {
