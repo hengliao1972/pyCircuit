@@ -68,6 +68,8 @@ public:
       pending_.push_back(0);
     }
     dirty_.assign(loop_word_count(q_.size()), 0);
+    pendingSeen_.assign(q_.size(), 0);
+    shadowSeen_.assign(q_.size(), 0);
   }
 
   std::size_t size() const { return q_.size(); }
@@ -136,28 +138,55 @@ public:
     const bool r = rst_->toBool();
     const bool go = r | en_->toBool();
     if (go) {
-      for (std::size_t i = 0; i < n; ++i) {
-        pending_[i] = 1;
+      std::uint64_t *const *const d = d_.data();
+      const std::uint64_t *const *const init = init_.data();
+      std::uint64_t *const *const qp = q_.data();
+      const unsigned *const words = words_.data();
+      for (std::size_t base = 0; base < n; base += 64) {
+        const std::size_t end = (base + 64 < n) ? base + 64 : n;
+        std::uint64_t mask = 0;
+        for (std::size_t i = base; i < end; ++i) {
+          const std::uint64_t *src = r ? init[i] : d[i];
+          std::uint64_t *q = qp[i];
+          if (words[i] == 1) {
+            const std::uint64_t v = src[0];
+            mask |= static_cast<std::uint64_t>(q[0] != v) << (i - base);
+            q[0] = v;
+          } else {
+            std::uint64_t changed = 0;
+            for (unsigned w = 0; w < words[i]; ++w) {
+              const std::uint64_t v = src[w];
+              changed |= q[w] != v;
+              q[w] = v;
+            }
+            mask |= changed << (i - base);
+          }
+        }
+        dirty_[base >> 6] |= mask;
+      }
+      // Only lanes a consumer bound (lane_pending/lane_qnext_raw) are mirrored:
+      // an untouched probe costs nothing, no retroactive scan is needed.
+      for (std::size_t k = 0; k < shadowLanes_.size(); ++k) {
+        const std::size_t i = shadowLanes_[k];
         const std::uint64_t *src = r ? init_[i] : d_[i];
         std::uint64_t *next = qStore_.data() + laneOff_[i];
-        std::uint64_t *q = q_[i];
-        bool changed = false;
-        for (unsigned w = 0; w < words_[i]; ++w) {
-          changed |= q[w] != src[w];
+        for (unsigned w = 0; w < words_[i]; ++w)
           next[w] = src[w];
-          q[w] = src[w];
-        }
-        if (changed)
-          dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
       }
+      for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
+        pending_[pendingLanes_[k]] = 1;
     } else {
-      for (std::size_t i = 0; i < n; ++i)
-        pending_[i] = 0;
+      for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
+        pending_[pendingLanes_[k]] = 0;
     }
     return dirty_;
   }
 
-  void retire() { clear_pending(); }
+  // q is published in tick_compute; retire() only clears probe pending flags.
+  void retire() {
+    for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
+      pending_[pendingLanes_[k]] = 0;
+  }
 
   // Diagnostic/helper reset of the consumed-in-place dirty bitmap; generated
   // code never calls this (the wake walks clear as they consume).
@@ -168,11 +197,19 @@ public:
   // stores char with values exactly 0/1; bool has the same object
   // representation on the Itanium ABI and consumers only test truthiness.
   bool *lane_pending(std::size_t i) {
+    if (!pendingSeen_[i]) {
+      pendingSeen_[i] = 1;
+      pendingLanes_.push_back(i);
+    }
     return reinterpret_cast<bool *>(&pending_[i]);
   }
   // Segment is kWords long; callers reinterpret it as Wire<W> (Bits is
   // standard-layout with words_ as its only member).
   void *lane_qnext_raw(std::size_t i) {
+    if (!shadowSeen_[i]) {
+      shadowSeen_[i] = 1;
+      shadowLanes_.push_back(i);
+    }
     return qStore_.data() + laneOff_[i];
   }
 
@@ -188,6 +225,10 @@ private:
   std::vector<std::uint64_t> qStore_;
   std::vector<std::size_t> laneOff_;
   std::vector<char> pending_;
+  std::vector<std::size_t> pendingLanes_;  // lanes bound via lane_pending()
+  std::vector<std::size_t> shadowLanes_;   // lanes bound via lane_qnext_raw()
+  std::vector<char> pendingSeen_;
+  std::vector<char> shadowSeen_;
   std::vector<std::uint64_t> dirty_;
   bool clkPrev_ = false;
 };
