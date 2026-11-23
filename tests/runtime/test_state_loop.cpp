@@ -61,6 +61,13 @@ int main() {
                           dinit[i].data(), 4u, 1u}});
   }
 
+  // Write-intent storage is materialized from the first lane_pending /
+  // lane_qnext_raw access on (probes nobody binds cost nothing), so a consumer
+  // binds its lanes before the first tick — exactly like pyc_register_probes.
+  for (unsigned i = 0; i < kRegLanes; ++i) {
+    fusedLoop.lane_pending(i);
+    fusedLoop.lane_qnext_raw(i);
+  }
   bool prev = false;
   Sum ref, loop;
   for (unsigned c = 0; c < kCycles; ++c) {
