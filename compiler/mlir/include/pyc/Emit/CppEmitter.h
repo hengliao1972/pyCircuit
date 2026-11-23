@@ -78,6 +78,10 @@ struct CppEmitterOptions {
   // Chunk fused comb helpers to avoid single mega-functions that dominate
   // downstream C++ TU cost even after file sharding.
   unsigned combChunkNodes = kDefaultCombChunkNodes;
+  // Sibling-instance parallelism (0 = off, N >= 2 = fork the independent
+  // instances of one stage onto an N-way persistent pool). 0 keeps the emitted
+  // code byte-identical to the serial emitter.
+  unsigned parallelInstances = 0;
   std::string probePlanPath{};
 };
 
