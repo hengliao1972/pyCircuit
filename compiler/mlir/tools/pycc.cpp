@@ -122,6 +122,16 @@ static llvm::cl::opt<std::string> cppSplitMode(
     llvm::cl::desc("C++ out-dir split mode: module|none"),
     llvm::cl::init("module"));
 
+static llvm::cl::opt<bool> cppPch(
+    "cpp-pch",
+    llvm::cl::desc("Record device module hpp for CMake precompiled headers (requires --cpp-split=module)"),
+    llvm::cl::init(false));
+
+static llvm::cl::opt<bool> cppCompileBudget(
+    "cpp-compile-budget",
+    llvm::cl::desc("Enforce predicted C++ compile cost budgets (PYC991-993)"),
+    llvm::cl::init(true));
+
 static llvm::cl::opt<unsigned> cppShardThresholdLines(
     "cpp-shard-threshold-lines",
     llvm::cl::desc("Shard oversized C++ module sources when generated line count exceeds this threshold"),
@@ -151,6 +161,27 @@ static llvm::cl::opt<std::string> probePlanPath(
     "probe-plan",
     llvm::cl::desc("Resolved @probe alias plan JSON to embed into generated ProbeRegistry registration"),
     llvm::cl::init(""));
+
+static llvm::cl::opt<std::string> traceCodegenPlanPath(
+    "trace-codegen-plan",
+    llvm::cl::desc(
+        "Resolved per-module internal trace fields used by C++ placement"),
+    llvm::cl::init(""));
+
+static llvm::cl::opt<bool> stateLoop(
+    "state-loop",
+    llvm::cl::desc(
+        "Lower same-clock registers and delay lines into per-clock state "
+        "loops (--state-loop=false for the per-object lowering)"),
+    llvm::cl::init(true));
+
+static llvm::cl::opt<std::string> observeNamed(
+    "observe-named",
+    llvm::cl::desc(
+        "Which pyc.name values stay as eager C++ probes after state opt: "
+        "demand (default: @probe/trace/IR attrs eager, other names lazy "
+        "lookup) or all (every non-cycle-balance name eager)"),
+    llvm::cl::init("demand"));
 
 static llvm::cl::opt<std::string> targetKind("target", llvm::cl::desc("Target: default|fpga"),
                                              llvm::cl::init("default"));
@@ -657,6 +688,16 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
             v = a.getIn();
           if (v.getDefiningOp<pyc::RegOp>() != nullptr)
             return true;
+          if (v.getDefiningOp<pyc::DelayLineOp>() != nullptr)
+            return true;
+          if (v.getDefiningOp<pyc::DelayTapOp>() != nullptr)
+            return true;
+          if (auto extract = v.getDefiningOp<pyc::ExtractOp>()) {
+            if (!extract->hasAttr("pyc.state_pack_lsb"))
+              return false;
+            v = extract.getIn();
+            continue;
+          }
           auto comb = v.getDefiningOp<pyc::CombOp>();
           if (!comb)
             return false;
@@ -673,6 +714,13 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
           Value y = yield.getOperand(res.getResultNumber());
           while (auto a = y.getDefiningOp<pyc::AliasOp>())
             y = a.getIn();
+          if (auto extract = y.getDefiningOp<pyc::ExtractOp>()) {
+            if (!extract->hasAttr("pyc.state_pack_lsb"))
+              return false;
+            y = extract.getIn();
+            while (auto alias = y.getDefiningOp<pyc::AliasOp>())
+              y = alias.getIn();
+          }
           auto barg = dyn_cast<BlockArgument>(y);
           if (!barg)
             return false;
@@ -741,6 +789,16 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
           v = a.getIn();
         if (auto rop = v.getDefiningOp<pyc::RegOp>())
           return rop.getQ();
+        if (auto delay = v.getDefiningOp<pyc::DelayLineOp>())
+          return delay.getQ();
+        if (auto tap = v.getDefiningOp<pyc::DelayTapOp>())
+          return tap.getLine();
+        if (auto extract = v.getDefiningOp<pyc::ExtractOp>()) {
+          if (!extract->hasAttr("pyc.state_pack_lsb"))
+            return Value();
+          v = extract.getIn();
+          continue;
+        }
         auto comb = v.getDefiningOp<pyc::CombOp>();
         if (!comb)
           return Value();
@@ -757,6 +815,13 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
         Value y = yield.getOperand(res.getResultNumber());
         while (auto a = y.getDefiningOp<pyc::AliasOp>())
           y = a.getIn();
+        if (auto extract = y.getDefiningOp<pyc::ExtractOp>()) {
+          if (!extract->hasAttr("pyc.state_pack_lsb"))
+            return Value();
+          y = extract.getIn();
+          while (auto alias = y.getDefiningOp<pyc::AliasOp>())
+            y = alias.getIn();
+        }
         auto barg = dyn_cast<BlockArgument>(y);
         if (!barg)
           return Value();
@@ -775,6 +840,10 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
 
     llvm::StringSet<> localNamedFields;
     f.walk([&](Operation *op) {
+      // Cycle-balance names are compiler temporaries, not stable user probes.
+      if (auto generated = op->getAttrOfType<StringAttr>("pyc.generated");
+          generated && generated.getValue() == "cycle_balance")
+        return;
       auto nameAttr = op->getAttrOfType<StringAttr>("pyc.name");
       if (!nameAttr)
         return;
@@ -832,8 +901,10 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
         return failure();
     }
 
-    const auto syncMems = collectMemNames([](Operation &op) { return isa<pyc::SyncMemOp>(op); });
-    for (const auto &name : syncMems) {
+    const auto syncMemNMs = collectMemNames([](Operation &op) {
+      return isa<pyc::SyncMemNMOp>(op);
+    });
+    for (const auto &name : syncMemNMs) {
       ProbeManifestEntry e;
       e.instance_path = canonInstPath;
       e.field_path = name;
@@ -847,23 +918,6 @@ static LogicalResult emitProbeManifest(ModuleOp module, llvm::StringRef outPath)
       if (failed(addEntry(std::move(e))))
         return failure();
     }
-
-    const auto syncMemDPs = collectMemNames([](Operation &op) { return isa<pyc::SyncMemDPOp>(op); });
-    for (const auto &name : syncMemDPs) {
-      ProbeManifestEntry e;
-      e.instance_path = canonInstPath;
-      e.field_path = name;
-      e.canonical_path = canonInstPath + ":" + name;
-      e.module = sym;
-      e.kind = "state";
-      e.subkind = "mem";
-      e.dir = "mem";
-      e.width_bits = 0;
-      e.ty = "mem";
-      if (failed(addEntry(std::move(e))))
-        return failure();
-    }
-
     struct ChildInfo {
       std::string name;
       std::string seg;
@@ -1063,7 +1117,10 @@ static std::optional<std::string> findToolchainRoot(const char *argv0) {
   for (unsigned i = 0; i < 6 && !cur.empty(); ++i) {
     if (auto found = tryRoot(cur))
       return found;
-    cur = llvm::sys::path::parent_path(cur);
+    // parent_path(cur) is a StringRef into cur. Copy it before assigning back
+    // because SmallVector assignment may resize and invalidate that reference.
+    llvm::SmallString<256> next = llvm::sys::path::parent_path(cur);
+    cur = next;
   }
   return std::nullopt;
 }
@@ -1073,8 +1130,7 @@ static LogicalResult emitPrimitivesFile(llvm::StringRef outPath, llvm::StringRef
       "pyc_reg.v",
       "pyc_fifo.v",
       "pyc_byte_mem.v",
-      "pyc_sync_mem.v",
-      "pyc_sync_mem_dp.v",
+      "pyc_sync_mem_nm.v",
       "pyc_async_fifo.v",
       "pyc_cdc_sync.v",
   };
@@ -1833,6 +1889,8 @@ static LogicalResult writeCppCompileManifest(llvm::StringRef path,
                                              llvm::ArrayRef<std::string> compileDefines,
                                              std::optional<std::string> toolchainRoot,
                                              llvm::StringRef topHeader,
+                                             llvm::StringRef outDirAbs,
+                                             bool enableDevicePch,
                                              const llvm::json::Object &profileSummary) {
   llvm::json::Object manifest;
   manifest["version"] = 3;
@@ -1910,6 +1968,17 @@ static LogicalResult writeCppCompileManifest(llvm::StringRef path,
   }
   manifest["top_header"] = topHeader.str();
   manifest["profile_summary"] = llvm::json::Object(profileSummary);
+  if (enableDevicePch) {
+    std::string expectedHeader = (targetName + ".hpp").str();
+    if (topHeader == expectedHeader) {
+      llvm::SmallString<256> headerAbs(outDirAbs);
+      llvm::sys::path::append(headerAbs, topHeader);
+      llvm::json::Array pchJson;
+      pchJson.push_back(headerAbs.str().str());
+      manifest["precompile_headers"] = std::move(pchJson);
+      manifest["precompile_headers_mode"] = "device_hpp";
+    }
+  }
 
   std::string hashInput;
   hashInput.reserve(256);
@@ -1938,6 +2007,8 @@ static LogicalResult writeCppCompileManifest(llvm::StringRef path,
 struct CompileStatsSummary {
   int64_t regCount = 0;
   int64_t regBits = 0;
+  int64_t retimeRegionsRewritten = 0;
+  int64_t retimeCombOpsMoved = 0;
   int64_t memCount = 0;
   int64_t memBits = 0;
   int64_t maxLogicDepth = 0;
@@ -1945,6 +2016,9 @@ struct CompileStatsSummary {
   int64_t tns = 0;
   int64_t logicDepthLimit = 32;
   bool fuseCombEnabled = false;
+  std::string observeNamedPolicy;
+  int64_t observeNamedNamesLazy = 0;
+  int64_t observeNamedNamesKept = 0;
 };
 
 static int64_t getI64Attr(Operation *op, llvm::StringRef name, int64_t fallback = 0) {
@@ -1971,8 +2045,19 @@ static CompileStatsSummary collectCompileStats(ModuleOp module, int64_t depthLim
   for (auto f : module.getOps<func::FuncOp>()) {
     s.regCount = satAdd(s.regCount, getI64Attr(f, "pyc.stats.reg_count", 0));
     s.regBits = satAdd(s.regBits, getI64Attr(f, "pyc.stats.reg_bits", 0));
+    s.retimeRegionsRewritten = satAdd(
+        s.retimeRegionsRewritten,
+        getI64Attr(f, "pyc.stats.retime_regions_rewritten", 0));
+    s.retimeCombOpsMoved = satAdd(
+        s.retimeCombOpsMoved, getI64Attr(f, "pyc.stats.retime_comb_ops_moved", 0));
     s.memCount = satAdd(s.memCount, getI64Attr(f, "pyc.stats.mem_count", 0));
     s.memBits = satAdd(s.memBits, getI64Attr(f, "pyc.stats.mem_bits", 0));
+    s.observeNamedNamesLazy = satAdd(
+        s.observeNamedNamesLazy,
+        getI64Attr(f, "pyc.stats.observe_named_names_lazy", 0));
+    s.observeNamedNamesKept = satAdd(
+        s.observeNamedNamesKept,
+        getI64Attr(f, "pyc.stats.observe_named_names_kept", 0));
 
     s.maxLogicDepth = std::max(s.maxLogicDepth, getI64Attr(f, "pyc.logic_depth.max", 0));
 
@@ -1993,10 +2078,13 @@ static CompileStatsSummary collectCompileStats(ModuleOp module, int64_t depthLim
 
 static void printCompileStats(const CompileStatsSummary &s) {
   llvm::errs() << "stats: regs=" << s.regCount << " (" << s.regBits << " bits)"
+               << ", retime_rewritten=" << s.retimeRegionsRewritten
+               << ", comb_moved=" << s.retimeCombOpsMoved
                << ", mems=" << s.memCount << " (" << s.memBits << " bits)"
                << ", max_depth=" << s.maxLogicDepth << "/" << s.logicDepthLimit
                << ", WNS=" << s.wns << ", TNS=" << s.tns
-               << ", fuse_comb=" << (s.fuseCombEnabled ? "on" : "off") << "\n";
+               << ", fuse_comb=" << (s.fuseCombEnabled ? "on" : "off")
+               << ", observe_named=" << s.observeNamedPolicy << "\n";
 }
 
 static LogicalResult writeCompileStatsJson(llvm::StringRef outPath, const CompileStatsSummary &s) {
@@ -2010,6 +2098,11 @@ static LogicalResult writeCompileStatsJson(llvm::StringRef outPath, const Compil
   obj["wns"] = s.wns;
   obj["tns"] = s.tns;
   obj["fuse_comb_enabled"] = s.fuseCombEnabled;
+  obj["retime_regions_rewritten"] = s.retimeRegionsRewritten;
+  obj["retime_comb_ops_moved"] = s.retimeCombOpsMoved;
+  obj["observe_named"] = s.observeNamedPolicy;
+  obj["observe_named_names_lazy"] = s.observeNamedNamesLazy;
+  obj["observe_named_names_kept"] = s.observeNamedNamesKept;
 
   std::string buf;
   llvm::raw_string_ostream ss(buf);
@@ -2062,6 +2155,24 @@ int main(int argc, char **argv) {
   }
   if ((hasDirectCpp || hasDirectVerilog) && outputFilename.empty()) {
     llvm::errs() << "error: direct output mode requires a non-empty output path\n";
+    return 1;
+  }
+  if (cppPch && emitKind != "cpp") {
+    llvm::errs() << "error: --cpp-pch requires --emit=cpp\n";
+    return 1;
+  }
+  if (cppPch && outDir.empty()) {
+    llvm::errs() << "error: --cpp-pch requires --out-dir\n";
+    return 1;
+  }
+  if (cppPch && cppSplitMode != "module") {
+    llvm::errs() << "error: --cpp-pch requires --cpp-split=module\n";
+    return 1;
+  }
+
+  if (observeNamed != "demand" && observeNamed != "all") {
+    llvm::errs() << "error: unknown --observe-named: " << observeNamed
+                 << " (expected: demand|all)\n";
     return 1;
   }
 
@@ -2264,6 +2375,9 @@ int main(int argc, char **argv) {
         static_cast<int64_t>(effectiveCanonicalizeBudget) * 4096);
   }
 
+  const unsigned cppCombChunkNodes = cppShardMaxAstNodes > 0 ? cppShardMaxAstNodes
+                                                           : pyc::CppEmitterOptions::kDefaultCombChunkNodes;
+
   // Cleanup + optimization pipeline tuned for netlist-style emission.
   PassManager pm(&ctx);
   std::unique_ptr<PassTimingCollector> passTimingStorage;
@@ -2318,23 +2432,49 @@ int main(int argc, char **argv) {
     pm.addNestedPass<func::FuncOp>(pyc::createVectorUnrollPass());
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadStatePass());
+  // State rewrites (delay-line formation) run on the C++ emit path only so
+  // Verilog keeps the pre-optimization register netlist.
+  if (emitKind == "cpp")
+    pm.addNestedPass<func::FuncOp>(pyc::createStateOptimizePass());
+  // Must run after the state rewrites: retiming and chain forming crash on
+  // the merged multiplicity.
+  pm.addNestedPass<func::FuncOp>(pyc::createMergeRegCopiesPass());
   if (!unrollVector)
     pm.addNestedPass<func::FuncOp>(pyc::createSLPPackWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createCombCanonicalizePass());
-  pm.addPass(pyc::createCheckCombCyclesPass());
   pm.addPass(pyc::createCheckClockDomainsPass());
   pm.addNestedPass<func::FuncOp>(pyc::createPackI1RegsPass());
+  // Loop partition runs after all state rewrites so loops cover the final
+  // state set; the C++ emitter reads the ids. fuse-comb only hoists state,
+  // keeping its relative order.
+  if (emitKind == "cpp" && stateLoop)
+    pm.addNestedPass<func::FuncOp>(pyc::createStateLoopPartitionPass());
+  // Demand mode drops undemanded pyc.name after identities were remapped,
+  // before fuse-comb treats leftover names as barriers.
+  if (emitKind == "cpp" && observeNamed == "demand")
+    pm.addPass(pyc::createApplyObservationDemandPass(
+        probePlanPath, traceCodegenPlanPath));
   const bool enableFuseComb = (!cppOnly) || !cppOnlyPreserveOps;
-  if (enableFuseComb)
+  if (enableFuseComb) {
+    // State rewrites add wire readers; restore dependency order before fusion.
+    pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());
     pm.addNestedPass<func::FuncOp>(pyc::createFuseCombPass());
+  }
   pm.addPass(createCanonicalizerPass(canonicalizeCfg));
   pm.addPass(createCSEPass());
   addRemoveDeadValuesPassIfSupported(pm);
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadInstancesPass());
   pm.addPass(createSymbolDCEPass());
+  // Fusion moves combinational ops into pyc.comb regions. The canonical graph
+  // still sees those dependencies, so one check after fusion is sufficient.
+  pm.addPass(pyc::createCheckCombCyclesPass());
+  pm.addPass(pyc::createChangeDrivenSchedulePass());
   pm.addNestedPass<func::FuncOp>(pyc::createCheckFlatTypesPass());
   pm.addNestedPass<func::FuncOp>(pyc::createCheckNoDynamicPass());
   pm.addPass(pyc::createCheckLogicDepthPass(logicDepthLimit));
+  if (emitKind == "cpp")
+    pm.addPass(
+        pyc::createCppPlacementPass(cppCombChunkNodes, traceCodegenPlanPath));
   pm.addNestedPass<func::FuncOp>(pyc::createCollectCompileStatsPass());
   const auto tPassStart = Clock::now();
   if (failed(pm.run(*module))) {
@@ -2371,6 +2511,8 @@ int main(int argc, char **argv) {
 
   CompileStatsSummary compileStats = collectCompileStats(*module, static_cast<int64_t>(logicDepthLimit));
   compileStats.fuseCombEnabled = enableFuseComb;
+  compileStats.observeNamedPolicy =
+      emitKind == "cpp" ? std::string(observeNamed) : std::string("off");
   printCompileStats(compileStats);
 
   if (!probeManifestPath.empty()) {
@@ -2386,7 +2528,11 @@ int main(int argc, char **argv) {
     return writeCompileStatsJson(statsPath, compileStats);
   };
 
-  auto buildProfileSummary = [&]() -> llvm::json::Object {
+  pyc::CppPlacementSummary placementTotals;
+  if (emitKind == "cpp")
+    placementTotals = pyc::accumulateModulePlacementSummary(*module);
+
+  auto buildProfileSummary = [&](const pyc::CppPlacementSummary &placementSummary) -> llvm::json::Object {
     llvm::json::Object obj;
     obj["build_profile"] = buildProfileNorm;
     obj["hierarchy_policy"] = hierarchyPolicy.getValue();
@@ -2402,7 +2548,20 @@ int main(int argc, char **argv) {
     obj["cpp_shard_threshold_lines"] = static_cast<int64_t>(cppShardThresholdLines);
     obj["cpp_shard_threshold_bytes"] = static_cast<int64_t>(cppShardThresholdBytes);
     obj["cpp_shard_max_ast_nodes"] = static_cast<int64_t>(cppShardMaxAstNodes);
+    obj["cpp_pch"] = cppPch.getValue();
     obj["profile_pass_timing"] = collectPassTiming;
+    {
+      llvm::json::Object placement;
+      placement["struct_members"] = static_cast<int64_t>(placementSummary.structMembers);
+      placement["local_in_method"] = static_cast<int64_t>(placementSummary.localInMethod);
+      placement["probe_pinned_struct"] = static_cast<int64_t>(placementSummary.probePinnedStruct);
+      placement["cross_part_promoted"] = static_cast<int64_t>(placementSummary.crossPartPromoted);
+      placement["scheduled_cross_method"] =
+          static_cast<int64_t>(placementSummary.scheduledCrossMethod);
+      placement["scheduled_cut_weight"] =
+          static_cast<int64_t>(placementSummary.scheduledCutWeight);
+      obj["cpp_placement"] = std::move(placement);
+    }
     return obj;
   };
 
@@ -2454,6 +2613,11 @@ int main(int argc, char **argv) {
     stats["wns"] = compileStats.wns;
     stats["tns"] = compileStats.tns;
     stats["fuse_comb_enabled"] = compileStats.fuseCombEnabled;
+    stats["retime_regions_rewritten"] = compileStats.retimeRegionsRewritten;
+    stats["retime_comb_ops_moved"] = compileStats.retimeCombOpsMoved;
+    stats["observe_named"] = compileStats.observeNamedPolicy;
+    stats["observe_named_names_lazy"] = compileStats.observeNamedNamesLazy;
+    stats["observe_named_names_kept"] = compileStats.observeNamedNamesKept;
     root["compile_stats"] = std::move(stats);
 
     if (passTimingCollector)
@@ -2566,10 +2730,6 @@ int main(int argc, char **argv) {
       llvm::json::Array cppFiles;
       std::vector<CppManifestSource> cppManifestSources;
       pyc::CppEmitterOptions cppEmitOpts;
-      if (cppShardMaxAstNodes > 0) {
-        cppEmitOpts.evalTopoChunkNodes = cppShardMaxAstNodes;
-        cppEmitOpts.combChunkNodes = cppShardMaxAstNodes;
-      }
       cppEmitOpts.probePlanPath = probePlanPath;
 
       // Collect direct dependencies per module for header includes.
@@ -2597,18 +2757,21 @@ int main(int argc, char **argv) {
         llvm::errs() << "error: unknown --cpp-split mode: " << cppSplitMode << " (expected: module|none)\n";
         return 1;
       }
-
       auto writeHeaderPreamble = [&](llvm::raw_ostream &os, llvm::StringRef moduleName) {
         (void)moduleName;
         os << "// pyCircuit C++ emission (split)\n";
         os << "#pragma once\n";
+        os << "#include <array>\n";
         os << "#include <cstdlib>\n";
         os << "#include <cstdint>\n";
         os << "#include <fstream>\n";
         os << "#include <iostream>\n";
         os << "#include <memory>\n";
         os << "#include <string>\n";
+        os << "#include <type_traits>\n";
         os << "#include <cpp/pyc_sim.hpp>\n";
+        os << "#include <cpp/pyc_state_loop.hpp>\n";
+        os << "#include <cpp/pyc_change_scheduler.hpp>\n";
       };
 
       auto writeSourcePreamble = [&](llvm::raw_ostream &os, llvm::StringRef headerName) {
@@ -2830,10 +2993,14 @@ int main(int argc, char **argv) {
           }
           hos << "// pyCircuit C++ emission (prototype)\n";
           hos << "#pragma once\n";
+          hos << "#include <array>\n";
           hos << "#include <cstdlib>\n";
           hos << "#include <iostream>\n";
           hos << "#include <memory>\n";
+          hos << "#include <type_traits>\n";
           hos << "#include <cpp/pyc_sim.hpp>\n";
+          hos << "#include <cpp/pyc_state_loop.hpp>\n";
+          hos << "#include <cpp/pyc_change_scheduler.hpp>\n";
           for (const std::string &dep : deps[f.getSymName()])
             hos << "#include \"" << dep << ".hpp\"\n";
           hos << "\nnamespace pyc::gen {\n\n";
@@ -2845,7 +3012,8 @@ int main(int argc, char **argv) {
       }
 
       if (splitModule) {
-        if (failed(enforceCppCompileBudgets(*module, cppManifestSources)))
+        if (cppCompileBudget &&
+            failed(enforceCppCompileBudgets(*module, cppManifestSources)))
           return 1;
         llvm::SmallString<256> manifestPathStorage;
         if (!cppManifestPath.empty()) {
@@ -2857,13 +3025,19 @@ int main(int argc, char **argv) {
         std::vector<std::string> includeDirs = {std::string(outDir)};
         std::vector<std::string> compileDefines;
         std::string topHeaderName = top + ".hpp";
-        llvm::json::Object manifestProfile = buildProfileSummary();
+        llvm::json::Object manifestProfile = buildProfileSummary(placementTotals);
         manifestProfile["pycc_peak_rss_bytes"] = static_cast<int64_t>(getPeakRssBytes());
         manifestProfile["pass_time_ms"] = static_cast<int64_t>(passMs);
         auto toolchainRoot = findToolchainRoot(argv[0]);
+        llvm::SmallString<256> outDirAbs(outDir);
+        if (std::error_code ec = llvm::sys::fs::make_absolute(outDirAbs)) {
+          llvm::errs() << "error: cannot resolve absolute path for --out-dir " << outDir << ": "
+                       << ec.message() << "\n";
+          return 1;
+        }
         if (failed(writeCppCompileManifest(manifestPathStorage, top, cppManifestSources,
                                            includeDirs, compileDefines, toolchainRoot, topHeaderName,
-                                           manifestProfile)))
+                                           outDirAbs, cppPch.getValue(), manifestProfile)))
           return 1;
       }
 
@@ -2916,10 +3090,6 @@ int main(int argc, char **argv) {
   }
   if (emitKind == "cpp") {
     pyc::CppEmitterOptions cppEmitOpts;
-    if (cppShardMaxAstNodes > 0) {
-      cppEmitOpts.evalTopoChunkNodes = cppShardMaxAstNodes;
-      cppEmitOpts.combChunkNodes = cppShardMaxAstNodes;
-    }
     cppEmitOpts.probePlanPath = probePlanPath;
     if (failed(pyc::emitCpp(*module, os, cppEmitOpts)))
       return 1;

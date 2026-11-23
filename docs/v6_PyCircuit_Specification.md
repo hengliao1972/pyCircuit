@@ -488,8 +488,8 @@ circ = compile_cycle_aware(top, eager=True, name="top", hierarchical=True)
 |----------|---------|------|
 | `m.fifo(...)` | `pyc.fifo` | 单时钟 ready/valid FIFO（attr `depth`） |
 | `m.byte_mem(...)` | `pyc.byte_mem` | 异步读、同步写、字节使能存储 |
-| `m.sync_mem(...)` | `pyc.sync_mem` | 同步 1R1W（读数据打拍） |
-| `m.sync_mem_dp(...)` | `pyc.sync_mem_dp` | 同步 2R1W |
+| `m.sync_mem_nm(...)` | `pyc.sync_mem_nm` | 同步 N 读 × M 写（读数据打拍；`read_mode` = forward/old） |
+| `m.sync_mem(...)` / `m.sync_mem_dp(...)` | `pyc.sync_mem_nm` | 上述的 1R1W / 2R1W 简写（发射 `read_mode="old"`） |
 | `m.async_fifo(...)` | `pyc.async_fifo` | 双时钟异步 FIFO |
 | `m.cdc_sync(...)` | `pyc.cdc_sync` | 多级同步器（attr `stages`，默认 2） |
 | `m.rv_queue(...)` | 组合原语 | ready/valid 队列；`pop()` 返回 `Pop(valid, data, fire)` |
