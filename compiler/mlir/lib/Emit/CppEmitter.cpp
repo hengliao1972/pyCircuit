@@ -1057,6 +1057,25 @@ static void emitCombResultPublish(
   os << "    }\n";
 }
 
+// L28 lane marks: per fused loop, the lanes whose next-state value is produced
+// by a given comb block. Emitted inside that comb's method body, so a lane is
+// marked exactly when its producer comb actually runs. A lane whose next value
+// has no comb producer (constant, delay tap, instance output, memory read) is
+// permanently marked instead.
+using LaneMarkTable =
+    llvm::DenseMap<unsigned, llvm::SmallVector<std::pair<unsigned, std::uint64_t>>>;
+
+static void emitLaneMark(const LaneMarkTable &marks, unsigned combIdx,
+                         llvm::raw_ostream &os, llvm::StringRef indent,
+                         llvm::StringRef arrayName) {
+  auto it = marks.find(combIdx);
+  if (it == marks.end())
+    return;
+  for (const auto &wm : it->second)
+    os << indent << arrayName << "[" << wm.first << "u] |= 0x"
+       << llvm::utohexstr(wm.second) << "ull;\n";
+}
+
 static LogicalResult emitCombMethod(pyc::CombOp comb,
                                     llvm::raw_ostream &os,
                                     NameTable &nt,
@@ -1066,7 +1085,9 @@ static LogicalResult emitCombMethod(pyc::CombOp comb,
                                     const llvm::DenseMap<Operation *, unsigned>
                                         &combIndices,
                                     const llvm::DenseMap<int64_t, llvm::SmallVector<pyc::DelayLineOp>>
-                                        *delayLoopLines = nullptr) {
+                                        *delayLoopLines = nullptr,
+                                    const LaneMarkTable *laneMarks = nullptr,
+                                    llvm::StringRef laneMarkArray = "_pyc_lane_marks") {
   if (comb.getBody().empty())
     return comb.emitError("pyc.comb must have a non-empty region");
 
@@ -1128,6 +1149,8 @@ static LogicalResult emitCombMethod(pyc::CombOp comb,
     for (auto [i, v] : llvm::enumerate(y.getOperands()))
       emitCombResultPublish(comb, idx, static_cast<unsigned>(i), v, os, nt,
                             schedule, combIndices);
+    if (laneMarks)
+      emitLaneMark(*laneMarks, idx, os, "    ", laneMarkArray);
     os << "  }\n\n";
     return success();
   }
@@ -1150,6 +1173,8 @@ static LogicalResult emitCombMethod(pyc::CombOp comb,
   for (auto [i, v] : llvm::enumerate(y.getOperands()))
     emitCombResultPublish(comb, idx, static_cast<unsigned>(i), v, os, nt,
                           schedule, combIndices);
+  if (laneMarks)
+    emitLaneMark(*laneMarks, idx, os, "    ", laneMarkArray);
   os << "  }\n\n";
   return success();
 }
@@ -2604,10 +2629,77 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   os << "    #endif\n";
   os << "  }\n\n";
 
+  // L28: build the lane -> producer-comb table for fused loops, plus the
+  // always-marked lanes (next value has no comb producer). Every fused lane must
+  // be classified; an unknown producer is a hard error, never a silent skip.
+  LaneMarkTable laneMarkTable;
+  llvm::SmallVector<std::pair<unsigned, std::uint64_t>, 16> laneAlwaysMarks;
+  std::size_t laneMarkWords = 0;
+  if (opts.laneMarkWalk) {
+    // Attribute a lane to the comb that produces its next value by matching the
+    // emitted symbol: names are minted from the original producer, so a lane
+    // whose next value is a forwarding pyc.wire still carries the comb's name.
+    // (Classifying by getDefiningOp() misses exactly those lanes.)
+    llvm::StringMap<unsigned> resultNameToComb;
+    for (auto [i, comb] : llvm::enumerate(combs)) {
+      for (Value res : comb.getResults())
+        resultNameToComb[nt.get(res)] = static_cast<unsigned>(i);
+    }
+    for (int64_t loopId : fusedRegLoopIds) {
+      unsigned lane = 0;
+      for (pyc::RegOp r : regLoopRegs[loopId]) {
+        Operation *def = r.getNext().getDefiningOp();
+        unsigned ownerComb = 0;
+        bool hasOwner = false;
+        {
+          auto nameIt = resultNameToComb.find(nt.get(r.getNext()));
+          if (nameIt != resultNameToComb.end()) {
+            ownerComb = nameIt->second;
+            hasOwner = true;
+          }
+        }
+        Operation *owner = hasOwner ? static_cast<Operation *>(combs[ownerComb])
+                                    : nullptr;
+        const unsigned word = lane / 64u;
+        const std::uint64_t mask = std::uint64_t{1} << (lane % 64u);
+        auto pushMark = [&](auto &into) {
+          if (!into.empty() && into.back().first == word)
+            into.back().second |= mask;
+          else
+            into.push_back({word, mask});
+        };
+        if (owner != nullptr) {
+          pushMark(laneMarkTable[ownerComb]);
+        } else if (def == nullptr || isa<pyc::ConstantOp>(def) ||
+                   isa<pyc::DelayTapOp>(def) || isa<pyc::InstanceOp>(def) ||
+                   isa<pyc::SyncMemNMOp>(def) || isa<pyc::ByteMemOp>(def) ||
+                   isa<pyc::WireOp>(def)) {
+          if (!laneAlwaysMarks.empty() &&
+              laneAlwaysMarks.back().first == word)
+            laneAlwaysMarks.back().second |= mask;
+          else
+            laneAlwaysMarks.push_back({word, mask});
+        } else {
+          return def->emitError(
+              "L28: fused lane next-value has no comb producer and is not a "
+              "known always-marked producer (constant/delay tap/instance/memory/"
+              "wire); refusing to generate a marked walk that would miss it");
+        }
+        ++lane;
+      }
+      laneMarkWords = std::max<std::size_t>(laneMarkWords, (lane + 63u) / 64u);
+    }
+    if (laneMarkWords == 0)
+      return f.emitError("L28: lane-mark walk requested but there are no fused lanes");
+    os << "  std::array<std::uint64_t, " << laneMarkWords << "> _pyc_lane_marks{};\n";
+    os << "  bool _pyc_lane_mark_stale = true;\n";
+  }
+
   // Emit fused comb helpers. Indices match body order (same as placement).
   for (auto [i, comb] : llvm::enumerate(combs)) {
     if (failed(emitCombMethod(comb, os, nt, static_cast<unsigned>(i), opts,
-                              *schedule, combIndex, &delayLoopLines)))
+                              *schedule, combIndex, &delayLoopLines,
+                              opts.laneMarkWalk ? &laneMarkTable : nullptr)))
       return failure();
   }
 
@@ -4336,8 +4428,53 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
            << "ull}";
       });
       os << "}}};\n";
-      os << "      " << wake << ".apply(" << loop
-         << ".direct_commit(), _pyc_comb_dirty);\n";
+      if (!opts.laneMarkWalk) {
+        os << "      " << wake << ".apply(" << loop
+           << ".direct_commit(), _pyc_comb_dirty);\n";
+        continue;
+      }
+      // L28 marked walk: only lanes whose producer comb ran (plus the always
+      // marked ones) are sampled; first rise / reset / en 0->1 fall back to a
+      // full walk. Marks are cleared in place after the walk (consume-in-place).
+      pyc::RegOp lane0 = regLoopRegs[loopId].front();
+      const std::string rstName = nt.get(lane0.getRst());
+      const std::string enName = nt.get(lane0.getEn());
+      os << "      {\n";
+      os << "        const bool _pyc_go = " << rstName << ".toBool() | " << enName
+         << ".toBool();\n";
+      os << "        const bool _pyc_full = _pyc_lane_mark_stale || " << rstName
+         << ".toBool();\n";
+      os << "        if (_pyc_go) {\n";
+      os << "          static constexpr std::array<std::pair<unsigned, "
+            "std::uint64_t>, "
+         << laneAlwaysMarks.size() << "> _pyc_lane_always{{\n";
+      for (const auto &wm : laneAlwaysMarks)
+        os << "              {" << wm.first << "u, 0x" << llvm::utohexstr(wm.second)
+           << "ull},\n";
+      os << "          }};\n";
+      os << "          if (_pyc_full) {\n";
+      os << "            for (auto &_w : _pyc_lane_marks) _w = ~std::uint64_t{0};\n";
+      os << "          } else {\n";
+      os << "            for (const auto &[_w, _m] : _pyc_lane_always) "
+            "_pyc_lane_marks[_w] |= _m;\n";
+      os << "          }\n";
+      os << "          " << wake << ".apply(" << loop
+         << ".direct_commit_marked(_pyc_lane_marks.data(), " << laneMarkWords
+         << "u), _pyc_comb_dirty);\n";
+      if (opts.verifyLaneMarks) {
+        os << "          // test-only completeness check: every unmarked lane must "
+              "already hold its next value\n";
+        os << "          if (!_pyc_full) " << loop
+           << ".assert_unmarked_published(_pyc_lane_marks.data());\n";
+      }
+      os << "        } else {\n";
+      os << "          " << loop << ".direct_commit();\n";
+      os << "        }\n";
+      os << "        for (auto &_w : _pyc_lane_marks) _w = 0;\n";
+      os << "        _pyc_lane_mark_stale = !_pyc_go || " << rstName
+         << ".toBool();\n";
+      os << "      }\n";
+      continue;
     }
     os << "    }\n";
   }

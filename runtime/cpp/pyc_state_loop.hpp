@@ -2,6 +2,8 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <initializer_list>
 #include <vector>
 
@@ -187,6 +189,86 @@ public:
         pending_[pendingLanes_[k]] = 0;
     }
     return dirty_;
+  }
+
+  // L28 marked walk (experimental): publish only the lanes whose bit is set in
+  // `marks` (word w carries lanes 64w..64w+63). Item-for-item the same update as
+  // direct_commit() — one control read, the same init/d selection and q write,
+  // the same dirty bits, the same pending restart for the lanes a consumer bound
+  // via lane_pending() — with the lane set narrowed to the marks. There is no
+  // shadow copy to refresh: write-intent probes read the lane's own q
+  // (lane_write_data), which this walk writes directly.
+  std::vector<std::uint64_t> &direct_commit_marked(const std::uint64_t *marks,
+                                                   std::size_t words) {
+    const std::size_t n = q_.size();
+    clkPrev_ = true;
+    const bool r = rst_->toBool();
+    const bool go = r | en_->toBool();
+    if (go) {
+      for (std::size_t w = 0; w < words; ++w) {
+        std::uint64_t bits = marks[w];
+        std::uint64_t mask = 0;
+        while (bits != 0) {
+          const unsigned bit = static_cast<unsigned>(__builtin_ctzll(bits));
+          bits &= bits - 1;
+          const std::size_t i = w * 64u + bit;
+          if (__builtin_expect(i >= n, 0))
+            break;
+          const std::uint64_t *src = r ? init_[i] : d_[i];
+          std::uint64_t *q = q_[i];
+          if (words_[i] == 1) {
+            const std::uint64_t v = src[0];
+            mask |= static_cast<std::uint64_t>(q[0] != v) << bit;
+            q[0] = v;
+          } else {
+            std::uint64_t changed = 0;
+            for (unsigned k = 0; k < words_[i]; ++k) {
+              const std::uint64_t v = src[k];
+              changed |= q[k] != v;
+              q[k] = v;
+            }
+            mask |= changed << bit;
+          }
+        }
+        dirty_[w] |= mask;
+      }
+      for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
+        pending_[pendingLanes_[k]] = 1;
+    } else {
+      for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
+        pending_[pendingLanes_[k]] = 0;
+    }
+    return dirty_;
+  }
+
+  // Test-only completeness check for direct_commit_marked(): number of unmarked
+  // lanes that do not already hold their next value.
+  std::size_t count_unpublished_unmarked(const std::uint64_t *marks) const {
+    const std::size_t n = q_.size();
+    const bool r = rst_->toBool();
+    std::size_t bad = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+      if ((marks[i >> 6] >> (i & 63)) & 1u)
+        continue;
+      const std::uint64_t *src = r ? init_[i] : d_[i];
+      for (unsigned k = 0; k < words_[i]; ++k) {
+        if (q_[i][k] != src[k]) {
+          ++bad;
+          break;
+        }
+      }
+    }
+    return bad;
+  }
+
+  // Test-only: abort if an unmarked lane did not already hold its next value.
+  void assert_unmarked_published(const std::uint64_t *marks) const {
+    const std::size_t bad = count_unpublished_unmarked(marks);
+    if (bad != 0) {
+      std::fprintf(stderr,
+                   "LANE-MARK INCOMPLETE: %zu lanes were not published\n", bad);
+      std::abort();
+    }
   }
 
   // Diagnostic/helper reset of the consumed-in-place dirty bitmap; generated
