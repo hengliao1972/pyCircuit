@@ -48,6 +48,9 @@ std::unique_ptr<::mlir::Pass> createVectorUnrollPass();
 /// Phase runners shared with the unified StateOptimizePass. Defined next to
 /// the passes whose cores they drive.
 void runRetimePipelines(::mlir::func::FuncOp function);
+/// Merge parallel register copies (same data, clock/reset/enable/init) into
+/// a single register.
+std::unique_ptr<::mlir::Pass> createMergeRegCopiesPass();
 void runDelayChainFormAndShare(::mlir::func::FuncOp function);
 void runEliminateDeadState(::mlir::func::FuncOp function);
 

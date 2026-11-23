@@ -42,8 +42,8 @@ struct StateOptimizePass
   StringRef getArgument() const override { return "pyc-state-optimize"; }
   StringRef getDescription() const override {
     return "Unified structural state optimization: dead-state cleanup, "
-           "retime, then delay-line chain formation with observation "
-           "identities preserved";
+           "parallel register copy merging, retime, then delay-line chain "
+           "formation with observation identities preserved";
   }
 
   void runOnOperation() override {
