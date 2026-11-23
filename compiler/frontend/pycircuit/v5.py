@@ -307,6 +307,11 @@ class CycleAwareDomain:
 
         cache_key = _hierarchical_cache_key(fn, kwargs)
         if cache_key not in self._sub_cache:
+            # Distinct parameter sets are cached separately, so they need
+            # distinct module symbols; the first one keeps the bare name.
+            if any(k[0] == cache_key[0] and k[1] != cache_key[1] for k in self._sub_cache):
+                import hashlib as _hashlib
+                sub_name = f"{sub_name}_{_hashlib.sha1(cache_key[1].encode()).hexdigest()[:8]}"
             canonical_kwargs = dict(kwargs)
             canonical_kwargs["prefix"] = sub_name
 
@@ -326,7 +331,7 @@ class CycleAwareDomain:
 
         sub_m, out_entries = self._sub_cache[cache_key]
 
-        canonical_prefix = sub_name
+        canonical_prefix = sub_m.name
         input_map: dict[str, Any] = {}
         if inputs:
             for k, v in inputs.items():
