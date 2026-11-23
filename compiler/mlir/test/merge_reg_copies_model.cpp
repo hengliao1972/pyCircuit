@@ -9,7 +9,7 @@
 //   init 0; reset loads the init). Checked after the rising edge, matching
 // the generated C++ step order.
 int main() {
-  pyc::gen::fork_merge_model model;
+  pyc::gen::merge_reg_copies_model model;
   std::uint8_t q1 = 0, q2 = 0, qc = 0;
   std::uint64_t checksum = 0;
   constexpr unsigned kCycles = 64;

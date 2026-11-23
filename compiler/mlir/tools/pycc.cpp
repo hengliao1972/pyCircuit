@@ -2436,11 +2436,10 @@ int main(int argc, char **argv) {
   // Verilog keeps the pre-optimization register netlist.
   if (emitKind == "cpp")
     pm.addNestedPass<func::FuncOp>(pyc::createStateOptimizePass());
-  // Collapse parallel register copies after the state rewrites: retiming and
-  // chain forming must not see the merged multiplicity (their interaction
-  // with it crashes), and the merge itself only deletes duplicates.
+  // Must run after the state rewrites: retiming and chain forming crash on
+  // the merged multiplicity.
   if (emitKind == "cpp")
-    pm.addNestedPass<func::FuncOp>(pyc::createForkMergeRetimePass());
+    pm.addNestedPass<func::FuncOp>(pyc::createMergeRegCopiesPass());
   if (!unrollVector)
     pm.addNestedPass<func::FuncOp>(pyc::createSLPPackWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createCombCanonicalizePass());
