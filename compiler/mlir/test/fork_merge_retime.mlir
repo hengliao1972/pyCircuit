@@ -18,10 +18,25 @@
 // CHECK: pyc.reg
 // CHECK: pyc.reg
 
-// A register that follows another register is not a duplicate of it.
+// Two followers with identical control/init sampling the same register are
+// one flip-flop twice: merge them. A single follower stays a pipeline stage.
 // CHECK-LABEL: func.func @follows_register
+// CHECK-SAME: pyc.stats.fork_merge_merged = 1
+// CHECK: %[[A:.*]] = pyc.reg %arg0, %arg1, %arg2, %arg3
+// CHECK: pyc.reg %arg0, %arg1, %arg2, %[[A]]
+// CHECK-NOT: pyc.reg
+
+// One follower alone is a real pipeline stage, never merged.
+// CHECK-LABEL: func.func @single_follower
 // CHECK-SAME: pyc.stats.fork_merge_merged = 0
 // CHECK: %[[A:.*]] = pyc.reg %arg0, %arg1, %arg2, %arg3
+// CHECK: pyc.reg %arg0, %arg1, %arg2, %[[A]]
+
+// Followers with different init are different flip-flops.
+// CHECK-LABEL: func.func @follower_distinct_init
+// CHECK-SAME: pyc.stats.fork_merge_merged = 0
+// CHECK: %[[A:.*]] = pyc.reg %arg0, %arg1, %arg2, %arg3
+// CHECK: pyc.reg %arg0, %arg1, %arg2, %[[A]]
 // CHECK: pyc.reg %arg0, %arg1, %arg2, %[[A]]
 
 // Hold loops stay untouched.
@@ -74,6 +89,24 @@ module {
     %q1 = pyc.reg %clk, %rst, %en, %a, %zero : i8
     %q2 = pyc.reg %clk, %rst, %en, %q1, %zero : i8
     %q3 = pyc.reg %clk, %rst, %en, %q1, %zero : i8
+    %u = pyc.xor %q2, %q3 : i8, i8 -> i8
+    func.return %u : i8
+  }
+
+  func.func @single_follower(%clk: !pyc.clock, %rst: !pyc.reset, %en: i1, %a: i8) -> i8 {
+    %zero = pyc.constant 0 : i8
+    %q1 = pyc.reg %clk, %rst, %en, %a, %zero : i8
+    %q2 = pyc.reg %clk, %rst, %en, %q1, %zero : i8
+    %u = pyc.xor %q2, %q1 : i8, i8 -> i8
+    func.return %u : i8
+  }
+
+  func.func @follower_distinct_init(%clk: !pyc.clock, %rst: !pyc.reset, %en: i1, %a: i8) -> i8 {
+    %zero = pyc.constant 0 : i8
+    %one = pyc.constant 1 : i8
+    %q1 = pyc.reg %clk, %rst, %en, %a, %zero : i8
+    %q2 = pyc.reg %clk, %rst, %en, %q1, %zero : i8
+    %q3 = pyc.reg %clk, %rst, %en, %q1, %one : i8
     %u = pyc.xor %q2, %q3 : i8, i8 -> i8
     func.return %u : i8
   }

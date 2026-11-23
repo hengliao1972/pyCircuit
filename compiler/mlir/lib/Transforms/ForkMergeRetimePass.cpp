@@ -100,14 +100,26 @@ static Value resolve(Value value) {
   return value;
 }
 
-// Textual identity of a value: SSA id for real values, literal for constants.
+// Textual identity of a value: pointer identity for real values, literal for
+// constants. Never stream a Value directly: Value::print is not thread-safe
+// under the parallel function-pass scheduler (this pass runs on every
+// function concurrently), and streaming OpResults raced the shared printing
+// infrastructure and corrupted unrelated type storage on the private
+// baseline. Pointer + result/argument number is unique, stable, and pure.
 static void appendValueKey(llvm::raw_ostream &os, Value value) {
   Value resolved = resolve(value);
   if (auto constant = constantValue(resolved)) {
     os << "c" << constant->getBitWidth() << "x" << *constant;
     return;
   }
-  os << resolved;
+  if (auto opResult = dyn_cast<OpResult>(resolved)) {
+    os << "r" << reinterpret_cast<uintptr_t>(opResult.getOwner()) << "#"
+       << opResult.getResultNumber();
+    return;
+  }
+  auto blockArg = cast<BlockArgument>(resolved);
+  os << "a" << reinterpret_cast<uintptr_t>(blockArg.getOwner()) << "#"
+     << blockArg.getArgNumber();
 }
 
 static bool isStateBoundary(Operation *def) {
@@ -189,9 +201,15 @@ public:
       // over one producer with several former consumers, which crashes the
       // real Davinci pipeline wherever this pass is placed. Copies rooted at
       // a constant or a function input are safe and are the bulk of the
-      // anonymous cycle_balance duplicates.
+      // anonymous cycle_balance duplicates. A bare register q reached only
+      // through transparent aliases / single-driver wires is equally safe:
+      // it is a state value, not a comb cone, so no producer rewrite races
+      // the merge. Covers the parallel delay copies a balanced pipeline
+      // leaves behind (47 identical one-beat followers of one source on
+      // pe_cluster; 694 redundant regs measured on 2026-11-22).
       Operation *dataDef = resolve(reg.getNext()).getDefiningOp();
-      if (dataDef && !isa<pyc::ConstantOp>(dataDef))
+      if (dataDef && !isa<pyc::ConstantOp>(dataDef) &&
+          !isa<pyc::RegOp>(dataDef))
         continue;
       // A register whose value reaches a delay line, tap or instance is part
       // of that state element's history identity. The chain former usually
@@ -266,7 +284,11 @@ private:
     llvm::raw_string_ostream os(key);
     os << scalarWidth(reg.getQ().getType()).value_or(0) << ':';
     appendValueKey(os, reg.getNext());
-    os << '|' << reg.getClk() << '|' << reg.getRst() << '|';
+    os << '|';
+    appendValueKey(os, reg.getClk());
+    os << '|';
+    appendValueKey(os, reg.getRst());
+    os << '|';
     appendValueKey(os, reg.getEn());
     if (init)
       os << '|' << init->getBitWidth() << 'x' << *init;
