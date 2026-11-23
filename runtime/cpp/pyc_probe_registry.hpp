@@ -299,6 +299,10 @@ public:
     const std::size_t *write_addr = nullptr;
     const void *write_mask_ptr = nullptr;
     std::uint32_t write_mask_width_bits = 0;
+    // Write data is the state storage itself (q), so it only holds the value
+    // being written after commit. Writers emit these Write events at the
+    // post-transfer observation point (XFER-OBS) instead of pre-transfer.
+    bool write_post_transfer = false;
 
     const void *known_mask_ptr = nullptr;
     std::uint32_t known_mask_width_bits = 0;
@@ -355,8 +359,11 @@ public:
       addVec(path + "[" + std::to_string(i) + "]", &(*vec)[i], kind);
   }
 
+  // write_post_transfer: write_data aliases the storage (q), so its value is
+  // only final after commit; see Entry::write_post_transfer.
   template <unsigned W>
-  std::uint64_t addReg(std::string path, Wire<W> *q, bool *write_valid, Wire<W> *write_data) {
+  std::uint64_t addReg(std::string path, Wire<W> *q, bool *write_valid, Wire<W> *write_data,
+                       bool write_post_transfer = false) {
     const std::uint64_t id = addImpl(std::move(path),
                    ProbeKind::Reg,
                    /*width_bits=*/W,
@@ -368,13 +375,15 @@ public:
                    /*write_lsb_bits=*/0);
     if (Entry *e = const_cast<Entry *>(findById(id))) {
       e->read_u64 = [q]() -> std::uint64_t { return q->value(); };
+      e->write_post_transfer = write_post_transfer;
     }
     return id;
   }
 
   template <unsigned W, unsigned StorageW>
   std::uint64_t addRegSlice(std::string path, Wire<W> *q, bool *write_valid,
-                            Wire<StorageW> *write_data, unsigned lsb) {
+                            Wire<StorageW> *write_data, unsigned lsb,
+                            bool write_post_transfer = false) {
     const std::uint64_t id = addImpl(std::move(path),
                    ProbeKind::Reg,
                    /*width_bits=*/W,
@@ -386,6 +395,7 @@ public:
                    /*write_lsb_bits=*/lsb);
     if (Entry *e = const_cast<Entry *>(findById(id))) {
       e->read_u64 = [q]() -> std::uint64_t { return q->value(); };
+      e->write_post_transfer = write_post_transfer;
     }
     return id;
   }
@@ -395,7 +405,8 @@ public:
   template <unsigned W, unsigned StorageW>
   std::uint64_t addRegLazySlice(std::string path, Wire<StorageW> *storage,
                                 unsigned lsb, bool *write_valid,
-                                Wire<StorageW> *write_data) {
+                                Wire<StorageW> *write_data,
+                                bool write_post_transfer = false) {
     const std::uint64_t id = addImpl(std::move(path),
                    ProbeKind::Reg,
                    /*width_bits=*/W,
@@ -409,6 +420,7 @@ public:
       e->read_u64 = [storage, lsb]() -> std::uint64_t {
         return extract<W, StorageW>(*storage, lsb).value();
       };
+      e->write_post_transfer = write_post_transfer;
     }
     return id;
   }

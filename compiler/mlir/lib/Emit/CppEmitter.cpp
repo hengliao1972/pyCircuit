@@ -1708,7 +1708,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   };
   // Probe write-intent binding for a scalar reg: either its pycReg inst
   // (unlooped) or the owning RegLoop's lane storage. Returns the C++ text
-  // for `&...pending` and `&...qNext`.
+  // for `&...pending` and the write-data storage. RegLoop lanes report q
+  // itself (read after commit); unlooped regs keep the two-phase qNext.
   auto probePendingNext = [&](pyc::RegOp r) -> std::pair<std::string, std::string> {
     if (auto idAttr = r->getAttrOfType<IntegerAttr>("pyc.loop_id")) {
       const int64_t id = idAttr.getValue().getSExtValue();
@@ -1722,10 +1723,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         }
       }
       std::string loop = regLoopName(id);
-      // lane_pending/lane_qnext_raw return pointers; keep the '&' at the
+      // lane_pending/lane_write_data return pointers; keep the '&' at the
       // call site out of this string (callers concatenate it verbatim
-      // after &). The arena segment reinterprets back to the value type
-      // (Wire<W> or the whole Vec, both standard-layout over the words).
+      // after &). lane_write_data is the lane's own q storage, so it holds
+      // the written value once commit ran; the cast reinterprets that
+      // standard-layout storage as the value (Wire<W> or the whole Vec).
       const std::string valTy =
           isa<VectorType>(r.getQ().getType())
               ? cppType(r.getQ().getType())
@@ -1733,7 +1735,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                  std::to_string(bitWidth(r.getQ().getType())) + ">");
       return {loop + ".lane_pending(" + std::to_string(lane) + "u)",
               "reinterpret_cast<" + valTy + " *>(" + loop +
-                  ".lane_qnext_raw(" + std::to_string(lane) + "u))"};
+                  ".lane_write_data(" + std::to_string(lane) + "u))"};
     }
     return {nt.get(r.getQ()) + "_inst->pending",
             nt.get(r.getQ()) + "_inst->qNext"};
@@ -2162,6 +2164,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 		      const auto pendNext = std::pair<std::string, std::string>{pendBase, nextBase};
 		      const bool looped = pendNext.first.rfind("reg_loop_", 0) == 0 ||
 		                              pendNext.first.rfind("delay_loop_", 0) == 0;
+		      // RegLoop lanes report q as write data: sample their Write event
+		      // after commit. Delay lanes keep the pre-transfer qNext view.
+		      const bool regPost = pendNext.first.rfind("reg_loop_", 0) == 0;
 		      refP = looped ? pendNext.first : "&" + pendNext.first;
 		      refN = looped ? pendNext.second : "&" + pendNext.second;
 		      if (source.lsb != 0 || storageWidth != w) {
@@ -2169,11 +2174,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 			           << ">(reg_path(" << cppStringLiteral(outCanon[i]) << "), &"
 			           << outNames[i] << ", " << refP << ", "
                        << refN
-                       << ", " << source.lsb << "u);\n";
+                       << ", " << source.lsb << "u, "
+                       << (regPost ? "true" : "false") << ");\n";
 			      } else {
 			        os << "    reg.addReg<" << w << ">(reg_path(" << cppStringLiteral(outCanon[i]) << "), &" << outNames[i]
 			           << ", " << refP << ", "
-                       << refN
+                       << refN << ", " << (regPost ? "true" : "false")
                        << ");\n";
 		      }
 		    } else {
@@ -2184,6 +2190,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         if (named.isReg && !isa<VectorType>(named.type)) {
           const bool loopedN = named.cppRegInst.rfind("reg_loop_", 0) == 0 ||
                        named.cppRegInst.rfind("delay_loop_", 0) == 0;
+          const bool namedPost = named.cppRegInst.rfind("reg_loop_", 0) == 0;
           if (named.stateLsb != 0 ||
               named.stateStorageWidth != named.width) {
             os << "    reg.addRegSlice<" << named.width << ", "
@@ -2192,13 +2199,15 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
                << named.cppValue << ", "
                << (loopedN ? named.cppRegInst : "&" + named.cppRegInst)
                << ", " << named.cppRegNext << ", "
-               << named.stateLsb << "u);\n";
+               << named.stateLsb << "u, "
+               << (namedPost ? "true" : "false") << ");\n";
           } else {
             os << "    reg.addReg<" << named.width << ">(reg_path("
                << cppStringLiteral(named.fieldPath) << "), &"
                << named.cppValue << ", "
                << (loopedN ? named.cppRegInst : "&" + named.cppRegInst)
-               << ", " << named.cppRegNext << ");\n";
+               << ", " << named.cppRegNext << ", "
+               << (namedPost ? "true" : "false") << ");\n";
           }
         } else {
           emitWireProbes(os, named.type, named.width, named.fieldPath, named.cppValue);
@@ -2360,16 +2369,18 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             }
             continue;
           }
+          const bool lazyPost = pendText.rfind("reg_loop_", 0) == 0;
           if (lsb == 0 && width == storageWidth) {
             os << "    reg.addReg<" << width << ">(reg_path("
                << cppStringLiteral(field) << "), " << qText << ", "
-               << pendText << ", " << nextText << ");\n";
+               << pendText << ", " << nextText << ", "
+               << (lazyPost ? "true" : "false") << ");\n";
             continue;
           }
           os << "    reg.addRegLazySlice<" << width << ", " << storageWidth
              << ">(reg_path(" << cppStringLiteral(field) << "), " << qText
-             << ", " << lsb << "u, " << pendText << ", " << nextText
-             << ");\n";
+             << ", " << lsb << "u, " << pendText << ", " << nextText << ", "
+             << (lazyPost ? "true" : "false") << ");\n";
         }
         return success();
       };
@@ -4425,9 +4436,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (lane)
       os << "    }\n";
   }
-  // Fused loops already published q in tick_compute; only retire pending.
-  for (int64_t loopId : fusedRegLoopIds)
-    os << "    " << regLoopName(loopId) << ".retire();\n";
   // RegLoop commit: per-lane dirty bitmap keeps the change-driven wake as
   // precise as the per-reg path.
   for (int64_t loopId : phasedRegLoopIds) {
