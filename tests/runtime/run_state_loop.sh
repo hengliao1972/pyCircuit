@@ -25,4 +25,17 @@ for include_dir in \
   "${build_dir}/${output_name}_commit_shrink"
 done
 
+mark_src="${repo_root}/tests/runtime/test_lane_mark_walk.cpp"
+for include_dir in \
+  "${repo_root}/runtime/cpp" \
+  "${repo_root}/include/pyc/cpp" \
+  "${repo_root}/include/cpp"; do
+  include_name="${include_dir#${repo_root}/}"
+  output_name="${include_name//\//_}_lane_mark"
+  "${cxx}" -std=c++17 -Wall -Wextra -Werror \
+    -I"${include_dir}" "${mark_src}" \
+    -o "${build_dir}/${output_name}"
+  "${build_dir}/${output_name}"
+done
+
 echo "state loop runtime tests passed"

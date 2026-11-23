@@ -2,8 +2,6 @@
 
 #include <cassert>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <initializer_list>
 #include <vector>
 
@@ -241,35 +239,6 @@ public:
     return dirty_;
   }
 
-  // Test-only completeness check for direct_commit_marked(): number of unmarked
-  // lanes that do not already hold their next value.
-  std::size_t count_unpublished_unmarked(const std::uint64_t *marks) const {
-    const std::size_t n = q_.size();
-    const bool r = rst_->toBool();
-    std::size_t bad = 0;
-    for (std::size_t i = 0; i < n; ++i) {
-      if ((marks[i >> 6] >> (i & 63)) & 1u)
-        continue;
-      const std::uint64_t *src = r ? init_[i] : d_[i];
-      for (unsigned k = 0; k < words_[i]; ++k) {
-        if (q_[i][k] != src[k]) {
-          ++bad;
-          break;
-        }
-      }
-    }
-    return bad;
-  }
-
-  // Test-only: abort if an unmarked lane did not already hold its next value.
-  void assert_unmarked_published(const std::uint64_t *marks) const {
-    const std::size_t bad = count_unpublished_unmarked(marks);
-    if (bad != 0) {
-      std::fprintf(stderr,
-                   "LANE-MARK INCOMPLETE: %zu lanes were not published\n", bad);
-      std::abort();
-    }
-  }
 
   // Diagnostic/helper reset of the consumed-in-place dirty bitmap; generated
   // code never calls this (the wake walks clear as they consume).

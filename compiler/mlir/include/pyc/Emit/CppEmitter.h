@@ -84,12 +84,9 @@ struct CppEmitterOptions {
   // persistent pool).
   unsigned parallelInstances = 1;
   std::string probePlanPath{};
-  // L28 (experimental, default off): walk only the lanes whose producer comb ran
-  // this cycle instead of every fused lane. verifyLaneMarks additionally checks,
-  // after each marked walk, that every unmarked lane already had q == next
-  // (i.e. the mark set is a superset of the changed set); test-only.
+  // Experimental, off by default: walk only the lanes whose producing comb ran
+  // this cycle instead of every fused lane.
   bool laneMarkWalk = false;
-  bool verifyLaneMarks = false;
 };
 
 ::mlir::LogicalResult emitCpp(::mlir::ModuleOp module, ::llvm::raw_ostream &os,

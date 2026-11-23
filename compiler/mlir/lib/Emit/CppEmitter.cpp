@@ -4461,12 +4461,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "          " << wake << ".apply(" << loop
          << ".direct_commit_marked(_pyc_lane_marks.data(), " << laneMarkWords
          << "u), _pyc_comb_dirty);\n";
-      if (opts.verifyLaneMarks) {
-        os << "          // test-only completeness check: every unmarked lane must "
-              "already hold its next value\n";
-        os << "          if (!_pyc_full) " << loop
-           << ".assert_unmarked_published(_pyc_lane_marks.data());\n";
-      }
       os << "        } else {\n";
       os << "          " << loop << ".direct_commit();\n";
       os << "        }\n";
