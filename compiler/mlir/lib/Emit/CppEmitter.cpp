@@ -1901,7 +1901,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 
   // ---- single-phase (EVO) analysis -------------------------------------
   // Report-only: builds the component-level state dependency graph and its
-  // SCCs, so a design can be checked for how much of it could use evo()
+  // SCCs, so a design can be checked for how much of it could use eval()
   // instead of the two-phase pair. Emission is not affected.
   if (!opts.singlePhaseReportPath.empty()) {
     struct NodeInfo {

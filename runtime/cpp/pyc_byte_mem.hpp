@@ -26,7 +26,7 @@ public:
   static constexpr unsigned StrbWidth = DataWidth / 8;
 
   pyc_byte_mem(Wire<1> &clk,
-                              Wire<AddrWidth> &raddr,
+               Wire<AddrWidth> &raddr,
                Wire<DataWidth> &rdata,
                Wire<1> &wvalid,
                Wire<AddrWidth> &waddr,

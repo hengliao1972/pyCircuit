@@ -64,16 +64,19 @@ public:
   }
 
   // Single-phase update: sample and publish in one call, returning the change
-  // mask. Legal only when the emitter has proven that no reader of this
+  // mask. Same verb as the combinational eval(), selected by the clock-level
+  // argument. Legal only when the emitter has proven that no reader of this
   // component can observe the new value inside the same pass -- i.e. the state
   // dependency graph is acyclic and the pass runs readers before producers.
   // Components in a dependency cycle keep the two-call fallback
   // (tick_compute() then tick_commit()).
-  inline change_mask_t evo(bool clkNow) {
+  //
+  // This hides BaseElement::eval(): a clocked leaf has no combinational read of
+  // its own, so the no-arg form is deliberately not part of this surface.
+  inline change_mask_t eval(bool clkNow) {
     tick_compute(clkNow);
     return static_cast<Derived *>(this)->tick_commit();
   }
-  inline change_mask_t evo() { return evo(clk.toBool()); }
 
   Wire<1> &clk;
   bool clkPrev = false;

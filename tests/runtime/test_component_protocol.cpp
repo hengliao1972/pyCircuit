@@ -107,26 +107,26 @@ void checkCdc() {
   assert(out.value() == 0x3cu);
 }
 
-// Single-phase evo() must produce exactly the state and change mask of the
+// Single-phase eval() must produce exactly the state and change mask of the
 // two-call fallback, so the emitter can pick per component from static analysis.
-void checkEvoEquivalence() {
+void checkEvalEquivalence() {
   Wire<1> clk(0), rst(0), en(1);
   Wire<8> d(0x33), init(0), qA(0), qB(0);
   pyc_reg<8> a(clk, rst, en, d, init, qA);
   pyc_reg<8> b(clk, rst, en, d, init, qB);
 
   clk = Wire<1>(1);
-  const mask_t mEvo = a.evo(true);
+  const mask_t mEval = a.eval(true);
   b.tick_compute(true);
   const mask_t mTwo = b.tick_commit();
-  assert(mEvo == mTwo);
-  assert(a.tick_commit() == mask_t{0});  // already published by evo()
+  assert(mEval == mTwo);
+  assert(a.tick_commit() == mask_t{0});  // already published by eval()
   assert(qA.value() == qB.value());
-  assert((mEvo & BaseElement::kChanged) != 0);
+  assert((mEval & BaseElement::kChanged) != 0);
 
   // A non-edge publishes nothing and reports no change.
   clk = Wire<1>(0);
-  assert(a.evo(false) == mask_t{0});
+  assert(a.eval(false) == mask_t{0});
   assert(qA.value() == qB.value());
 }
 
@@ -134,7 +134,7 @@ void checkEvoEquivalence() {
 
 int main() {
   checkReg();
-  checkEvoEquivalence();
+  checkEvalEquivalence();
   checkFifo();
   checkByteMem();
   checkCdc();
