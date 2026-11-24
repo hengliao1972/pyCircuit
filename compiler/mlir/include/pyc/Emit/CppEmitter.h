@@ -79,6 +79,8 @@ struct CppEmitterOptions {
   // downstream C++ TU cost even after file sharding.
   unsigned combChunkNodes = kDefaultCombChunkNodes;
   std::string probePlanPath{};
+  // Optional path for the single-phase (EVO) eligibility report.
+  std::string singlePhaseReportPath{};
 };
 
 ::mlir::LogicalResult emitCpp(::mlir::ModuleOp module, ::llvm::raw_ostream &os,
