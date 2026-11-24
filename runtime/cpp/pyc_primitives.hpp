@@ -222,12 +222,12 @@ public:
 };
 
 template <unsigned Width, unsigned Depth>
-class pyc_fifo : public PortBase {
+class pyc_fifo : public BaseElement {
 public:
   // Bit numbers of the three visible outputs (rule: i-th output -> bit i).
-  static constexpr change_mask_t kInReadyChanged = portBit(0);
-  static constexpr change_mask_t kOutValidChanged = portBit(1);
-  static constexpr change_mask_t kOutDataChanged = portBit(2);
+  static constexpr change_mask_t kInReadyChanged = change_bit(0);
+  static constexpr change_mask_t kOutValidChanged = change_bit(1);
+  static constexpr change_mask_t kOutDataChanged = change_bit(2);
 
   pyc_fifo(Wire<1> &clk,
            Wire<1> &rst,
@@ -237,7 +237,7 @@ public:
            Wire<1> &out_valid,
            Wire<1> &out_ready,
            Wire<Width> &out_data)
-      : PortBase(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
+      : clk(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
         out_ready(out_ready), out_data(out_data) {
     static_assert(Depth > 0, "pyc_fifo Depth must be > 0");
     resetState();
@@ -354,6 +354,7 @@ private:
   }
 
 public:
+  Wire<1> &clk;
   Wire<1> &rst;
 
   Wire<1> &in_valid;
@@ -364,6 +365,7 @@ public:
   Wire<1> &out_ready;
   Wire<Width> &out_data;
 
+  bool clkPrev = false;
   bool pending = false;
   bool evalValid_ = false;
   bool lastEvalOutReady_ = false;

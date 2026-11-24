@@ -16,9 +16,9 @@ namespace pyc::cpp {
 // VCD paths need no adaptation.
 //
 // Semantics contract (matches the per-object pyc_reg / pyc_delay_line):
-//   compute_rise()    == posedge_tick_compute() for every lane
-//   compute_generic() == tick_compute() for every lane
-//   negedge()         == negedge_update() for every lane
+//   compute_rise()    == tick_compute(true)  for every lane (known rising edge)
+//   compute_generic() == tick_compute(clkNow) for every lane
+//   negedge()         == tick_compute(false) for every lane
 //   commit()          == tick_commit() for every lane; returns per-lane dirty
 //     bitmaps (one bit per lane, 64 lanes per word) so the change-driven
 //     fanout wake stays exactly as precise as the per-object path.

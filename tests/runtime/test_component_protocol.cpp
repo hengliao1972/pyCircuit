@@ -1,5 +1,5 @@
 // Verifies the shared component protocol: every simulated leaf derives from
-// ComponentBase, reports changes as a change_mask_t, and exposes the same
+// BaseElement, reports changes as a change_mask_t, and exposes the same
 // two-phase update shape used by generated models.
 #include "pyc_byte_mem.hpp"
 #include "pyc_cdc_sync.hpp"
@@ -15,17 +15,17 @@ using namespace pyc::cpp;
 
 namespace {
 
-using mask_t = ComponentBase::change_mask_t;
+using mask_t = BaseElement::change_mask_t;
 
 // Every leaf is a component and reports its changes through the same type.
-static_assert(std::is_base_of_v<ComponentBase, pyc_reg<8>>);
-static_assert(std::is_base_of_v<ComponentBase, pyc_vec_reg<Vec<Wire<4>, 2>>>);
-static_assert(std::is_base_of_v<ComponentBase, pyc_delay_line<8, 2>>);
-static_assert(std::is_base_of_v<ComponentBase, pyc_vec_delay_line<Vec<Wire<4>, 2>, 2>>);
-static_assert(std::is_base_of_v<ComponentBase, pyc_cdc_sync<8, 2>>);
-static_assert(std::is_base_of_v<ComponentBase, pyc_fifo<8, 2>>);
-static_assert(std::is_base_of_v<ComponentBase, pyc_byte_mem<4, 8, 16>>);
-static_assert(std::is_base_of_v<ComponentBase, pyc_sync_mem_nm<4, 8, 16, 1, 1>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_reg<8>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_vec_reg<Vec<Wire<4>, 2>>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_delay_line<8, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_vec_delay_line<Vec<Wire<4>, 2>, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_cdc_sync<8, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_fifo<8, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_byte_mem<4, 8, 16>>);
+static_assert(std::is_base_of_v<BaseElement, pyc_sync_mem_nm<4, 8, 16, 1, 1>>);
 
 static_assert(std::is_same_v<decltype(std::declval<pyc_reg<8> &>().tick_commit()), mask_t>);
 static_assert(std::is_same_v<decltype(std::declval<pyc_delay_line<8, 2> &>().tick_commit()), mask_t>);
@@ -46,12 +46,12 @@ void checkReg() {
 
   clk = Wire<1>(1);
   reg.tick_compute(true);
-  assert(reg.tick_commit() == ComponentBase::kChanged);
+  assert(reg.tick_commit() == BaseElement::kChanged);
   assert(q.value() == 0x12u);
 
   // Repeating the same level is not an edge and must not report a change.
   clk = Wire<1>(0);
-  reg.negedge_update();
+  reg.tick_compute(false);
   clk = Wire<1>(1);
   reg.tick_compute(true);
   assert(reg.tick_commit() == mask_t{0});
@@ -59,10 +59,10 @@ void checkReg() {
   // Reset takes precedence over enable.
   rst = Wire<1>(1);
   clk = Wire<1>(0);
-  reg.negedge_update();
+  reg.tick_compute(false);
   clk = Wire<1>(1);
   reg.tick_compute(true);
-  assert(reg.tick_commit() == ComponentBase::kChanged);
+  assert(reg.tick_commit() == BaseElement::kChanged);
   assert(q.value() == 0x7u);
 }
 
@@ -103,7 +103,7 @@ void checkCdc() {
 
   clk = Wire<1>(1);
   cdc.tick_compute(true);
-  assert(cdc.tick_commit() == ComponentBase::kChanged);
+  assert(cdc.tick_commit() == BaseElement::kChanged);
   assert(out.value() == 0x3cu);
 }
 

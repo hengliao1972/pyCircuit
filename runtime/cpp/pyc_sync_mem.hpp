@@ -19,7 +19,7 @@ namespace pyc::cpp {
 // returns the pre-write data (plain SRAM semantics).
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries,
           unsigned RPorts, unsigned WPorts, bool OldData = false>
-class pyc_sync_mem_nm : public PortBase {
+class pyc_sync_mem_nm : public BaseElement {
 public:
   static_assert(DataWidth > 0, "pyc_sync_mem_nm requires DataWidth > 0");
   static_assert(DepthEntries > 0, "pyc_sync_mem_nm DepthEntries must be > 0");
@@ -35,7 +35,7 @@ public:
                   const Wire<AddrWidth> *const *waddrs,
                   const Wire<DataWidth> *const *wdatas,
                   const Wire<StrbWidth> *const *wstrbs)
-      : PortBase(clk) {
+      : clk(clk) {
     for (unsigned i = 0; i < RPorts; ++i) {
       ren[i] = rens[i];
       raddr[i] = raddrs[i];
@@ -111,7 +111,7 @@ public:
     for (unsigned i = 0; i < RPorts; ++i) {
       if (pendingRead[i]) {
         if (*rdata[i] != rdataNext[i])
-          markPort(changed, i);
+          changed |= change_bit(i);
         *rdata[i] = rdataNext[i];
       }
       pendingRead[i] = false;
@@ -135,6 +135,7 @@ public:
     return applyStrbNM(oldV, newV, strb);
   }
 
+  Wire<1> &clk;
   const Wire<1> *ren[RPorts];
   const Wire<AddrWidth> *raddr[RPorts];
   Wire<DataWidth> *rdata[RPorts];
@@ -143,6 +144,7 @@ public:
   const Wire<DataWidth> *wdata[WPorts];
   const Wire<StrbWidth> *wstrb[WPorts];
 
+  bool clkPrev = false;
   bool pendingWrite[WPorts] = {};
   bool pendingRead[RPorts] = {};
   std::size_t latchedWaddr[WPorts] = {};

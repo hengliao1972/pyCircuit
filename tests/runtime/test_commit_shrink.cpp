@@ -69,7 +69,7 @@ int runGroup(const char *name, unsigned lanes, RegLoop &loop, Wire<1> &clk,
     // Reference: per-object sampling on the edge, commit right after.
     if (rise)
       for (auto &r : ref)
-        r.posedge_tick_compute();
+        r.tick_compute(true);
     else
       for (auto &r : ref)
         r.tick_compute();
@@ -151,10 +151,12 @@ int runWakeConsume() {
         d[i] = Wire<8>{rng()};
     const bool rise = (!prev) & now;
     prev = now;
+    // Mirror the generated drive: the reference sees every clock level, so its
+    // previous-level latch stays in sync across falling edges too.
+    for (auto &r : ref)
+      r.tick_compute(now);
     if (!rise)
       continue;
-    for (auto &r : ref)
-      r.posedge_tick_compute();
     std::vector<std::uint64_t> &bits = loop.direct_commit();
     const std::vector<std::uint64_t> expected = [&] {
       std::vector<std::uint64_t> m((kLanes + 63) / 64, std::uint64_t{0});

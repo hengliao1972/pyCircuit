@@ -83,13 +83,13 @@ int main() {
     const bool rise = (!prev) & now, fall = prev & (!now);
     prev = now;
     if (rise) {
-      for (auto &r : regRef) r.posedge_tick_compute();
-      for (auto &r : delayRef) r.posedge_tick_compute();
+      for (auto &r : regRef) r.tick_compute(true);
+      for (auto &r : delayRef) r.tick_compute(true);
       regLoop.compute_rise();
       delayLoop.compute_rise();
     } else if (fall) {
-      for (auto &r : regRef) r.negedge_update();
-      for (auto &r : delayRef) r.negedge_update();
+      for (auto &r : regRef) r.tick_compute(false);
+      for (auto &r : delayRef) r.tick_compute(false);
       regLoop.negedge();
       delayLoop.negedge();
     } else {

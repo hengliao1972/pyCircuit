@@ -4151,11 +4151,16 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "    tick_compute_part_" << i << "();\n";
   }
   os << "    // Local sequential primitives.\n";
-  auto emitEdgeCall = [&](const char *method, llvm::StringRef indent) {
+  // Call every edge-driven leaf. arg is the already-classified clock level,
+  // so leaves never re-read the clock wire on the fast path.
+  auto emitEdgeCall = [&](const char *method, llvm::StringRef indent,
+                          const char *arg = nullptr) {
     for (auto r : regs)
-      os << indent << nt.get(r.getQ()) << "_inst->" << method << "();\n";
+      os << indent << nt.get(r.getQ()) << "_inst->" << method << "("
+         << (arg ? arg : "") << ");\n";
     for (auto delay : delayLines)
-      os << indent << nt.get(delay.getQ()) << "_inst->" << method << "();\n";
+      os << indent << nt.get(delay.getQ()) << "_inst->" << method << "("
+         << (arg ? arg : "") << ");\n";
   };
   auto emitTapUpdates = [&](llvm::StringRef indent) -> LogicalResult {
     for (auto tap : delayTaps) {
@@ -4215,7 +4220,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_rise();\n";
-    emitEdgeCall("posedge_tick_compute", "        ");
+    emitEdgeCall("tick_compute", "        ", "true");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "        _pyc_seq_armed = true;\n";
@@ -4227,7 +4232,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "          delay_loop_" << dbk << ".negedge();\n";
-    emitEdgeCall("negedge_update", "          ");
+    emitEdgeCall("tick_compute", "          ", "false");
     os << "          _pyc_seq_armed = false;\n";
     os << "        }\n";
     if (failed(emitTapUpdates("        ")))
@@ -4238,7 +4243,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_generic(_pyc_now);\n";
-    emitEdgeCall("tick_compute", "        ");
+    emitEdgeCall("tick_compute", "        ", "_pyc_now");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "        _pyc_commit_needed = true;\n";
