@@ -71,7 +71,7 @@ public:
     lastEvalOutData_ = out_data_r_;
   }
 
-  void tick_compute() {
+  void tick_sample() {
     pendingIn_ = false;
     pendingOut_ = false;
 
