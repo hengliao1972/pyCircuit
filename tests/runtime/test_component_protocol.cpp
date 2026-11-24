@@ -36,8 +36,8 @@ static_assert(std::is_same_v<decltype(std::declval<pyc_sync_mem_nm<4, 8, 16, 1, 
 
 // The canonical entry point accepts a caller-supplied clock level, so a driver
 // can hoist the edge test without changing component code.
-static_assert(std::is_same_v<decltype(std::declval<pyc_reg<8> &>().tick_compute(true)), void>);
-static_assert(std::is_same_v<decltype(std::declval<pyc_fifo<8, 2> &>().tick_compute(true)), void>);
+static_assert(std::is_same_v<decltype(std::declval<pyc_reg<8> &>().tick_sample()), void>);
+static_assert(std::is_same_v<decltype(std::declval<pyc_fifo<8, 2> &>().tick_sample()), void>);
 
 void checkReg() {
   Wire<1> clk(0), rst(0), en(1);
@@ -45,23 +45,23 @@ void checkReg() {
   pyc_reg<8> reg(clk, rst, en, d, init, q);
 
   clk = Wire<1>(1);
-  reg.tick_compute(true);
+  reg.tick_sample();
   assert(reg.tick_commit() == BaseElement::kChanged);
   assert(q.value() == 0x12u);
 
   // Repeating the same level is not an edge and must not report a change.
   clk = Wire<1>(0);
-  reg.tick_compute(false);
+  reg.tick_sample();
   clk = Wire<1>(1);
-  reg.tick_compute(true);
+  reg.tick_sample();
   assert(reg.tick_commit() == mask_t{0});
 
   // Reset takes precedence over enable.
   rst = Wire<1>(1);
   clk = Wire<1>(0);
-  reg.tick_compute(false);
+  reg.tick_sample();
   clk = Wire<1>(1);
-  reg.tick_compute(true);
+  reg.tick_sample();
   assert(reg.tick_commit() == BaseElement::kChanged);
   assert(q.value() == 0x7u);
 }
@@ -74,7 +74,7 @@ void checkFifo() {
   in_valid = Wire<1>(1);
   in_data = Wire<8>(0x5a);
   clk = Wire<1>(1);
-  fifo.tick_compute(true);
+  fifo.tick_sample();
   const mask_t pushed = fifo.tick_commit();
   fifo.eval();
   assert((pushed & pyc_fifo<8, 4>::kOutValidChanged) != 0);
@@ -90,7 +90,7 @@ void checkByteMem() {
   pyc_byte_mem<4, 8, 16> mem(clk, raddr, rdata, wvalid, waddr, wdata, wstrb);
 
   clk = Wire<1>(1);
-  mem.tick_compute(true);
+  mem.tick_sample();
   (void)mem.tick_commit();
   mem.eval();
   assert(rdata.value() == 0xabu);
@@ -102,7 +102,7 @@ void checkCdc() {
   pyc_cdc_sync<8, 1> cdc(clk, rst, in, out);
 
   clk = Wire<1>(1);
-  cdc.tick_compute(true);
+  cdc.tick_sample();
   assert(cdc.tick_commit() == BaseElement::kChanged);
   assert(out.value() == 0x3cu);
 }
@@ -116,8 +116,8 @@ void checkEvalEquivalence() {
   pyc_reg<8> b(clk, rst, en, d, init, qB);
 
   clk = Wire<1>(1);
-  const mask_t mEval = a.eval(true);
-  b.tick_compute(true);
+  const mask_t mEval = a.eval();
+  b.tick_sample();
   const mask_t mTwo = b.tick_commit();
   assert(mEval == mTwo);
   assert(a.tick_commit() == mask_t{0});  // already published by eval()
@@ -126,7 +126,7 @@ void checkEvalEquivalence() {
 
   // A non-edge publishes nothing and reports no change.
   clk = Wire<1>(0);
-  assert(a.eval(false) == mask_t{0});
+  assert(a.eval() == mask_t{0});
   assert(qA.value() == qB.value());
 }
 

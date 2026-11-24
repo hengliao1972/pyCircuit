@@ -20,10 +20,9 @@ namespace pyc::cpp {
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries,
           unsigned RPorts, unsigned WPorts, bool OldData = false>
 class pyc_sync_mem_nm
-    : public ClockedWiring<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>> {
+    : public ClockedElement<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>> {
 public:
   using change_mask_t = BaseElement::change_mask_t;
-  using ClockedWiring<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>>::tick_compute;
 
   static_assert(DataWidth > 0, "pyc_sync_mem_nm requires DataWidth > 0");
   static_assert(DepthEntries > 0, "pyc_sync_mem_nm DepthEntries must be > 0");
@@ -39,7 +38,7 @@ public:
                   const Wire<AddrWidth> *const *waddrs,
                   const Wire<DataWidth> *const *wdatas,
                   const Wire<StrbWidth> *const *wstrbs)
-      : ClockedWiring<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>>(clk) {
+      : ClockedElement<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>>(clk) {
     for (unsigned i = 0; i < RPorts; ++i) {
       ren[i] = rens[i];
       raddr[i] = raddrs[i];
@@ -65,8 +64,8 @@ public:
     return h;
   }
 
-  void tick_compute(bool clkNow) {
-    const bool posedge = edge_rise(this->clkPrev, clkNow);
+  void tick_sample() {
+    const bool posedge = true;
     for (unsigned k = 0; k < WPorts; ++k) {
       pendingWrite[k] = false;
       if (posedge && wvalid[k]->toBool()) {

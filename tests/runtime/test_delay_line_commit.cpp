@@ -20,9 +20,9 @@ namespace {
 
 void posedge(pyc_delay_line<8, 2> &delay, Wire<1> &clk) {
   clk = Wire<1>(0);
-  delay.tick_compute();
+  delay.tick_sample();
   clk = Wire<1>(1);
-  delay.tick_compute();
+  delay.tick_sample();
 }
 
 void testScalarCommitReportsTailChange() {

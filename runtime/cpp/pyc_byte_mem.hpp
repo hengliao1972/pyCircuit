@@ -20,10 +20,9 @@ namespace pyc::cpp {
 // - Addresses are low-bit indexed into host `size_t`; out-of-range bytes are 0.
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthBytes>
 class pyc_byte_mem
-    : public ClockedWiring<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>> {
+    : public ClockedElement<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>> {
 public:
   using change_mask_t = BaseElement::change_mask_t;
-  using ClockedWiring<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>>::tick_compute;
 
   static_assert(DataWidth > 0, "pyc_byte_mem requires DataWidth > 0");
   static_assert((DataWidth % 8) == 0, "pyc_byte_mem requires DataWidth divisible by 8");
@@ -36,7 +35,7 @@ public:
                Wire<AddrWidth> &waddr,
                Wire<DataWidth> &wdata,
                Wire<StrbWidth> &wstrb)
-      : ClockedWiring<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>>(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
+      : ClockedElement<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>>(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
         mem_(DepthBytes, 0u) {
     eval();
   }
@@ -137,10 +136,7 @@ public:
     }
   }
 
-  void tick_compute(bool clkNow) {
-    if (!edge_rise(this->clkPrev, clkNow))
-      return;
-
+  void tick_sample() {
     pendingWrite = false;
     if (wvalid.toBool()) {
       pendingWrite = true;

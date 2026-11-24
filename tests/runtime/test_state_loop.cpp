@@ -83,18 +83,18 @@ int main() {
     const bool rise = (!prev) & now, fall = prev & (!now);
     prev = now;
     if (rise) {
-      for (auto &r : regRef) r.tick_compute(true);
-      for (auto &r : delayRef) r.tick_compute(true);
+      for (auto &r : regRef) r.tick_sample();
+      for (auto &r : delayRef) r.tick_sample();
       regLoop.compute_rise();
       delayLoop.compute_rise();
     } else if (fall) {
-      for (auto &r : regRef) r.tick_compute(false);
-      for (auto &r : delayRef) r.tick_compute(false);
+      for (auto &r : regRef) r.tick_sample();
+      for (auto &r : delayRef) r.tick_sample();
       regLoop.negedge();
       delayLoop.negedge();
     } else {
-      for (auto &r : regRef) r.tick_compute();
-      for (auto &r : delayRef) r.tick_compute();
+      for (auto &r : regRef) r.tick_sample();
+      for (auto &r : delayRef) r.tick_sample();
       regLoop.compute_generic(now);
       delayLoop.compute_generic(now);
     }

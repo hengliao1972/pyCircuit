@@ -69,10 +69,10 @@ int runGroup(const char *name, unsigned lanes, RegLoop &loop, Wire<1> &clk,
     // Reference: per-object sampling on the edge, commit right after.
     if (rise)
       for (auto &r : ref)
-        r.tick_compute(true);
+        r.tick_sample();
     else
       for (auto &r : ref)
-        r.tick_compute();
+        r.tick_sample();
     // Fused path: the generated code only calls direct_commit() on the edge.
     const std::vector<std::uint64_t> *dirty =
         rise ? &loop.direct_commit() : nullptr;
@@ -154,7 +154,7 @@ int runWakeConsume() {
     // Mirror the generated drive: the reference sees every clock level, so its
     // previous-level latch stays in sync across falling edges too.
     for (auto &r : ref)
-      r.tick_compute(now);
+      r.tick_sample();
     if (!rise)
       continue;
     std::vector<std::uint64_t> &bits = loop.direct_commit();

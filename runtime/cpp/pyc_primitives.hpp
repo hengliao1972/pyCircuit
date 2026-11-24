@@ -224,10 +224,9 @@ public:
 };
 
 template <unsigned Width, unsigned Depth>
-class pyc_fifo : public ClockedWiring<pyc_fifo<Width, Depth>> {
+class pyc_fifo : public ClockedElement<pyc_fifo<Width, Depth>> {
 public:
   using change_mask_t = BaseElement::change_mask_t;
-  using ClockedWiring<pyc_fifo<Width, Depth>>::tick_compute;
 
   // Bit numbers of the three visible outputs (rule: i-th output -> bit i).
   static constexpr change_mask_t kInReadyChanged = change_bit(0);
@@ -242,7 +241,7 @@ public:
            Wire<1> &out_valid,
            Wire<1> &out_ready,
            Wire<Width> &out_data)
-      : ClockedWiring<pyc_fifo<Width, Depth>>(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
+      : ClockedElement<pyc_fifo<Width, Depth>>(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
         out_ready(out_ready), out_data(out_data) {
     static_assert(Depth > 0, "pyc_fifo Depth must be > 0");
     resetState();
@@ -276,12 +275,7 @@ public:
     lastEvalOutData_ = out_data_int;
   }
 
-  void tick_compute(bool clkNow) {
-    const bool posedge = edge_rise(this->clkPrev, clkNow);
-    pending = false;
-    if (!posedge)
-      return;
-
+  void tick_sample() {
     pending = true;
     if (rst.toBool()) {
       rdNext_ = 0;

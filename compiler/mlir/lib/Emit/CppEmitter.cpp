@@ -4220,7 +4220,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_rise();\n";
-    emitEdgeCall("tick_compute", "        ", "true");
+    emitEdgeCall("tick_sample", "        ");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "        _pyc_seq_armed = true;\n";
@@ -4234,10 +4234,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "          delay_loop_" << dbk << ".negedge();\n";
     os << "          _pyc_seq_armed = false;\n";
     os << "        }\n";
-    // A leaf keeps its own copy of the clock level, so it must see every level
-    // transition: the armed gate above would leave a stale level and swallow the
-    // next rising edge. Leaves are cheap here (one compare + one store).
-    emitEdgeCall("tick_compute", "        ", "false");
+    // tick_sample() detects the edge itself, so it keeps the stored level in
+    // sync on every step; the armed gate above only trims the loops.
+    emitEdgeCall("tick_sample", "        ");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "      } else {\n";
@@ -4246,7 +4245,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_generic(_pyc_now);\n";
-    emitEdgeCall("tick_compute", "        ", "_pyc_now");
+    emitEdgeCall("tick_sample", "        ");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "        _pyc_commit_needed = true;\n";
@@ -4257,14 +4256,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       std::string key = nt.get(r.getQ()) + "_inst";
       emitStateTickCompute(key, r->getOperands(), "    ",
                            [&](llvm::StringRef indent) {
-                             os << indent << key << "->tick_compute();\n";
+                             os << indent << key << "->tick_sample();\n";
                            });
     }
     for (auto delay : delayLines) {
       std::string key = nt.get(delay.getQ()) + "_inst";
       emitStateTickCompute(key, delay->getOperands(), "    ",
                            [&](llvm::StringRef indent) {
-                             os << indent << key << "->tick_compute();\n";
+                             os << indent << key << "->tick_sample();\n";
                            });
     }
     for (int64_t dbk : delayLoopIds) {
@@ -4282,35 +4281,35 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     std::string key = nt.get(fifo.getInReady()) + "_inst";
     emitStateTickCompute(key, fifo->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   for (auto mem : byteMems) {
     std::string key = byteMemInstName.lookup(mem.getOperation());
     emitStateTickCompute(key, mem->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   for (auto mem : syncMemNMs) {
     std::string key = syncMemNMInstName.lookup(mem.getOperation());
     emitStateTickCompute(key, mem->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << "->tick_compute();\n";
+                           os << indent << key << "->tick_sample();\n";
                          });
   }
   for (auto fifo : asyncFifos) {
     std::string key = nt.get(fifo.getInReady()) + "_inst";
     emitStateTickCompute(key, fifo->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   for (auto sync : cdcSyncs) {
     std::string key = nt.get(sync.getOut()) + "_inst";
     emitStateTickCompute(key, sync->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   if (!fusedRegLoopIds.empty()) {
