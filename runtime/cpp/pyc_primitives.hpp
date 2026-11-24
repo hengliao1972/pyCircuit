@@ -271,10 +271,10 @@ public:
     lastEvalOutData_ = out_data_int;
   }
 
-  void tick_compute() { tick_compute(edge.clk.toBool()); }
+  void tick_compute() { tick_compute(clk.toBool()); }
 
   void tick_compute(bool clkNow) {
-    const bool posedge = edge.rise(clkNow);
+    const bool posedge = edge_rise(clkPrev, clkNow);
     pending = false;
     if (!posedge)
       return;
