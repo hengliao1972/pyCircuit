@@ -43,7 +43,6 @@ def Mem2Port(
 
     rdata0, rdata1 = m.sync_mem_dp(
         clk_v,
-        rst_v,
         ren0=ren0_w,
         raddr0=raddr0_w,
         ren1=ren1_w,
