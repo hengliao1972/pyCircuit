@@ -68,7 +68,9 @@ struct pyc_not {
   void eval() { y = ~a; }
 };
 
-// Register semantics shared by pyc_reg (scalar) and pyc_vec_reg (vector).
+// Register semantics shared by pyc_reg (scalar) and pyc_vec_reg (vector): the
+// two differ only in the value type, so staging/publish lives here once and the
+// leaves are 0-line derivations that keep their generated constructor signature.
 // The edge protocol lives in ClockedElement; derived classes supply sample().
 template <class ValT>
 class RegBase : public ClockedElement<RegBase<ValT>> {

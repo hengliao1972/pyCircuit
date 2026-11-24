@@ -16,6 +16,9 @@ namespace pyc::cpp {
 //                  components that actually publish combinational outputs
 class BaseElement {
 public:
+  // One bit per visible output (single-output components use bit 0). 64 bits
+  // matches the runtime's dirty/wake words, and no component reports more than
+  // 64 outputs -- pyc_sync_mem_nm asserts RPorts <= 64.
   using change_mask_t = std::uint64_t;
   static constexpr change_mask_t kChanged = change_mask_t{1};
 

@@ -127,11 +127,6 @@ static llvm::cl::opt<bool> cppPch(
     llvm::cl::desc("Record device module hpp for CMake precompiled headers (requires --cpp-split=module)"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<std::string> cppSinglePhaseReport(
-    "cpp-single-phase-report",
-    llvm::cl::desc("Write the component single-phase (EVO) eligibility report"),
-    llvm::cl::init(""));
-
 static llvm::cl::opt<bool> cppCompileBudget(
     "cpp-compile-budget",
     llvm::cl::desc("Enforce predicted C++ compile cost budgets (PYC991-993)"),
@@ -2736,8 +2731,6 @@ int main(int argc, char **argv) {
       std::vector<CppManifestSource> cppManifestSources;
       pyc::CppEmitterOptions cppEmitOpts;
       cppEmitOpts.probePlanPath = probePlanPath;
-    cppEmitOpts.singlePhaseReportPath = cppSinglePhaseReport;
-      cppEmitOpts.singlePhaseReportPath = cppSinglePhaseReport;
 
       // Collect direct dependencies per module for header includes.
       llvm::StringMap<llvm::SmallVector<std::string>> deps;
