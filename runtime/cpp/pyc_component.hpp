@@ -45,18 +45,39 @@ inline bool edge_rise(bool &clkPrev, bool clkNow) {
   return isRise;
 }
 
-// Clocked single-port element: owns the clock wiring, the previous clock level
-// and the pending flag. Only the level is kept — rising/falling edges are
-// derived from it, never tracked as separate entry points. Derived implements
-// sample() (stage next state, return "edge is pending").
+// Clock wiring shared by every component that ticks on a single clock wire: the
+// wire, the previous level, and the no-arg convenience overload. The clocked
+// entry itself stays in the derived class -- what a tick does (stage a sample
+// vs. run phase logic) is the part that actually differs.
 template <class Derived>
-class ClockedElement : public BaseElement {
+class ClockedWiring : public BaseElement {
 public:
-  explicit ClockedElement(Wire<1> &clk) : clk(clk) {}
+  explicit ClockedWiring(Wire<1> &clk) : clk(clk) {}
 
-  inline void tick_compute() { tick_compute(clk.toBool()); }
+  inline void tick_compute() {
+    static_cast<Derived *>(this)->tick_compute(clk.toBool());
+  }
+
+  Wire<1> &clk;
+  bool clkPrev = false;
+};
+
+// Clocked single-port element: adds the pending flag and the single-phase
+// update. Only the clock level is kept -- rising/falling edges are derived from
+// it, never tracked as separate entry points. Derived implements sample()
+// (stage next state, return "edge is pending").
+template <class Derived>
+class ClockedElement : public ClockedWiring<Derived> {
+public:
+  // Dependent base: re-declare the shared vocabulary this class itself names.
+  using change_mask_t = BaseElement::change_mask_t;
+  // The level overload below hides the no-arg convenience form; keep both.
+  using ClockedWiring<Derived>::tick_compute;
+
+  explicit ClockedElement(Wire<1> &clk) : ClockedWiring<Derived>(clk) {}
+
   inline void tick_compute(bool clkNow) {
-    if (__builtin_expect(!edge_rise(clkPrev, clkNow), 1)) {
+    if (__builtin_expect(!edge_rise(this->clkPrev, clkNow), 1)) {
       pending = false;
       return;
     }
@@ -78,8 +99,6 @@ public:
     return static_cast<Derived *>(this)->tick_commit();
   }
 
-  Wire<1> &clk;
-  bool clkPrev = false;
   bool pending = false;
 };
 

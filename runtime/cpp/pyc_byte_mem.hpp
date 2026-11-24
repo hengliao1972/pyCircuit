@@ -19,8 +19,12 @@ namespace pyc::cpp {
 // - Write uses `wstrb` byte enables relative to `waddr`.
 // - Addresses are low-bit indexed into host `size_t`; out-of-range bytes are 0.
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthBytes>
-class pyc_byte_mem : public BaseElement {
+class pyc_byte_mem
+    : public ClockedWiring<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>> {
 public:
+  using change_mask_t = BaseElement::change_mask_t;
+  using ClockedWiring<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>>::tick_compute;
+
   static_assert(DataWidth > 0, "pyc_byte_mem requires DataWidth > 0");
   static_assert((DataWidth % 8) == 0, "pyc_byte_mem requires DataWidth divisible by 8");
   static constexpr unsigned StrbWidth = DataWidth / 8;
@@ -32,7 +36,7 @@ public:
                Wire<AddrWidth> &waddr,
                Wire<DataWidth> &wdata,
                Wire<StrbWidth> &wstrb)
-      : clk(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
+      : ClockedWiring<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>>(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
         mem_(DepthBytes, 0u) {
     eval();
   }
@@ -133,10 +137,8 @@ public:
     }
   }
 
-  void tick_compute() { tick_compute(clk.toBool()); }
-
   void tick_compute(bool clkNow) {
-    if (!edge_rise(clkPrev, clkNow))
+    if (!edge_rise(this->clkPrev, clkNow))
       return;
 
     pendingWrite = false;
@@ -190,7 +192,7 @@ public:
     }
     pendingWrite = false;
     eval();
-    return (hadPendingWrite && oldRdata != rdata) ? kChanged : change_mask_t{0};
+    return (hadPendingWrite && oldRdata != rdata) ? BaseElement::kChanged : change_mask_t{0};
   }
 
   // Convenience for testbenches.
@@ -213,8 +215,6 @@ public:
   }
 
 public:
-  Wire<1> &clk;
-
   Wire<AddrWidth> &raddr;
   Wire<DataWidth> &rdata;
 
@@ -223,7 +223,6 @@ public:
   Wire<DataWidth> &wdata;
   Wire<StrbWidth> &wstrb;
 
-  bool clkPrev = false;
   bool pendingWrite = false;
   std::size_t latchedAddr = 0;
   Wire<DataWidth> latchedData{};

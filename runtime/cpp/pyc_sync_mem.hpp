@@ -19,8 +19,12 @@ namespace pyc::cpp {
 // returns the pre-write data (plain SRAM semantics).
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries,
           unsigned RPorts, unsigned WPorts, bool OldData = false>
-class pyc_sync_mem_nm : public BaseElement {
+class pyc_sync_mem_nm
+    : public ClockedWiring<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>> {
 public:
+  using change_mask_t = BaseElement::change_mask_t;
+  using ClockedWiring<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>>::tick_compute;
+
   static_assert(DataWidth > 0, "pyc_sync_mem_nm requires DataWidth > 0");
   static_assert(DepthEntries > 0, "pyc_sync_mem_nm DepthEntries must be > 0");
   static_assert(RPorts > 0 && RPorts <= 64, "pyc_sync_mem_nm RPorts in 1..64");
@@ -35,7 +39,7 @@ public:
                   const Wire<AddrWidth> *const *waddrs,
                   const Wire<DataWidth> *const *wdatas,
                   const Wire<StrbWidth> *const *wstrbs)
-      : clk(clk) {
+      : ClockedWiring<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>>(clk) {
     for (unsigned i = 0; i < RPorts; ++i) {
       ren[i] = rens[i];
       raddr[i] = raddrs[i];
@@ -61,10 +65,8 @@ public:
     return h;
   }
 
-  void tick_compute() { tick_compute(clk.toBool()); }
-
   void tick_compute(bool clkNow) {
-    const bool posedge = edge_rise(clkPrev, clkNow);
+    const bool posedge = edge_rise(this->clkPrev, clkNow);
     for (unsigned k = 0; k < WPorts; ++k) {
       pendingWrite[k] = false;
       if (posedge && wvalid[k]->toBool()) {
@@ -135,7 +137,6 @@ public:
     return applyStrbNM(oldV, newV, strb);
   }
 
-  Wire<1> &clk;
   const Wire<1> *ren[RPorts];
   const Wire<AddrWidth> *raddr[RPorts];
   Wire<DataWidth> *rdata[RPorts];
@@ -144,7 +145,6 @@ public:
   const Wire<DataWidth> *wdata[WPorts];
   const Wire<StrbWidth> *wstrb[WPorts];
 
-  bool clkPrev = false;
   bool pendingWrite[WPorts] = {};
   bool pendingRead[RPorts] = {};
   std::size_t latchedWaddr[WPorts] = {};
