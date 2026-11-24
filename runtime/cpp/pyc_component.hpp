@@ -14,7 +14,8 @@ namespace pyc::cpp {
 //   change_mask_t  bit i = i-th visible output changed (single output -> bit 0)
 //   eval()         combinational read; default no-op, overridden only by
 //                  components that actually publish combinational outputs
-struct BaseElement {
+class BaseElement {
+public:
   using change_mask_t = std::uint64_t;
   static constexpr change_mask_t kChanged = change_mask_t{1};
 
