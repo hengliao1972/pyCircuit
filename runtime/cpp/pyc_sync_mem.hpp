@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "pyc_bits.hpp"
+#include "pyc_component.hpp"
 
 namespace pyc::cpp {
 // Synchronous NxM memory: N registered read ports, M write ports (write
@@ -18,14 +19,13 @@ namespace pyc::cpp {
 // returns the pre-write data (plain SRAM semantics).
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries,
           unsigned RPorts, unsigned WPorts, bool OldData = false>
-class pyc_sync_mem_nm {
+class pyc_sync_mem_nm : public PortBase {
 public:
   static_assert(DataWidth > 0, "pyc_sync_mem_nm requires DataWidth > 0");
   static_assert(DepthEntries > 0, "pyc_sync_mem_nm DepthEntries must be > 0");
   static_assert(RPorts > 0 && RPorts <= 64, "pyc_sync_mem_nm RPorts in 1..64");
   static_assert(WPorts > 0, "pyc_sync_mem_nm WPorts must be > 0");
   static constexpr unsigned StrbWidth = (DataWidth + 7) / 8;
-  using change_mask_t = std::uint64_t;
 
   pyc_sync_mem_nm(Wire<1> &clk,
                   const Wire<1> *const *rens,
@@ -35,7 +35,7 @@ public:
                   const Wire<AddrWidth> *const *waddrs,
                   const Wire<DataWidth> *const *wdatas,
                   const Wire<StrbWidth> *const *wstrbs)
-      : clk(clk) {
+      : PortBase(clk) {
     for (unsigned i = 0; i < RPorts; ++i) {
       ren[i] = rens[i];
       raddr[i] = raddrs[i];
@@ -61,10 +61,10 @@ public:
     return h;
   }
 
-  void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) && clkNow;
-    clkPrev = clkNow;
+  void tick_compute() { tick_compute(clk.toBool()); }
+
+  void tick_compute(bool clkNow) {
+    const bool posedge = rise(clkNow);
     for (unsigned k = 0; k < WPorts; ++k) {
       pendingWrite[k] = false;
       if (posedge && wvalid[k]->toBool()) {
@@ -111,7 +111,7 @@ public:
     for (unsigned i = 0; i < RPorts; ++i) {
       if (pendingRead[i]) {
         if (*rdata[i] != rdataNext[i])
-          changed |= (change_mask_t{1} << i);
+          markPort(changed, i);
         *rdata[i] = rdataNext[i];
       }
       pendingRead[i] = false;
@@ -135,7 +135,6 @@ public:
     return applyStrbNM(oldV, newV, strb);
   }
 
-  Wire<1> &clk;
   const Wire<1> *ren[RPorts];
   const Wire<AddrWidth> *raddr[RPorts];
   Wire<DataWidth> *rdata[RPorts];
@@ -144,7 +143,6 @@ public:
   const Wire<DataWidth> *wdata[WPorts];
   const Wire<StrbWidth> *wstrb[WPorts];
 
-  bool clkPrev = false;
   bool pendingWrite[WPorts] = {};
   bool pendingRead[RPorts] = {};
   std::size_t latchedWaddr[WPorts] = {};

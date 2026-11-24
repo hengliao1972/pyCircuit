@@ -9,9 +9,12 @@ using pyc::cpp::pyc_delay_line;
 using pyc::cpp::pyc_vec_delay_line;
 using pyc::cpp::Vec;
 
-static_assert(std::is_same_v<decltype(std::declval<pyc_delay_line<8, 2>&>().tick_commit()), bool>);
+using pyc::cpp::ComponentBase;
+static_assert(std::is_same_v<decltype(std::declval<pyc_delay_line<8, 2>&>().tick_commit()),
+                             ComponentBase::change_mask_t>);
 static_assert(std::is_same_v<
-    decltype(std::declval<pyc_vec_delay_line<Vec<Wire<8>, 2>, 2>&>().tick_commit()), bool>);
+    decltype(std::declval<pyc_vec_delay_line<Vec<Wire<8>, 2>, 2>&>().tick_commit()),
+    ComponentBase::change_mask_t>);
 
 namespace {
 

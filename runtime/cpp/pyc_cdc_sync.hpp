@@ -4,67 +4,68 @@
 
 #include "pyc_bits.hpp"
 #include "pyc_clock.hpp"
+#include "pyc_component.hpp"
 
 namespace pyc::cpp {
 
 // CDC synchronizer modeled as a destination-clocked flop pipeline.
-template <unsigned Width, unsigned Stages>
-class pyc_cdc_sync {
-public:
-  static_assert(Width > 0 && Width <= 64, "pyc_cdc_sync supports widths 1..64 in the prototype");
-  static_assert(Stages >= 1, "pyc_cdc_sync requires Stages >= 1");
+template <class ValT, unsigned Stages>
+class CdcBase : public ClockedElement<CdcBase<ValT, Stages>> {
+  using Base = ClockedElement<CdcBase<ValT, Stages>>;
+  using change_mask_t = typename Base::change_mask_t;
 
-  pyc_cdc_sync(Wire<1> &clk, Wire<1> &rst, Wire<Width> &in, Wire<Width> &out) : clk(clk), rst(rst), in(in), out(out) {
+  static_assert(Stages >= 1, "CdcBase requires Stages >= 1");
+
+public:
+  CdcBase(Wire<1> &clk, Wire<1> &rst, ValT &in, ValT &out)
+      : Base(clk), rst(rst), in(in), out(out) {
     for (auto &e : pipe_)
-      e = Wire<Width>(0);
-    out = Wire<Width>(0);
+      e = ValT(0);
+    out = ValT(0);
   }
 
-  void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) && clkNow;
-    clkPrev = clkNow;
-    pending = false;
-    if (!posedge)
-      return;
-
-    pending = true;
+  // Every destination-clock edge is pending: the pipeline always advances.
+  bool sample() {
     if (rst.toBool()) {
       for (auto &e : pipeNext_)
-        e = Wire<Width>(0);
-      return;
+        e = ValT(0);
+      return true;
     }
-
     pipeNext_[0] = in;
     for (unsigned i = 1; i < Stages; i++)
       pipeNext_[i] = pipe_[i - 1];
+    return true;
   }
 
   // Applies a destination-clock edge and reports whether out changed.
-  bool tick_commit() {
-    if (!pending)
-      return false;
+  inline change_mask_t tick_commit() {
+    if (!this->pending)
+      return 0;
     for (unsigned i = 0; i < Stages; i++)
       pipe_[i] = pipeNext_[i];
     const bool changed = out != pipe_[Stages - 1];
     out = pipe_[Stages - 1];
-    pending = false;
-    return changed;
+    this->pending = false;
+    return changed ? Base::kChanged : change_mask_t{0};
   }
 
-public:
-  Wire<1> &clk;
   Wire<1> &rst;
-  Wire<Width> &in;
-  Wire<Width> &out;
-
-  bool clkPrev = false;
-  bool pending = false;
+  ValT &in;
+  ValT &out;
 
 private:
-  std::array<Wire<Width>, Stages> pipe_{};
-  std::array<Wire<Width>, Stages> pipeNext_{};
+  std::array<ValT, Stages> pipe_{};
+  std::array<ValT, Stages> pipeNext_{};
+};
+
+template <unsigned Width, unsigned Stages>
+class pyc_cdc_sync : public CdcBase<Wire<Width>, Stages> {
+  using Base = CdcBase<Wire<Width>, Stages>;
+
+public:
+  static_assert(Width > 0 && Width <= 64,
+                "pyc_cdc_sync supports widths 1..64 in the prototype");
+  using Base::Base;
 };
 
 } // namespace pyc::cpp
-
