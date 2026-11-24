@@ -36,7 +36,7 @@ int main() {
 
   std::vector<Wire<8>> rd(kRegLanes), rinit(kRegLanes), rqRef(kRegLanes),
       rqLoop(kRegLanes), rqFused(kRegLanes);
-  std::vector<pyc_reg<8>> regRef;
+  std::vector<pycReg<8>> regRef;
   regRef.reserve(kRegLanes);
   RegLoop regLoop, fusedLoop;  // fusedLoop: tick-fuse single-phase lanes
   for (unsigned i = 0; i < kRegLanes; ++i) {
@@ -51,7 +51,7 @@ int main() {
 
   std::vector<Wire<8>> dd(kDelayLanes), dinit(kDelayLanes), dqRef(kDelayLanes),
       dqLoop(kDelayLanes);
-  std::vector<pyc_delay_line<8, 4>> delayRef;
+  std::vector<pycDelayLine<8, 4>> delayRef;
   delayRef.reserve(kDelayLanes);
   DelayLoop delayLoop;
   for (unsigned i = 0; i < kDelayLanes; ++i) {

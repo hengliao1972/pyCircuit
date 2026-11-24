@@ -8,7 +8,7 @@ int main() {
   Wire<1> wv0{0}, wv1{0}, wv2{0};
   Wire<64> rd0{0}, rd1{0}, wd0{0}, wd1{0}, wd2{0};
   Wire<8> st0{0}, st1{0}, st2{0};
-  using M = pyc::cpp::pyc_sync_mem_nm<5, 64, 32, 2, 3>;
+  using M = pyc::cpp::pycSyncMemNM<5, 64, 32, 2, 3>;
   const pyc::cpp::Wire<1> *rens[] = {&ren0, &ren1};
   const pyc::cpp::Wire<5> *raddrs[] = {&ra0, &ra1};
   pyc::cpp::Wire<64> *rdatas[] = {&rd0, &rd1};
@@ -41,7 +41,7 @@ int main() {
   clk=Wire<1>{1}; m.tick_sample(); m.tick_commit();
   if (rd0.value()!=0xCC || rd1.value()!=0xDDDDDDDDDDDD11DDull) { printf("FAIL rd2: %lx %lx\n",(unsigned long)rd0.value(),(unsigned long)rd1.value()); return 1; }
   // read_mode=old: read-during-write must return the PRE-write data.
-  using O = pyc::cpp::pyc_sync_mem_nm<5, 64, 32, 1, 1, true>;
+  using O = pyc::cpp::pycSyncMemNM<5, 64, 32, 1, 1, true>;
   Wire<1> oren{1}, owv{0}; Wire<5> ora{0}, owa{0};
   Wire<64> ord{0}, owd{0}; Wire<8> ost{0};
   const pyc::cpp::Wire<1> *orens[] = {&oren};

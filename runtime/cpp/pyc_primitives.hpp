@@ -68,7 +68,7 @@ struct pyc_not {
   void eval() { y = ~a; }
 };
 
-// Register semantics shared by pyc_reg (scalar) and pyc_vec_reg (vector): the
+// Register semantics shared by pycReg (scalar) and pycVecReg (vector): the
 // two differ only in the value type, so staging/publish lives here once and the
 // leaves are 0-line derivations that keep their generated constructor signature.
 // The edge protocol lives in ClockedElement; derived classes supply sample().
@@ -112,7 +112,7 @@ public:
 };
 
 template <unsigned Width>
-class pyc_reg : public RegBase<Wire<Width>> {
+class pycReg : public RegBase<Wire<Width>> {
   using Base = RegBase<Wire<Width>>;
 
 public:
@@ -120,7 +120,7 @@ public:
 };
 
 template <typename T>
-class pyc_vec_reg : public RegBase<T> {
+class pycVecReg : public RegBase<T> {
   using Base = RegBase<T>;
 
 public:
@@ -129,7 +129,7 @@ public:
 
 // Simulator representation of DEPTH cascaded registers. A circular buffer
 // makes the normal enabled edge O(1); reset still initializes every stage so
-// reset/enable and compute-before-commit semantics match pyc_reg chains.
+// reset/enable and compute-before-commit semantics match pycReg chains.
 template <class ValT, unsigned Depth>
 class DelayBase : public ClockedElement<DelayBase<ValT, Depth>> {
   using Base = ClockedElement<DelayBase<ValT, Depth>>;
@@ -208,7 +208,7 @@ private:
 };
 
 template <unsigned Width, unsigned Depth>
-class pyc_delay_line : public DelayBase<Wire<Width>, Depth> {
+class pycDelayLine : public DelayBase<Wire<Width>, Depth> {
   using Base = DelayBase<Wire<Width>, Depth>;
 
 public:
@@ -216,7 +216,7 @@ public:
 };
 
 template <typename T, unsigned Depth>
-class pyc_vec_delay_line : public DelayBase<T, Depth> {
+class pycVecDelayLine : public DelayBase<T, Depth> {
   using Base = DelayBase<T, Depth>;
 
 public:
@@ -224,16 +224,16 @@ public:
 };
 
 template <unsigned Width, unsigned Depth>
-class pyc_fifo : public ClockedElement<pyc_fifo<Width, Depth>> {
+class pycFifo : public ClockedElement<pycFifo<Width, Depth>> {
 public:
   using change_mask_t = BaseElement::change_mask_t;
 
   // Bit numbers of the three visible outputs (rule: i-th output -> bit i).
-  static constexpr change_mask_t kInReadyChanged = change_bit(0);
-  static constexpr change_mask_t kOutValidChanged = change_bit(1);
-  static constexpr change_mask_t kOutDataChanged = change_bit(2);
+  static constexpr change_mask_t kInReadyChanged = BaseElement::change_bit(0);
+  static constexpr change_mask_t kOutValidChanged = BaseElement::change_bit(1);
+  static constexpr change_mask_t kOutDataChanged = BaseElement::change_bit(2);
 
-  pyc_fifo(Wire<1> &clk,
+  pycFifo(Wire<1> &clk,
            Wire<1> &rst,
            Wire<1> &in_valid,
            Wire<1> &in_ready,
@@ -241,9 +241,9 @@ public:
            Wire<1> &out_valid,
            Wire<1> &out_ready,
            Wire<Width> &out_data)
-      : ClockedElement<pyc_fifo<Width, Depth>>(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
+      : ClockedElement<pycFifo<Width, Depth>>(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
         out_ready(out_ready), out_data(out_data) {
-    static_assert(Depth > 0, "pyc_fifo Depth must be > 0");
+    static_assert(Depth > 0, "pycFifo Depth must be > 0");
     resetState();
     eval();
   }

@@ -5,20 +5,20 @@
 #include <type_traits>
 
 using pyc::cpp::Wire;
-using pyc::cpp::pyc_delay_line;
-using pyc::cpp::pyc_vec_delay_line;
+using pyc::cpp::pycDelayLine;
+using pyc::cpp::pycVecDelayLine;
 using pyc::cpp::Vec;
 
 using pyc::cpp::BaseElement;
-static_assert(std::is_same_v<decltype(std::declval<pyc_delay_line<8, 2>&>().tick_commit()),
+static_assert(std::is_same_v<decltype(std::declval<pycDelayLine<8, 2>&>().tick_commit()),
                              BaseElement::change_mask_t>);
 static_assert(std::is_same_v<
-    decltype(std::declval<pyc_vec_delay_line<Vec<Wire<8>, 2>, 2>&>().tick_commit()),
+    decltype(std::declval<pycVecDelayLine<Vec<Wire<8>, 2>, 2>&>().tick_commit()),
     BaseElement::change_mask_t>);
 
 namespace {
 
-void posedge(pyc_delay_line<8, 2> &delay, Wire<1> &clk) {
+void posedge(pycDelayLine<8, 2> &delay, Wire<1> &clk) {
   clk = Wire<1>(0);
   delay.tick_sample();
   clk = Wire<1>(1);
@@ -28,7 +28,7 @@ void posedge(pyc_delay_line<8, 2> &delay, Wire<1> &clk) {
 void testScalarCommitReportsTailChange() {
   Wire<1> clk{}, rst{}, en{};
   Wire<8> d{}, init{}, q{};
-  pyc_delay_line<8, 2> delay(clk, rst, en, d, init, q);
+  pycDelayLine<8, 2> delay(clk, rst, en, d, init, q);
 
   // No pending edge: no wake for anyone.
   assert(!delay.has_pending());

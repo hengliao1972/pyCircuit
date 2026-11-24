@@ -59,12 +59,12 @@ private:
 };
 
 template <unsigned Width, unsigned Stages>
-class pyc_cdc_sync : public CdcBase<Wire<Width>, Stages> {
+class pycCdcSync : public CdcBase<Wire<Width>, Stages> {
   using Base = CdcBase<Wire<Width>, Stages>;
 
 public:
   static_assert(Width > 0 && Width <= 64,
-                "pyc_cdc_sync supports widths 1..64 in the prototype");
+                "pycCdcSync supports widths 1..64 in the prototype");
   using Base::Base;
 };
 

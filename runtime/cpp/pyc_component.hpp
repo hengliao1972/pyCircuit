@@ -18,11 +18,16 @@ class BaseElement {
 public:
   // One bit per visible output (single-output components use bit 0). 64 bits
   // matches the runtime's dirty/wake words, and no component reports more than
-  // 64 outputs -- pyc_sync_mem_nm asserts RPorts <= 64.
+  // 64 outputs -- pycSyncMemNM asserts RPorts <= 64.
   using change_mask_t = std::uint64_t;
   static constexpr change_mask_t kChanged = change_mask_t{1};
 
   void eval() {}
+
+  // Bit for the i-th visible output.
+  static constexpr change_mask_t change_bit(unsigned i) {
+    return change_mask_t{1} << i;
+  }
 };
 
 enum ComponentFlags : std::uint32_t {
@@ -32,21 +37,6 @@ enum ComponentFlags : std::uint32_t {
   kIsModule = 1u << 3,       // hierarchical instance (eval + tick + commit)
   kIsCombOnly = 1u << 4,     // stateless module: no tick/commit walk entry
 };
-
-// Bit for the i-th visible output.
-inline constexpr BaseElement::change_mask_t change_bit(unsigned i) {
-  return BaseElement::change_mask_t{1} << i;
-}
-
-// Edge detection for one clock domain. A free function rather than a type: the
-// only state is the previous clock level, which belongs to the component that
-// owns the wire. Dual-clock components call this once per domain with their own
-// previous-level flags.
-inline bool edge_rise(bool &clkPrev, bool clkNow) {
-  const bool isRise = !clkPrev && clkNow;
-  clkPrev = clkNow;
-  return isRise;
-}
 
 // Clocked single-port element: owns the clock wiring and exposes exactly three
 // entries.
@@ -66,16 +56,24 @@ public:
   explicit ClockedElement(Wire<1> &clk) : clk(clk) {}
 
   inline change_mask_t eval() {
-    if (__builtin_expect(!edge_rise(clkPrev, clk.toBool()), 1))
+    if (__builtin_expect(!rise(clk.toBool()), 1))
       return 0;
     pending = static_cast<Derived *>(this)->sample();
     return static_cast<Derived *>(this)->tick_commit();
   }
 
   inline void tick_sample() {
-    if (__builtin_expect(!edge_rise(clkPrev, clk.toBool()), 1))
+    if (__builtin_expect(!rise(clk.toBool()), 1))
       return;
     pending = static_cast<Derived *>(this)->sample();
+  }
+
+  // Edge detection for this component's clock domain: the only state is the
+  // previous level, which belongs to the component that owns the wire.
+  inline bool rise(bool clkNow) {
+    const bool isRise = !clkPrev && clkNow;
+    clkPrev = clkNow;
+    return isRise;
   }
 
   Wire<1> &clk;

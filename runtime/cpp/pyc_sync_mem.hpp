@@ -19,18 +19,18 @@ namespace pyc::cpp {
 // returns the pre-write data (plain SRAM semantics).
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthEntries,
           unsigned RPorts, unsigned WPorts, bool OldData = false>
-class pyc_sync_mem_nm
-    : public ClockedElement<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>> {
+class pycSyncMemNM
+    : public ClockedElement<pycSyncMemNM<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>> {
 public:
   using change_mask_t = BaseElement::change_mask_t;
 
-  static_assert(DataWidth > 0, "pyc_sync_mem_nm requires DataWidth > 0");
-  static_assert(DepthEntries > 0, "pyc_sync_mem_nm DepthEntries must be > 0");
-  static_assert(RPorts > 0 && RPorts <= 64, "pyc_sync_mem_nm RPorts in 1..64");
-  static_assert(WPorts > 0, "pyc_sync_mem_nm WPorts must be > 0");
+  static_assert(DataWidth > 0, "pycSyncMemNM requires DataWidth > 0");
+  static_assert(DepthEntries > 0, "pycSyncMemNM DepthEntries must be > 0");
+  static_assert(RPorts > 0 && RPorts <= 64, "pycSyncMemNM RPorts in 1..64");
+  static_assert(WPorts > 0, "pycSyncMemNM WPorts must be > 0");
   static constexpr unsigned StrbWidth = (DataWidth + 7) / 8;
 
-  pyc_sync_mem_nm(Wire<1> &clk,
+  pycSyncMemNM(Wire<1> &clk,
                   const Wire<1> *const *rens,
                   const Wire<AddrWidth> *const *raddrs,
                   Wire<DataWidth> *const *rdatas,
@@ -38,7 +38,7 @@ public:
                   const Wire<AddrWidth> *const *waddrs,
                   const Wire<DataWidth> *const *wdatas,
                   const Wire<StrbWidth> *const *wstrbs)
-      : ClockedElement<pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>>(clk) {
+      : ClockedElement<pycSyncMemNM<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, OldData>>(clk) {
     for (unsigned i = 0; i < RPorts; ++i) {
       ren[i] = rens[i];
       raddr[i] = raddrs[i];
@@ -112,7 +112,7 @@ public:
     for (unsigned i = 0; i < RPorts; ++i) {
       if (pendingRead[i]) {
         if (*rdata[i] != rdataNext[i])
-          changed |= change_bit(i);
+          changed |= BaseElement::change_bit(i);
         *rdata[i] = rdataNext[i];
       }
       pendingRead[i] = false;

@@ -18,31 +18,31 @@ namespace {
 using mask_t = BaseElement::change_mask_t;
 
 // Every leaf is a component and reports its changes through the same type.
-static_assert(std::is_base_of_v<BaseElement, pyc_reg<8>>);
-static_assert(std::is_base_of_v<BaseElement, pyc_vec_reg<Vec<Wire<4>, 2>>>);
-static_assert(std::is_base_of_v<BaseElement, pyc_delay_line<8, 2>>);
-static_assert(std::is_base_of_v<BaseElement, pyc_vec_delay_line<Vec<Wire<4>, 2>, 2>>);
-static_assert(std::is_base_of_v<BaseElement, pyc_cdc_sync<8, 2>>);
-static_assert(std::is_base_of_v<BaseElement, pyc_fifo<8, 2>>);
-static_assert(std::is_base_of_v<BaseElement, pyc_byte_mem<4, 8, 16>>);
-static_assert(std::is_base_of_v<BaseElement, pyc_sync_mem_nm<4, 8, 16, 1, 1>>);
+static_assert(std::is_base_of_v<BaseElement, pycReg<8>>);
+static_assert(std::is_base_of_v<BaseElement, pycVecReg<Vec<Wire<4>, 2>>>);
+static_assert(std::is_base_of_v<BaseElement, pycDelayLine<8, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pycVecDelayLine<Vec<Wire<4>, 2>, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pycCdcSync<8, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pycFifo<8, 2>>);
+static_assert(std::is_base_of_v<BaseElement, pycByteMem<4, 8, 16>>);
+static_assert(std::is_base_of_v<BaseElement, pycSyncMemNM<4, 8, 16, 1, 1>>);
 
-static_assert(std::is_same_v<decltype(std::declval<pyc_reg<8> &>().tick_commit()), mask_t>);
-static_assert(std::is_same_v<decltype(std::declval<pyc_delay_line<8, 2> &>().tick_commit()), mask_t>);
-static_assert(std::is_same_v<decltype(std::declval<pyc_cdc_sync<8, 2> &>().tick_commit()), mask_t>);
-static_assert(std::is_same_v<decltype(std::declval<pyc_fifo<8, 2> &>().tick_commit()), mask_t>);
-static_assert(std::is_same_v<decltype(std::declval<pyc_byte_mem<4, 8, 16> &>().tick_commit()), mask_t>);
-static_assert(std::is_same_v<decltype(std::declval<pyc_sync_mem_nm<4, 8, 16, 1, 1> &>().tick_commit()), mask_t>);
+static_assert(std::is_same_v<decltype(std::declval<pycReg<8> &>().tick_commit()), mask_t>);
+static_assert(std::is_same_v<decltype(std::declval<pycDelayLine<8, 2> &>().tick_commit()), mask_t>);
+static_assert(std::is_same_v<decltype(std::declval<pycCdcSync<8, 2> &>().tick_commit()), mask_t>);
+static_assert(std::is_same_v<decltype(std::declval<pycFifo<8, 2> &>().tick_commit()), mask_t>);
+static_assert(std::is_same_v<decltype(std::declval<pycByteMem<4, 8, 16> &>().tick_commit()), mask_t>);
+static_assert(std::is_same_v<decltype(std::declval<pycSyncMemNM<4, 8, 16, 1, 1> &>().tick_commit()), mask_t>);
 
 // The canonical entry point accepts a caller-supplied clock level, so a driver
 // can hoist the edge test without changing component code.
-static_assert(std::is_same_v<decltype(std::declval<pyc_reg<8> &>().tick_sample()), void>);
-static_assert(std::is_same_v<decltype(std::declval<pyc_fifo<8, 2> &>().tick_sample()), void>);
+static_assert(std::is_same_v<decltype(std::declval<pycReg<8> &>().tick_sample()), void>);
+static_assert(std::is_same_v<decltype(std::declval<pycFifo<8, 2> &>().tick_sample()), void>);
 
 void checkReg() {
   Wire<1> clk(0), rst(0), en(1);
   Wire<8> d(0x12), init(0x7), q(0);
-  pyc_reg<8> reg(clk, rst, en, d, init, q);
+  pycReg<8> reg(clk, rst, en, d, init, q);
 
   clk = Wire<1>(1);
   reg.tick_sample();
@@ -69,7 +69,7 @@ void checkReg() {
 void checkFifo() {
   Wire<1> clk(0), rst(0), in_valid(0), in_ready(0), out_valid(0), out_ready(0);
   Wire<8> in_data(0), out_data(0);
-  pyc_fifo<8, 4> fifo(clk, rst, in_valid, in_ready, in_data, out_valid, out_ready, out_data);
+  pycFifo<8, 4> fifo(clk, rst, in_valid, in_ready, in_data, out_valid, out_ready, out_data);
 
   in_valid = Wire<1>(1);
   in_data = Wire<8>(0x5a);
@@ -77,7 +77,7 @@ void checkFifo() {
   fifo.tick_sample();
   const mask_t pushed = fifo.tick_commit();
   fifo.eval();
-  assert((pushed & pyc_fifo<8, 4>::kOutValidChanged) != 0);
+  assert((pushed & pycFifo<8, 4>::kOutValidChanged) != 0);
   assert(out_valid.toBool());
 }
 
@@ -87,7 +87,7 @@ void checkByteMem() {
   Wire<8> rdata(0), wdata(0xab);
   Wire<1> wvalid(1);
   Wire<1> wstrb(1);
-  pyc_byte_mem<4, 8, 16> mem(clk, raddr, rdata, wvalid, waddr, wdata, wstrb);
+  pycByteMem<4, 8, 16> mem(clk, raddr, rdata, wvalid, waddr, wdata, wstrb);
 
   clk = Wire<1>(1);
   mem.tick_sample();
@@ -99,7 +99,7 @@ void checkByteMem() {
 void checkCdc() {
   Wire<1> clk(0), rst(0);
   Wire<8> in(0x3c), out(0);
-  pyc_cdc_sync<8, 1> cdc(clk, rst, in, out);
+  pycCdcSync<8, 1> cdc(clk, rst, in, out);
 
   clk = Wire<1>(1);
   cdc.tick_sample();
@@ -112,8 +112,8 @@ void checkCdc() {
 void checkEvalEquivalence() {
   Wire<1> clk(0), rst(0), en(1);
   Wire<8> d(0x33), init(0), qA(0), qB(0);
-  pyc_reg<8> a(clk, rst, en, d, init, qA);
-  pyc_reg<8> b(clk, rst, en, d, init, qB);
+  pycReg<8> a(clk, rst, en, d, init, qA);
+  pycReg<8> b(clk, rst, en, d, init, qB);
 
   clk = Wire<1>(1);
   const mask_t mEval = a.eval();

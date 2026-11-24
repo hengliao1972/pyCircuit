@@ -19,23 +19,23 @@ namespace pyc::cpp {
 // - Write uses `wstrb` byte enables relative to `waddr`.
 // - Addresses are low-bit indexed into host `size_t`; out-of-range bytes are 0.
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthBytes>
-class pyc_byte_mem
-    : public ClockedElement<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>> {
+class pycByteMem
+    : public ClockedElement<pycByteMem<AddrWidth, DataWidth, DepthBytes>> {
 public:
   using change_mask_t = BaseElement::change_mask_t;
 
-  static_assert(DataWidth > 0, "pyc_byte_mem requires DataWidth > 0");
-  static_assert((DataWidth % 8) == 0, "pyc_byte_mem requires DataWidth divisible by 8");
+  static_assert(DataWidth > 0, "pycByteMem requires DataWidth > 0");
+  static_assert((DataWidth % 8) == 0, "pycByteMem requires DataWidth divisible by 8");
   static constexpr unsigned StrbWidth = DataWidth / 8;
 
-  pyc_byte_mem(Wire<1> &clk,
+  pycByteMem(Wire<1> &clk,
                Wire<AddrWidth> &raddr,
                Wire<DataWidth> &rdata,
                Wire<1> &wvalid,
                Wire<AddrWidth> &waddr,
                Wire<DataWidth> &wdata,
                Wire<StrbWidth> &wstrb)
-      : ClockedElement<pyc_byte_mem<AddrWidth, DataWidth, DepthBytes>>(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
+      : ClockedElement<pycByteMem<AddrWidth, DataWidth, DepthBytes>>(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
         mem_(DepthBytes, 0u) {
     eval();
   }
