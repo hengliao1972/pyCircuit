@@ -1071,7 +1071,7 @@ int main() {
   const pyc::cpp::Wire<8> *sm_was[] = {&waddr};
   const pyc::cpp::Wire<32> *sm_wds[] = {&wdata};
   const pyc::cpp::Wire<4> *sm_wss[] = {&wstrb};
-  pyc_sync_mem_nm<8, 32, 16, 1, 1, true> sm(clk, sm_rens, sm_ras, sm_rds,
+  pycSyncMemNM<8, 32, 16, 1, 1, true> sm(clk, sm_rens, sm_ras, sm_rds,
                                              sm_wvs, sm_was, sm_wds, sm_wss);
   sm.pokeEntry(3, 0x11223344u);
 
@@ -1081,10 +1081,10 @@ int main() {
   ren = Wire<1>(1);
   raddr = Wire<8>(3);
   clk = Wire<1>(1);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
   clk = Wire<1>(0);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
   if (rdata.value() != 0x11223344u) {
     std::cerr << "sync_mem_nm(old) read did not return the stored entry\n";
@@ -1098,10 +1098,10 @@ int main() {
   wdata = Wire<32>(0x55667788u);
   wstrb = Wire<4>(0xFu);
   clk = Wire<1>(1);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
   clk = Wire<1>(0);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
 
   if (sm.peekEntry(3) != 0x55667788u) {
@@ -1121,7 +1121,7 @@ int main() {
   Wire<32> bwdata(0);
   Wire<4> bwstrb(0);
 
-  pyc_byte_mem<8, 32, 64> bm(clk, braddr, brdata, bwvalid, bwaddr, bwdata, bwstrb);
+  pycByteMem<8, 32, 64> bm(clk, braddr, brdata, bwvalid, bwaddr, bwdata, bwstrb);
   bm.mem_watch(0, 63);
 
   // Force a read recompute after enabling watch.
@@ -1134,19 +1134,19 @@ int main() {
   bwdata = Wire<32>(0xAABBCCDDu);
   bwstrb = Wire<4>(0xFu);
   clk = Wire<1>(1);
-  bm.tick_compute();
+  bm.tick_sample();
   bm.tick_commit();
 
   const bool has_byte_read = [&]() {
     for (const auto &ev : bm.mem_watch_events()) {
-      if (ev.kind == pyc_byte_mem<8, 32, 64>::MemWatchEvent::Kind::Read)
+      if (ev.kind == pycByteMem<8, 32, 64>::MemWatchEvent::Kind::Read)
         return true;
     }
     return false;
   }();
   const bool has_byte_write = [&]() {
     for (const auto &ev : bm.mem_watch_events()) {
-      if (ev.kind == pyc_byte_mem<8, 32, 64>::MemWatchEvent::Kind::Write)
+      if (ev.kind == pycByteMem<8, 32, 64>::MemWatchEvent::Kind::Write)
         return true;
     }
     return false;

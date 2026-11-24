@@ -29,7 +29,7 @@ def main() -> None:
         if cpp_stats.get("retime_regions_rewritten") != 2:
             raise AssertionError(f"cpp: retiming stats mismatch: {cpp_stats}")
         header = opt_cpp.read_text(encoding="utf-8")
-        if "DelayLoop " not in header and "pyc_delay_line<" not in header:
+        if "DelayLoop " not in header and "pycDelayLine<" not in header:
             raise AssertionError("cpp: retiming emitted no delay line")
 
         # The driver carries an independent software model and asserts every
