@@ -15,11 +15,11 @@ _STATE_METHODS = frozenset(
     {
         "out",
         "reg_wire",
-        "reg_domain",
         "backedge_reg",
         "byte_mem",
         "sync_mem",
         "sync_mem_dp",
+        "sync_mem_nm",
         "async_fifo",
         "cdc_sync",
         "fifo",

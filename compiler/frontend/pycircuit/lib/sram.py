@@ -22,11 +22,8 @@ def SRAM(
     depth: int,
 ):
     clk_v = cd.clk
-    rst_v = cd.rst
     if not isinstance(clk_v, Signal) or clk_v.ty != "!pyc.clock":
         raise SRAMError("SRAM domain clk must be !pyc.clock")
-    if not isinstance(rst_v, Signal) or rst_v.ty != "!pyc.reset":
-        raise SRAMError("SRAM domain rst must be !pyc.reset")
 
     ren_w = ren
     wvalid_w = wvalid
@@ -39,7 +36,6 @@ def SRAM(
 
     rdata = m.sync_mem(
         clk_v,
-        rst_v,
         ren=ren_w,
         raddr=raddr_w,
         wvalid=wvalid_w,

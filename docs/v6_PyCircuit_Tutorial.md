@@ -553,11 +553,18 @@ lane 之间逻辑**不同构**时（比如每个表项有独立的复杂状态�
 寄存器堆 / RAM / 队列不要用 `domain.signal()` 数组硬堆（会展开成海量 mux），用内建原语：
 
 ```python
-# 同步 1R1W 存储（读数据打一拍）→ pyc.sync_mem → Verilog pyc_sync_mem 原语
-rdata = m.sync_mem(clk, rst,
+# 同步 1R1W 存储（读数据打一拍）→ pyc.sync_mem_nm（read_mode="old"）→ Verilog pyc_sync_mem_nm 原语
+rdata = m.sync_mem(clk,
                    ren=ren, raddr=raddr,
                    wvalid=wen, waddr=waddr, wdata=wdata, wstrb=strb,
                    depth=64, name="dcache_data")
+
+# 任意 N 读 × M 写形状走通用入口；read_mode="forward"（默认）时同拍同址写会转发到读口
+rdatas = m.sync_mem_nm(clk,
+                       [(ren0, raddr0), (ren1, raddr1)],
+                       [(wen0, waddr0, wdata0, strb0)],
+                       depth=64, name="dcache_2r1w")
+rdata0, rdata1 = rdatas
 
 # ready/valid FIFO → pyc.fifo
 in_ready, out_valid, out_data = m.fifo(clk, rst,

@@ -8,6 +8,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/Visitors.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -470,6 +471,10 @@ static std::optional<LogicalResult> emitScalarOpAssign(Operation &op, raw_ostrea
          << lsb << "];\n";
     return success();
   }
+  if (isa<pyc::DelayTapOp>(op))
+    return {op.emitError("pyc.delay_tap is not supported by the Verilog "
+                         "backend (delay lines are C++-only; re-emit with "
+                         "--emit=cpp or disable state optimization)")};
   if (auto sh = dyn_cast<pyc::ShliOp>(op)) {
     os << "assign " << nt.get(sh.getResult()) << " = (" << nt.get(sh.getIn()) << " << " << sh.getAmountAttr().getInt()
        << ");\n";
@@ -791,15 +796,10 @@ static std::string opSortKey(Operation *op, NameTable &nt) {
       return sanitizeId(nameAttr.getValue());
     return nt.get(mem.getRdata());
   }
-  if (auto mem = dyn_cast<pyc::SyncMemOp>(op)) {
+  if (auto mem = dyn_cast<pyc::SyncMemNMOp>(op)) {
     if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
       return sanitizeId(nameAttr.getValue());
-    return nt.get(mem.getRdata());
-  }
-  if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op)) {
-    if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
-      return sanitizeId(nameAttr.getValue());
-    return nt.get(mem.getRdata0());
+    return nt.get(mem.getRdatas()[0]);
   }
   if (!op->getResults().empty())
     return nt.get(op->getResult(0));
@@ -991,6 +991,16 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
   }
   os << "\n";
 
+  // Reject delay lines early with a clear diagnostic: the Verilog backend
+  // keeps the pre-optimization netlist contract and never emits them.
+  bool sawDelayLine = false;
+  f.walk([&](pyc::DelayLineOp) { sawDelayLine = true; });
+  if (sawDelayLine)
+    return f.emitError("pyc.delay_line is not supported by the Verilog "
+                       "backend (delay lines are C++-only; re-emit with "
+                       "--emit=cpp or disable state optimization)");
+  os << "\n";
+
   // Collect top-level ops for netlist-friendly emission.
   llvm::SmallVector<Operation *> combAssignOps;
   llvm::SmallVector<Operation *> instOps;
@@ -1054,7 +1064,7 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         seqInstOps.push_back(&op);
         continue;
       }
-      if (isa<pyc::SyncMemOp, pyc::SyncMemDPOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op)) {
+      if (isa<pyc::SyncMemNMOp, pyc::AsyncFifoOp, pyc::CdcSyncOp>(op)) {
         seqInstOps.push_back(&op);
         continue;
       }
@@ -1208,7 +1218,24 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
           return r.emitError("verilog emitter only supports integer reg data type");
 
         auto emitReg = [&](llvm::StringRef suffix, llvm::StringRef instanceSuffix) {
-          os << "pyc_reg #(.WIDTH(" << *width << ")) " << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          std::string initParam;
+          bool usePortInit = true;
+          if (auto *initDef = r.getInit().getDefiningOp()) {
+            if (auto constOp = dyn_cast<pyc::ConstantOp>(initDef)) {
+              initParam = ", .INIT(" + vLiteral(constOp.getValueAttr(),
+                                                 constOp.getType()) + ")";
+              usePortInit = false;
+            }
+          }
+          if (usePortInit) {
+            // non-constant init: use the init port path
+            os << "pyc_reg #(.WIDTH(" << *width << "), .USE_INIT_PORT(1)) "
+               << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          } else {
+            // constant init: use the INIT parameter path (no init port)
+            os << "pyc_reg #(.WIDTH(" << *width << ")" << initParam << ") "
+               << nt.get(r.getQ()) << "_inst" << instanceSuffix << " (\n";
+          }
           os << "  .clk(" << nt.get(r.getClk()) << "),\n";
           os << "  .rst(" << nt.get(r.getRst()) << "),\n";
           os << "  .en(" << nt.get(r.getEn()) << "),\n";
@@ -1219,6 +1246,8 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         };
 
         if (auto vt = dyn_cast<VectorType>(qTy)) {
+          // The primitive has scalar leaf ports, so preserve vector shape by
+          // emitting one delay instance per leaf, as for vector registers.
           SmallVector<int64_t> shape = vectorShape(vt);
           walkVectorIndices(shape, [&](ArrayRef<int64_t> indices) {
             std::string suffix = indexSuffix(indices);
@@ -1268,7 +1297,6 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << "pyc_byte_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth() << "), .DEPTH("
            << depth << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
         os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
         os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
         os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
@@ -1278,64 +1306,43 @@ static LogicalResult emitFunc(func::FuncOp f, raw_ostream &os, const VerilogEmit
         os << ");\n";
         continue;
       }
-      if (auto mem = dyn_cast<pyc::SyncMemOp>(op)) {
-        auto addrTy = dyn_cast<IntegerType>(mem.getRaddr().getType());
-        auto dataTy = dyn_cast<IntegerType>(mem.getRdata().getType());
+      if (auto mem = dyn_cast<pyc::SyncMemNMOp>(op)) {
+        auto addrTy = dyn_cast<IntegerType>(mem.getRaddrs()[0].getType());
+        auto dataTy = dyn_cast<IntegerType>(mem.getRdatas()[0].getType());
         if (!addrTy || !dataTy)
-          return mem.emitError("verilog emitter only supports integer sync_mem types");
-
+          return mem.emitError("verilog emitter only supports integer sync_mem_nm types");
         auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
         if (!depthAttr)
           return mem.emitError("missing integer attribute `depth`");
         auto depth = depthAttr.getValue().getZExtValue();
-
-        std::string inst = nt.get(mem.getRdata()) + "_inst";
+        unsigned rp = mem.getRens().size();
+        unsigned wp = mem.getWvalids().size();
+        std::string inst = nt.get(mem.getRdatas()[0]);
         if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
           inst = sanitizeId(nameAttr.getValue());
-
-        os << "pyc_sync_mem #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
-           << "), .DEPTH(" << depth << ")) " << inst << " (\n";
+        // Pack port groups LSB-first (port k = bits [k*W +: W]); the
+        // concatenation lists the high index first.
+        auto pack = [&](auto range) {
+          std::string cat;
+          for (auto v : llvm::reverse(range)) {
+            if (!cat.empty())
+              cat += ", ";
+            cat += nt.get(v);
+          }
+          return "{" + cat + "}";
+        };
+        os << "pyc_sync_mem_nm #(.ADDR_WIDTH(" << addrTy.getWidth()
+           << "), .DATA_WIDTH(" << dataTy.getWidth() << "), .DEPTH(" << depth
+           << "), .R_PORTS(" << rp << "), .W_PORTS(" << wp << "), .READ_MODE("
+           << (mem.getReadMode() == "old" ? 1 : 0) << ")) " << inst << " (\n";
         os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
-        os << "  .ren(" << nt.get(mem.getRen()) << "),\n";
-        os << "  .raddr(" << nt.get(mem.getRaddr()) << "),\n";
-        os << "  .rdata(" << nt.get(mem.getRdata()) << "),\n";
-        os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
-        os << "  .waddr(" << nt.get(mem.getWaddr()) << "),\n";
-        os << "  .wdata(" << nt.get(mem.getWdata()) << "),\n";
-        os << "  .wstrb(" << nt.get(mem.getWstrb()) << ")\n";
-        os << ");\n";
-        continue;
-      }
-      if (auto mem = dyn_cast<pyc::SyncMemDPOp>(op)) {
-        auto addrTy = dyn_cast<IntegerType>(mem.getRaddr0().getType());
-        auto dataTy = dyn_cast<IntegerType>(mem.getRdata0().getType());
-        if (!addrTy || !dataTy)
-          return mem.emitError("verilog emitter only supports integer sync_mem_dp types");
-
-        auto depthAttr = mem->getAttrOfType<IntegerAttr>("depth");
-        if (!depthAttr)
-          return mem.emitError("missing integer attribute `depth`");
-        auto depth = depthAttr.getValue().getZExtValue();
-
-        std::string inst = nt.get(mem.getRdata0()) + "_inst";
-        if (auto nameAttr = mem->getAttrOfType<StringAttr>("name"))
-          inst = sanitizeId(nameAttr.getValue());
-
-        os << "pyc_sync_mem_dp #(.ADDR_WIDTH(" << addrTy.getWidth() << "), .DATA_WIDTH(" << dataTy.getWidth()
-           << "), .DEPTH(" << depth << ")) " << inst << " (\n";
-        os << "  .clk(" << nt.get(mem.getClk()) << "),\n";
-        os << "  .rst(" << nt.get(mem.getRst()) << "),\n";
-        os << "  .ren0(" << nt.get(mem.getRen0()) << "),\n";
-        os << "  .raddr0(" << nt.get(mem.getRaddr0()) << "),\n";
-        os << "  .rdata0(" << nt.get(mem.getRdata0()) << "),\n";
-        os << "  .ren1(" << nt.get(mem.getRen1()) << "),\n";
-        os << "  .raddr1(" << nt.get(mem.getRaddr1()) << "),\n";
-        os << "  .rdata1(" << nt.get(mem.getRdata1()) << "),\n";
-        os << "  .wvalid(" << nt.get(mem.getWvalid()) << "),\n";
-        os << "  .waddr(" << nt.get(mem.getWaddr()) << "),\n";
-        os << "  .wdata(" << nt.get(mem.getWdata()) << "),\n";
-        os << "  .wstrb(" << nt.get(mem.getWstrb()) << ")\n";
+        os << "  .rens(" << pack(mem.getRens()) << "),\n";
+        os << "  .raddrs(" << pack(mem.getRaddrs()) << "),\n";
+        os << "  .rdatas(" << pack(mem.getRdatas()) << "),\n";
+        os << "  .wvalids(" << pack(mem.getWvalids()) << "),\n";
+        os << "  .waddrs(" << pack(mem.getWaddrs()) << "),\n";
+        os << "  .wdatas(" << pack(mem.getWdatas()) << "),\n";
+        os << "  .wstrbs(" << pack(mem.getWstrbs()) << ")\n";
         os << ");\n";
         continue;
       }
@@ -1407,8 +1414,7 @@ LogicalResult emitVerilog(ModuleOp module, llvm::raw_ostream &os, const VerilogE
     os << "`include \"pyc_reg.v\"\n";
     os << "`include \"pyc_fifo.v\"\n\n";
     os << "`include \"pyc_byte_mem.v\"\n\n";
-    os << "`include \"pyc_sync_mem.v\"\n";
-    os << "`include \"pyc_sync_mem_dp.v\"\n";
+    os << "`include \"pyc_sync_mem_nm.v\"\n";
     os << "`include \"pyc_async_fifo.v\"\n";
     os << "`include \"pyc_cdc_sync.v\"\n\n";
   }

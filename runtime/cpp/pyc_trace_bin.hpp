@@ -85,6 +85,8 @@ public:
       t.write_valid = e->write_valid;
       t.write_data_ptr = e->write_data_ptr;
       t.write_width_bits = e->write_width_bits;
+      t.write_storage_width_bits = e->write_storage_width_bits;
+      t.write_lsb_bits = e->write_lsb_bits;
       t.write_addr = e->write_addr;
       t.write_mask_ptr = e->write_mask_ptr;
       t.write_mask_width_bits = e->write_mask_width_bits;
@@ -224,6 +226,8 @@ private:
     bool *write_valid = nullptr;
     const void *write_data_ptr = nullptr;
     std::uint32_t write_width_bits = 0;
+    std::uint32_t write_storage_width_bits = 0;
+    std::uint32_t write_lsb_bits = 0;
     const std::size_t *write_addr = nullptr;
     const void *write_mask_ptr = nullptr;
     std::uint32_t write_mask_width_bits = 0;
@@ -340,6 +344,27 @@ private:
     return out;
   }
 
+  std::vector<std::uint8_t> readValueSliceBytes(
+      const void *ptr, std::uint32_t storage_width_bits,
+      std::uint32_t lsb_bits, std::uint32_t width_bits) {
+    if (lsb_bits == 0 && storage_width_bits == width_bits)
+      return readValueBytes(ptr, width_bits);
+    if (!ptr || width_bits == 0 || storage_width_bits == 0 ||
+        lsb_bits + width_bits > storage_width_bits)
+      return {};
+
+    const std::vector<std::uint8_t> storage =
+        readValueBytes(ptr, storage_width_bits);
+    std::vector<std::uint8_t> out(bytesForWidth(width_bits), 0);
+    for (std::uint32_t bit = 0; bit < width_bits; ++bit) {
+      const std::uint32_t source_bit = lsb_bits + bit;
+      if ((storage[source_bit / 8u] >> (source_bit % 8u)) & 1u)
+        out[bit / 8u] |= static_cast<std::uint8_t>(1u << (bit % 8u));
+    }
+    applyTopBitsMask(out, width_bits);
+    return out;
+  }
+
   std::vector<std::uint8_t> readMaskBytes(const void *ptr,
                                           std::uint32_t mask_width_bits,
                                           std::uint32_t value_width_bits,
@@ -399,7 +424,12 @@ private:
     if (t.write_mask_ptr && t.write_mask_width_bits)
       flags |= 1u << 1u;
 
-    std::vector<std::uint8_t> data = readValueBytes(t.write_data_ptr, t.write_width_bits);
+    const std::uint32_t storage_width = t.write_storage_width_bits == 0
+                                            ? t.write_width_bits
+                                            : t.write_storage_width_bits;
+    std::vector<std::uint8_t> data = readValueSliceBytes(
+        t.write_data_ptr, storage_width, t.write_lsb_bits,
+        t.write_width_bits);
     std::vector<std::uint8_t> mask;
     if (flags & (1u << 1u))
       mask = readValueBytes(t.write_mask_ptr, t.write_mask_width_bits);

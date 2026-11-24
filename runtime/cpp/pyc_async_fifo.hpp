@@ -38,6 +38,10 @@ public:
 
   static constexpr unsigned AW = detail::clog2(Depth);
   static_assert(AW >= 1, "internal: pyc_async_fifo requires AW >= 1");
+  using change_mask_t = std::uint8_t;
+  static constexpr change_mask_t kInReadyChanged = change_mask_t{1} << 0;
+  static constexpr change_mask_t kOutValidChanged = change_mask_t{1} << 1;
+  static constexpr change_mask_t kOutDataChanged = change_mask_t{1} << 2;
 
   pyc_async_fifo(Wire<1> &in_clk,
                  Wire<1> &in_rst,
@@ -85,12 +89,25 @@ public:
       tick_compute_out();
   }
 
-  void tick_commit() {
+  // Commits both clock domains and identifies each externally visible change.
+  change_mask_t tick_commit() {
+    const Wire<1> oldInReady = in_ready;
+    const Wire<1> oldOutValid = out_valid;
+    const Wire<Width> oldOutData = out_data;
     if (pendingIn_)
       tick_commit_in();
     if (pendingOut_)
       tick_commit_out();
     eval();
+
+    change_mask_t changed = 0;
+    if (oldInReady != in_ready)
+      changed |= kInReadyChanged;
+    if (oldOutValid != out_valid)
+      changed |= kOutValidChanged;
+    if (oldOutData != out_data)
+      changed |= kOutDataChanged;
+    return changed;
   }
 
 private:
