@@ -133,10 +133,10 @@ public:
     }
   }
 
-  void tick_compute() { tick_compute(clk.toBool()); }
+  void tick_compute() { tick_compute(edge.clk.toBool()); }
 
   void tick_compute(bool clkNow) {
-    if (!rise(clkNow))
+    if (!edge.rise(clkNow))
       return;
 
     pendingWrite = false;

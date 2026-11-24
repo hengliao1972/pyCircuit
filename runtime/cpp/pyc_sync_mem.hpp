@@ -61,10 +61,10 @@ public:
     return h;
   }
 
-  void tick_compute() { tick_compute(clk.toBool()); }
+  void tick_compute() { tick_compute(edge.clk.toBool()); }
 
   void tick_compute(bool clkNow) {
-    const bool posedge = rise(clkNow);
+    const bool posedge = edge.rise(clkNow);
     for (unsigned k = 0; k < WPorts; ++k) {
       pendingWrite[k] = false;
       if (posedge && wvalid[k]->toBool()) {

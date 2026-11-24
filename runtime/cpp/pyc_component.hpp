@@ -29,10 +29,15 @@ enum ComponentFlags : std::uint32_t {
   kEdgeOptimized = 1u << 1,  // posedge_tick_compute()/negedge_update() exist
   kHasTap = 1u << 2,         // tap()/tap_next()/has_pending() exist
   kIsModule = 1u << 3,       // hierarchical instance (eval + tick + commit)
+  kIsCombOnly = 1u << 4,     // stateless module: no tick/commit walk entry
 };
 
-// Edge detection shared by clocked components.
-class ClockEdge : public ComponentBase {
+// Edge detector for one clock domain. A plain value type, deliberately not a
+// component: a component *has* one (a dual-clock component holds two), it is
+// not one. Keeping it out of the hierarchy lets the same detector serve
+// components that do not share the ClockedElement protocol (memories,
+// channels) without inventing a common ancestor for them.
+class ClockEdge {
 public:
   explicit ClockEdge(Wire<1> &clk) : clk(clk) {}
 
@@ -47,16 +52,17 @@ public:
   bool clkPrev = false;
 };
 
-// Clocked single-port element: owns the four edge verbs and the pending flag.
-// Derived implements sample() (stage next state, return "edge is pending").
+// Clocked single-port element: owns the four edge verbs, the pending flag and
+// one edge detector. Derived implements sample() (stage next state, return
+// "edge is pending").
 template <class Derived>
-class ClockedElement : public ClockEdge {
+class ClockedElement : public ComponentBase {
 public:
-  explicit ClockedElement(Wire<1> &clk) : ClockEdge(clk) {}
+  explicit ClockedElement(Wire<1> &clk) : edge(clk) {}
 
-  inline void tick_compute() { tick_compute(clk.toBool()); }
+  inline void tick_compute() { tick_compute(edge.clk.toBool()); }
   inline void tick_compute(bool clkNow) {
-    if (__builtin_expect(!rise(clkNow), 1)) {
+    if (__builtin_expect(!edge.rise(clkNow), 1)) {
       pending = false;
       return;
     }
@@ -65,25 +71,26 @@ public:
 
   // Caller already observed a 0->1 edge (saves the clkPrev read and branch).
   inline void posedge_tick_compute() {
-    clkPrev = true;
+    edge.clkPrev = true;
     pending = static_cast<Derived *>(this)->sample();
   }
 
   // Falling-edge bookkeeping: just clear the latch so the next rise shows up.
   inline void negedge_update() {
-    clkPrev = false;
+    edge.clkPrev = false;
     pending = false;
   }
 
+  ClockEdge edge;
   bool pending = false;
 };
 
-// Multi-port storage/channel base: shared edge detector plus the bit numbering
-// used to report changes on several visible outputs. Storage and phase logic
-// stay in the derived class.
-class PortBase : public ClockEdge {
+// Multi-port storage/channel base: owns one edge detector plus the bit
+// numbering used to report changes on several visible outputs. Storage and
+// phase logic stay in the derived class.
+class PortBase : public ComponentBase {
 public:
-  explicit PortBase(Wire<1> &clk) : ClockEdge(clk) {}
+  explicit PortBase(Wire<1> &clk) : edge(clk) {}
 
 protected:
   static constexpr change_mask_t portBit(unsigned i) {
@@ -92,6 +99,9 @@ protected:
   static inline void markPort(change_mask_t &mask, unsigned i) {
     mask |= portBit(i);
   }
+
+public:
+  ClockEdge edge;
 };
 
 } // namespace pyc::cpp
