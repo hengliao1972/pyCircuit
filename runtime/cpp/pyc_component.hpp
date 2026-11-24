@@ -62,6 +62,18 @@ public:
     pending = static_cast<Derived *>(this)->sample();
   }
 
+  // Single-phase update: sample and publish in one call, returning the change
+  // mask. Legal only when the emitter has proven that no reader of this
+  // component can observe the new value inside the same pass -- i.e. the state
+  // dependency graph is acyclic and the pass runs readers before producers.
+  // Components in a dependency cycle keep the two-call fallback
+  // (tick_compute() then tick_commit()).
+  inline change_mask_t evo(bool clkNow) {
+    tick_compute(clkNow);
+    return static_cast<Derived *>(this)->tick_commit();
+  }
+  inline change_mask_t evo() { return evo(clk.toBool()); }
+
   Wire<1> &clk;
   bool clkPrev = false;
   bool pending = false;
