@@ -4232,9 +4232,12 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "          delay_loop_" << dbk << ".negedge();\n";
-    emitEdgeCall("tick_compute", "          ", "false");
     os << "          _pyc_seq_armed = false;\n";
     os << "        }\n";
+    // A leaf keeps its own copy of the clock level, so it must see every level
+    // transition: the armed gate above would leave a stale level and swallow the
+    // next rising edge. Leaves are cheap here (one compare + one store).
+    emitEdgeCall("tick_compute", "        ", "false");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "      } else {\n";
