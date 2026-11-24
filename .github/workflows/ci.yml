@@ -214,6 +214,8 @@ jobs:
           unset PYCC || true
           bash flows/scripts/run_examples.sh
           PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
+            bash compiler/mlir/test/pass_ir_dumper_smoke.sh
+          PYCC="$PYC_TOOLCHAIN_ROOT/bin/pycc" \
             PYC_OPT="$PYC_TOOLCHAIN_ROOT/bin/pyc-opt" \
             PYC_GATE_SKIP_BUILD=1 \
             PYC_GATE_RUN_ID="${PYC_GATE_RUN_ID}/cpp-placement" \

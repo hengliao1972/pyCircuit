@@ -228,4 +228,33 @@ if not data.get("passes"):
 print("ok: profile.json carries pass timing")
 PY
 
+# --- AC: func-nested passes run in parallel; each before/after pair must still
+# share one <NN>, pass name and level ---
+MULTI="${OUT}/multi.pyc"
+python3 - <<'PY' "${INPUT}" "${MULTI}"
+import sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+start, end = text.index("func.func @counter"), text.rindex("}")
+body = text[start:end]
+copies = [body] + [body.replace("func.func @counter", f"func.func @counter_{i}", 1) for i in range(1, 8)]
+Path(sys.argv[2]).write_text(text[:start] + "\n".join(copies) + text[end:], encoding="utf-8")
+PY
+DUMP_MULTI="${OUT}/dump_multi"
+"${PYCC}" "${MULTI}" --emit=none -o /dev/null --dump-pass-ir="${DUMP_MULTI}" >/dev/null 2>&1
+python3 - <<'PY' "${DUMP_MULTI}"
+import re, sys
+from pathlib import Path
+pat = re.compile(r"^\d+_(before|after)_(\d+)_(.+?)__L(\d+)")
+pairs = {}
+for p in Path(sys.argv[1]).glob("*.mlir"):
+    m = pat.match(p.name)
+    pairs.setdefault(m.group(2), []).append((m.group(1), m.group(3), m.group(4)))
+bad = [nn for nn, v in pairs.items()
+       if sorted(ph for ph, _, _ in v) != ["after", "before"] or len({v[0][1:], v[1][1:]}) != 1]
+if bad:
+    raise SystemExit(f"fail: parallel pairing broken for NN={[sorted(pairs[nn]) for nn in bad[:3]]}")
+print(f"ok: {len(pairs)} parallel pass instances keep matching before/after")
+PY
+
 echo "ok: per-pass IR dump smoke passed"
