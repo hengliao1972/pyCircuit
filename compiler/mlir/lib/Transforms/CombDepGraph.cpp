@@ -36,18 +36,6 @@ static bool isHardSequentialCut(Operation *op) {
              pyc::AsyncFifoOp, pyc::CdcSyncOp>(op);
 }
 
-static int64_t ceilLog2(int64_t n) {
-  if (n <= 1)
-    return 0;
-  int64_t depth = 0;
-  int64_t v = 1;
-  while (v < n) {
-    v <<= 1;
-    ++depth;
-  }
-  return depth;
-}
-
 static int64_t opCost(Operation *op) {
   if (!op)
     return 0;

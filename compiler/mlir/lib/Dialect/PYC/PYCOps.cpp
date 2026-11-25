@@ -92,18 +92,6 @@ static IntegerAttr intAttrFor(Type ty, const llvm::APInt &v) {
   return IntegerAttr::get(intTy, vv);
 }
 
-static std::optional<llvm::APInt> intConstOfValue(Value v, unsigned width) {
-  if (!v)
-    return std::nullopt;
-  if (auto c = v.getDefiningOp<ConstantOp>())
-    return c.getValueAttr().getValue().zextOrTrunc(width);
-  if (auto c = v.getDefiningOp<arith::ConstantOp>()) {
-    if (auto ia = dyn_cast<IntegerAttr>(c.getValue()))
-      return ia.getValue().zextOrTrunc(width);
-  }
-  return std::nullopt;
-}
-
 static OpFoldResult foldValueIfResultTypeMatches(Value v, Type resultTy) {
   if (v && v.getType() == resultTy)
     return v;
