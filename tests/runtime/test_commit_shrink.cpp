@@ -1,7 +1,8 @@
 // RegLoop::direct_commit fast-path equivalence: single-word lanes, 2-word and
 // multi-word lanes, idle edges (no rising edge, en=0), reset, and the opt-in
-// write-intent probe mirror. Values, per-lane wake bits, pending flags and the
-// qNext mirror must match the per-object pycReg semantics exactly.
+// write-intent surface probes read (pending flag at the post-transfer
+// observation point, write data == the lane's own q). Values and per-lane wake
+// bits must match the per-object pycReg semantics exactly.
 #include <cstdint>
 #include <cstdio>
 #include <random>
@@ -46,12 +47,11 @@ int runGroup(const char *name, unsigned lanes, RegLoop &loop, Wire<1> &clk,
   }
 
   if (probe)
-    // Bind before the first tick: write-intent storage is materialized from
-    // the first accessor call on (unbound probes are dead stores).
-    for (unsigned i = 0; i < lanes; ++i) {
+    // Bind before the first tick: write-intent flags are materialized from the
+    // first lane_pending call on (unbound lanes are dead stores). The write
+    // data is the lane's own q, so it needs no binding.
+    for (unsigned i = 0; i < lanes; ++i)
       loop.lane_pending(i);
-      loop.lane_qnext_raw(i);
-    }
 
   bool prev = false;
   for (unsigned c = 0; c < kCycles; ++c) {
@@ -90,28 +90,33 @@ int runGroup(const char *name, unsigned lanes, RegLoop &loop, Wire<1> &clk,
           return 1;
         }
       if (probe) {
-        // Write-intent mirror: pending == "sampled this edge"; qNext == the
-        // sampled value whenever the edge fired.
-        if (*loop.lane_pending(i) != go) {
+        // Write-intent surface: the flag is still valid here (it is sampled at
+        // the post-transfer observation point, after commit), and the data a
+        // probe reads is the lane's own q — no second copy of the state.
+        if (loop.lane_write_data(i) != l[i].q.data()) {
+          std::fprintf(stderr, "%s: write data is not q cycle %u lane %u\n",
+                       name, c, i);
+          return 1;
+        }
+        if (rise && *loop.lane_pending(i) != go) {
           std::fprintf(stderr, "%s: pending mismatch cycle %u lane %u\n", name,
                        c, i);
           return 1;
         }
         if (go) {
-          const auto *next =
-              reinterpret_cast<const Wire<W> *>(loop.lane_qnext_raw(i));
+          const auto *q =
+              reinterpret_cast<const Wire<W> *>(loop.lane_write_data(i));
           const std::uint64_t *src =
               rst.toBool() ? l[i].init.data() : l[i].d.data();
           for (unsigned w = 0; w < words; ++w)
-            if (next->data()[w] != src[w]) {
-              std::fprintf(stderr, "%s: qnext mismatch cycle %u lane %u\n",
+            if (q->data()[w] != src[w]) {
+              std::fprintf(stderr, "%s: write data mismatch cycle %u lane %u\n",
                            name, c, i);
               return 1;
             }
         }
       }
     }
-    loop.retire();
     // The wake walk consumes (clears) the bitmap; mirror that here so the
     // next edge's staged mask is OR-ed into a clean word.
     loop.clearDirty();
@@ -177,7 +182,6 @@ int runWakeConsume() {
         std::fprintf(stderr, "wake-consume: apply left bits cycle %u\n", c);
         return 1;
       }
-    loop.retire();
   }
   if (dirtyEdges == 0) {
     std::fprintf(stderr, "wake-consume: no dirty edge observed\n");
@@ -194,8 +198,8 @@ int main() {
   Wire<1> clk{0}, rst{0}, en{1};
   int rc = 0;
 
-  // No trace writer attached: the fused path skips the qNext arena and the
-  // pending flags (dead stores); values and wake bits must still match.
+  // No probe bound: the fused path skips the write-intent flags (dead
+  // stores); values and wake bits must still match.
   {
     RegLoop loop;
     rc |= runGroup<8>("single-word", 130, loop, clk, rst, en, false);
@@ -216,7 +220,7 @@ int main() {
     RegLoop loop;
     rc |= runGroup<1024>("sixteen-word", 20, loop, clk, rst, en, false);
   }
-  // Write-intent probes enabled: the mirror must stay exact.
+  // Write-intent probes bound: flags and q-as-write-data must stay exact.
   {
     RegLoop loop;
     rc |= runGroup<8>("probe-single-word", 130, loop, clk, rst, en, true);

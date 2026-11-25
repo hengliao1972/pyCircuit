@@ -29,11 +29,13 @@ constexpr std::size_t loop_word_count(std::size_t lanes) {
 
 // RegLoop: lanes of different widths share one loop, so the
 // emitter groups by (loop id, fused) instead of (loop id, width, fused).
-// Lane values are raw words (Wire<W>::data()); qNext lives in a packed
-// arena whose per-lane segment is kWords long, so write-intent probes can
-// still reinterpret the segment as Wire<W> via lane_qnext_raw(). Semantics
-// mirror the per-object pycReg exactly; the per-lane compare/copy loops
-// are bounded by the runtime word count.
+// Lane values are raw words (Wire<W>::data()). Phased lanes park their
+// sampled next value in a packed arena (per-lane segment of kWords); fused
+// lanes write q directly and never touch the arena. Write-intent probes
+// read the lane storage itself (lane_write_data) after commit, so no second
+// copy of the state is kept for observation. Semantics mirror the
+// per-object pycReg exactly; the per-lane compare/copy loops are bounded
+// by the runtime word count.
 class RegLoop {
 public:
   struct Lane {
@@ -69,13 +71,13 @@ public:
     }
     dirty_.assign(loop_word_count(q_.size()), 0);
     pendingSeen_.assign(q_.size(), 0);
-    shadowSeen_.assign(q_.size(), 0);
   }
 
   std::size_t size() const { return q_.size(); }
 
   void compute_rise() {
     clkPrev_ = true;
+    pendingValid_ = true;
     const std::size_t n = q_.size();
     // One control read per loop (not per lane): qNext stays written for
     // every lane, matching the per-object pycReg sampling order.
@@ -95,13 +97,18 @@ public:
     const bool posedge = (!clkPrev_) & clkNow;
     clkPrev_ = clkNow;
     if (__builtin_expect(!posedge, 1)) {
+      pendingValid_ = false;
       clear_pending();
       return;
     }
     compute_rise();
   }
 
-  void negedge() { clkPrev_ = false; clear_pending(); }
+  void negedge() {
+    clkPrev_ = false;
+    pendingValid_ = false;
+    clear_pending();
+  }
 
   // Applies pending updates, writes back through the lane's q pointer, and
   // returns the per-lane dirty bitmap (bit i set == lane i's q changed).
@@ -110,6 +117,13 @@ public:
   // reader in generated code clears as it walks, and add_lanes
   // zero-initializes once.
   std::vector<std::uint64_t> &commit() {
+    // One commit per edge: the runner calls commit() again on the falling
+    // edge, where there is nothing left to apply. pending_ is deliberately
+    // not cleared per lane: writes are observed after commit (see
+    // lane_pending), so the flag has to outlive the apply.
+    if (__builtin_expect(!pendingValid_, 0))
+      return dirty_;
+    pendingValid_ = false;
     const std::size_t n = q_.size();
     for (std::size_t i = 0; i < n; ++i) {
       if (__builtin_expect(pending_[i] != 0, 0)) {
@@ -120,7 +134,6 @@ public:
           changed |= q[w] != next[w];
           q[w] = next[w];
         }
-        pending_[i] = 0;
         if (changed)
           dirty_[i >> 6] |= std::uint64_t{1} << (i & 63);
       }
@@ -164,15 +177,9 @@ public:
         }
         dirty_[base >> 6] |= mask;
       }
-      // Only lanes a consumer bound (lane_pending/lane_qnext_raw) are mirrored:
-      // an untouched probe costs nothing, no retroactive scan is needed.
-      for (std::size_t k = 0; k < shadowLanes_.size(); ++k) {
-        const std::size_t i = shadowLanes_[k];
-        const std::uint64_t *src = r ? init_[i] : d_[i];
-        std::uint64_t *next = qStore_.data() + laneOff_[i];
-        for (unsigned w = 0; w < words_[i]; ++w)
-          next[w] = src[w];
-      }
+      // Only lanes a consumer bound via lane_pending() carry write-intent
+      // bookkeeping: an untouched probe costs nothing. No qNext mirror: the
+      // write data a probe reads is q itself, after this edge.
       for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
         pending_[pendingLanes_[k]] = 1;
     } else {
@@ -180,12 +187,6 @@ public:
         pending_[pendingLanes_[k]] = 0;
     }
     return dirty_;
-  }
-
-  // q is published in tick_compute; retire() only clears probe pending flags.
-  void retire() {
-    for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
-      pending_[pendingLanes_[k]] = 0;
   }
 
   // Diagnostic/helper reset of the consumed-in-place dirty bitmap; generated
@@ -203,15 +204,10 @@ public:
     }
     return reinterpret_cast<bool *>(&pending_[i]);
   }
-  // Segment is kWords long; callers reinterpret it as Wire<W> (Bits is
-  // standard-layout with words_ as its only member).
-  void *lane_qnext_raw(std::size_t i) {
-    if (!shadowSeen_[i]) {
-      shadowSeen_[i] = 1;
-      shadowLanes_.push_back(i);
-    }
-    return qStore_.data() + laneOff_[i];
-  }
+  // Write-intent data for lane i: the lane's own q storage. Callers
+  // reinterpret it as Wire<W> (Bits is standard-layout with words_ as its
+  // only member); it is read after commit, when q holds the written value.
+  void *lane_write_data(std::size_t i) { return q_[i]; }
 
 private:
   void clear_pending() { pending_.assign(q_.size(), 0); }
@@ -226,11 +222,10 @@ private:
   std::vector<std::size_t> laneOff_;
   std::vector<char> pending_;
   std::vector<std::size_t> pendingLanes_;  // lanes bound via lane_pending()
-  std::vector<std::size_t> shadowLanes_;   // lanes bound via lane_qnext_raw()
   std::vector<char> pendingSeen_;
-  std::vector<char> shadowSeen_;
   std::vector<std::uint64_t> dirty_;
   bool clkPrev_ = false;
+  bool pendingValid_ = false;  // compute ran, commit still owes this edge
 };
 
 // Width-erased DelayLoop: lanes of different widths share one loop (the
@@ -325,7 +320,10 @@ public:
     compute_rise();
   }
 
-  void negedge() { clkPrev_ = false; clear_pending(); }
+  void negedge() {
+    clkPrev_ = false;
+    clear_pending();
+  }
 
   struct CommitResult {
     const std::vector<std::uint64_t> &tailDirty;

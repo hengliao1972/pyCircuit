@@ -61,12 +61,13 @@ int main() {
                           dinit[i].data(), 4u, 1u}});
   }
 
-  // Write-intent storage is materialized from the first lane_pending /
-  // lane_qnext_raw access on (probes nobody binds cost nothing), so a consumer
-  // binds its lanes before the first tick — exactly like pyc_register_probes.
+  // Write-intent flags are materialized from the first lane_pending access on
+  // (lanes nobody binds cost nothing), so a consumer binds before the first
+  // tick — exactly like pyc_register_probes. The write data a probe reads is
+  // the lane's own q, after commit, so nothing else has to be bound.
   for (unsigned i = 0; i < kRegLanes; ++i) {
     fusedLoop.lane_pending(i);
-    fusedLoop.lane_qnext_raw(i);
+    regLoop.lane_pending(i);
   }
   bool prev = false;
   Sum ref, loop;
@@ -104,12 +105,17 @@ int main() {
         rise ? fusedLoop.direct_commit() : std::vector<std::uint64_t>(3, 0);
 
     for (unsigned i = 0; i < kRegLanes; ++i) {
-      const bool pend = *regLoop.lane_pending(i);
-      if (pend != *fusedLoop.lane_pending(i) ||
-          (pend &&
-           reinterpret_cast<Wire<8> *>(regLoop.lane_qnext_raw(i))->value() !=
-               reinterpret_cast<Wire<8> *>(fusedLoop.lane_qnext_raw(i))
-                   ->value())) {
+      // Write data is the lane's own q storage for both the two-phase and the
+      // fused loop: the trace writer reads it post-transfer, when q is final.
+      if (regLoop.lane_write_data(i) != rqLoop[i].data() ||
+          fusedLoop.lane_write_data(i) != rqFused[i].data()) {
+        std::fprintf(stderr, "WRITE DATA IS NOT Q cycle %u lane %u\n", c, i);
+        return 1;
+      }
+      // The flag is only defined at an edge's post-transfer observation
+      // point: fused lanes keep it from their in-compute commit until the
+      // next edge, phased lanes clear it on a non-edge tick.
+      if (rise && *regLoop.lane_pending(i) != *fusedLoop.lane_pending(i)) {
         std::fprintf(stderr, "FUSED WRITE-INTENT MISMATCH cycle %u lane %u\n",
                      c, i);
         return 1;
@@ -118,8 +124,21 @@ int main() {
 
     // Wake precision: per-lane bitmaps equal the per-object commit results.
     const auto &regDirty = regLoop.commit();
-    fusedLoop.retire();
     const auto delayRes = delayLoop.commit();
+    // The write-intent flag must outlive commit: it is sampled at the
+    // post-transfer observation point. (Fused lanes keep the flag from their
+    // in-compute commit until the next edge overwrites it.)
+    if (rise) {
+      const bool wrote = rst.toBool() | en.toBool();
+      for (unsigned i = 0; i < kRegLanes; ++i) {
+        if (*regLoop.lane_pending(i) != wrote ||
+            *fusedLoop.lane_pending(i) != wrote) {
+          std::fprintf(stderr, "PENDING LOST AFTER COMMIT cycle %u lane %u\n",
+                       c, i);
+          return 1;
+        }
+      }
+    }
     for (unsigned i = 0; i < kRegLanes; ++i) {
       const bool changed = regRef[i].tick_commit();
       if (changed != bit(regDirty, i)) {
