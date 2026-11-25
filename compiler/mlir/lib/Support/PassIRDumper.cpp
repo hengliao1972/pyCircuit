@@ -3,6 +3,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FileSystem.h"
@@ -10,11 +11,12 @@
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <atomic>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <system_error>
-#include <vector>
 
 using namespace mlir;
 
@@ -73,6 +75,14 @@ std::string formatSeq(unsigned n) {
   return std::string(buf);
 }
 
+/// Level = op nesting depth: module passes are level 0, func-nested are 1+.
+unsigned nestingLevel(Operation *op) {
+  unsigned level = 0;
+  for (Operation *p = op ? op->getParentOp() : nullptr; p; p = p->getParentOp())
+    ++level;
+  return level;
+}
+
 /// Append up to `maxLines` non-empty-trailing lines of `ir` to `os`. When the
 /// limit kicks in, append a trailing `// truncated at N lines` marker. When
 /// `maxLines == 0`, write the whole buffer.
@@ -105,19 +115,31 @@ struct PassIRDumper::Impl {
 
   /// Monotonic counter shared across all phases; guarantees lexical order =
   /// execution order. Incremented once per emitted file.
-  unsigned seq = 0;
+  std::atomic<unsigned> seq{0};
   /// Monotonic per-pass counter. Each `runBeforePass` takes the next value and
-  /// stores it on `frameStack` so the matching `runAfterPass*` reuses the same
+  /// records it under (pass, op) so the matching `runAfterPass*` reuses the same
   /// `<NN>` even if nested passes ran in between.
   unsigned nextPassIndex = 0;
 
-  /// Nesting frame: level + the pass index assigned at `runBeforePass`.
-  /// Top-level (module) passes are level 0; func-nested are level 1+.
-  struct Frame {
-    unsigned level = 0;
-    unsigned passIndex = 0;
-  };
-  std::vector<Frame> frameStack;
+  /// Pass index assigned at `runBeforePass`, keyed by the running (pass, op).
+  /// Func-nested passes run on several threads at once, so a single nesting
+  /// stack would hand an after-image another instance's index.
+  llvm::DenseMap<std::pair<Pass *, Operation *>, unsigned> openPasses;
+  /// Guards `nextPassIndex` and `openPasses` only: printing IR may wait on the
+  /// context thread pool, so it must not run under this lock.
+  std::mutex mutex;
+
+  unsigned openPass(Pass *pass, Operation *op) {
+    std::lock_guard<std::mutex> lock(mutex);
+    return openPasses[{pass, op}] = ++nextPassIndex;
+  }
+
+  unsigned closePass(Pass *pass, Operation *op) {
+    std::lock_guard<std::mutex> lock(mutex);
+    unsigned passIdx = openPasses.lookup({pass, op});
+    openPasses.erase({pass, op});
+    return passIdx;
+  }
 
   /// Optional compiled regex. Constructed once. Uses llvm::Regex (no exceptions,
   /// matches LLVM/MLIR -fno-exceptions build default).
@@ -212,45 +234,29 @@ PassIRDumper::~PassIRDumper() = default;
 void PassIRDumper::runBeforePass(Pass *pass, Operation *op) {
   if (!impl_->enabled)
     return;
-  // Nesting level = current stack depth before push. Capture a fresh pass
-  // index on the frame so nested passes cannot steal the outer `<NN>`.
-  const unsigned level = static_cast<unsigned>(impl_->frameStack.size());
-  const unsigned passIdx = ++impl_->nextPassIndex;
-  impl_->frameStack.push_back({level, passIdx});
+  const unsigned passIdx = impl_->openPass(pass, op);
 
   const std::string name = passShortName(pass);
   if (impl_->opts.wantBefore())
-    impl_->write(name, level, passIdx, op, "before", /*failed=*/false);
+    impl_->write(name, nestingLevel(op), passIdx, op, "before", /*failed=*/false);
 }
 
 void PassIRDumper::runAfterPass(Pass *pass, Operation *op) {
   if (!impl_->enabled)
     return;
-  unsigned level = 0;
-  unsigned passIdx = 0;
-  if (!impl_->frameStack.empty()) {
-    level = impl_->frameStack.back().level;
-    passIdx = impl_->frameStack.back().passIndex;
-    impl_->frameStack.pop_back();
-  }
+  const unsigned passIdx = impl_->closePass(pass, op);
   if (impl_->opts.wantAfter())
-    impl_->write(passShortName(pass), level, passIdx, op, "after",
+    impl_->write(passShortName(pass), nestingLevel(op), passIdx, op, "after",
                  /*failed=*/false);
 }
 
 void PassIRDumper::runAfterPassFailed(Pass *pass, Operation *op) {
   if (!impl_->enabled)
     return;
-  unsigned level = 0;
-  unsigned passIdx = 0;
-  if (!impl_->frameStack.empty()) {
-    level = impl_->frameStack.back().level;
-    passIdx = impl_->frameStack.back().passIndex;
-    impl_->frameStack.pop_back();
-  }
+  const unsigned passIdx = impl_->closePass(pass, op);
   // Always write the after-image on failure, even if phase == "before", so the
   // failure state is never lost.
-  impl_->write(passShortName(pass), level, passIdx, op, "after",
+  impl_->write(passShortName(pass), nestingLevel(op), passIdx, op, "after",
                /*failed=*/true);
 }
 

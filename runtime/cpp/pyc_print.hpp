@@ -100,14 +100,14 @@ inline std::ostream &operator<<(std::ostream &os, const pyc_not<Width> &m) {
 }
 
 template <unsigned Width>
-inline std::ostream &operator<<(std::ostream &os, const pyc_reg<Width> &m) {
-  os << "pyc_reg<" << Width << ">{en=" << m.en << " d=" << m.d << " init=" << m.init << " q=" << m.q << "}";
+inline std::ostream &operator<<(std::ostream &os, const pycReg<Width> &m) {
+  os << "pycReg<" << Width << ">{en=" << m.en << " d=" << m.d << " init=" << m.init << " q=" << m.q << "}";
   return os;
 }
 
 template <unsigned Width, unsigned Depth>
-inline std::ostream &operator<<(std::ostream &os, const pyc_fifo<Width, Depth> &m) {
-  os << "pyc_fifo<" << Width << "," << Depth << ">{";
+inline std::ostream &operator<<(std::ostream &os, const pycFifo<Width, Depth> &m) {
+  os << "pycFifo<" << Width << "," << Depth << ">{";
   os << "in_valid=" << m.in_valid << " in_ready=" << m.in_ready << " in_data=" << m.in_data;
   os << " out_valid=" << m.out_valid << " out_ready=" << m.out_ready << " out_data=" << m.out_data;
   os << " count=" << m.debug_count() << " rd=" << m.debug_rd_ptr() << " wr=" << m.debug_wr_ptr();
