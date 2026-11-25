@@ -191,8 +191,7 @@ into a single region:
   - `pyc.fifo` → `pyc_fifo` (`runtime/verilog/pyc_fifo.v`)
   - `pyc.async_fifo` → `pyc_async_fifo` (`runtime/verilog/pyc_async_fifo.v`)
   - `pyc.byte_mem` → `pyc_byte_mem` (`runtime/verilog/pyc_byte_mem.v`)
-  - `pyc.sync_mem` → `pyc_sync_mem` (`runtime/verilog/pyc_sync_mem.v`)
-  - `pyc.sync_mem_dp` → `pyc_sync_mem_dp` (`runtime/verilog/pyc_sync_mem_dp.v`)
+  - `pyc.sync_mem_nm` → `pyc_sync_mem_nm` (`runtime/verilog/pyc_sync_mem_nm.v`)
   - `pyc.cdc_sync` → `pyc_cdc_sync` (`runtime/verilog/pyc_cdc_sync.v`)
 
 `pycc` also runs `pyc-fuse-comb`, which enables emission of flattened

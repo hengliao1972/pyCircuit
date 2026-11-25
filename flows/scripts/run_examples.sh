@@ -1054,7 +1054,6 @@ int main() {
 
   // ---- sync_mem: entry-addressed ----
   Wire<1> clk(0);
-  Wire<1> rst(0);
   Wire<1> ren(0);
   Wire<8> raddr(0);
   Wire<32> rdata(0);
@@ -1063,21 +1062,34 @@ int main() {
   Wire<32> wdata(0);
   Wire<4> wstrb(0);
 
-  pyc_sync_mem<8, 32, 16> sm(clk, rst, ren, raddr, rdata, wvalid, waddr, wdata, wstrb);
+  // sync_mem is now pyc_sync_mem_nm with read_mode=old (verified separately
+  // against the legacy class); watch-event coverage lives on byte_mem below.
+  const pyc::cpp::Wire<1> *sm_rens[] = {&ren};
+  const pyc::cpp::Wire<8> *sm_ras[] = {&raddr};
+  pyc::cpp::Wire<32> *sm_rds[] = {&rdata};
+  const pyc::cpp::Wire<1> *sm_wvs[] = {&wvalid};
+  const pyc::cpp::Wire<8> *sm_was[] = {&waddr};
+  const pyc::cpp::Wire<32> *sm_wds[] = {&wdata};
+  const pyc::cpp::Wire<4> *sm_wss[] = {&wstrb};
+  pycSyncMemNM<8, 32, 16, 1, 1, true> sm(clk, sm_rens, sm_ras, sm_rds,
+                                             sm_wvs, sm_was, sm_wds, sm_wss);
   sm.pokeEntry(3, 0x11223344u);
 
   const std::uint64_t h0 = sm.mem_hash();
-  sm.mem_watch(0, 15);
 
   // Read @3.
   ren = Wire<1>(1);
   raddr = Wire<8>(3);
   clk = Wire<1>(1);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
   clk = Wire<1>(0);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
+  if (rdata.value() != 0x11223344u) {
+    std::cerr << "sync_mem_nm(old) read did not return the stored entry\n";
+    return 2;
+  }
 
   // Write @3.
   ren = Wire<1>(0);
@@ -1086,41 +1098,20 @@ int main() {
   wdata = Wire<32>(0x55667788u);
   wstrb = Wire<4>(0xFu);
   clk = Wire<1>(1);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
   clk = Wire<1>(0);
-  sm.tick_compute();
+  sm.tick_sample();
   sm.tick_commit();
 
-  const bool has_sync_read = [&]() {
-    for (const auto &ev : sm.mem_watch_events()) {
-      if (ev.kind == pyc_sync_mem<8, 32, 16>::MemWatchEvent::Kind::Read)
-        return true;
-    }
-    return false;
-  }();
-  const bool has_sync_write = [&]() {
-    for (const auto &ev : sm.mem_watch_events()) {
-      if (ev.kind == pyc_sync_mem<8, 32, 16>::MemWatchEvent::Kind::Write)
-        return true;
-    }
-    return false;
-  }();
-  if (!has_sync_read || !has_sync_write) {
-    std::cerr << "missing sync_mem watch events (read/write)\n";
-    return 2;
-  }
   if (sm.peekEntry(3) != 0x55667788u) {
-    std::cerr << "sync_mem write did not commit\n";
+    std::cerr << "sync_mem_nm write did not commit\n";
     return 3;
   }
   if (sm.mem_hash() == h0) {
-    std::cerr << "sync_mem hash did not change after write\n";
+    std::cerr << "sync_mem_nm hash did not change after write\n";
     return 4;
   }
-
-  // Dump just the written entry.
-  sm.mem_dump(std::cout, 3, 3);
 
   // ---- byte_mem: byte-addressed ----
   Wire<8> braddr(0);
@@ -1130,7 +1121,7 @@ int main() {
   Wire<32> bwdata(0);
   Wire<4> bwstrb(0);
 
-  pyc_byte_mem<8, 32, 64> bm(clk, rst, braddr, brdata, bwvalid, bwaddr, bwdata, bwstrb);
+  pycByteMem<8, 32, 64> bm(clk, braddr, brdata, bwvalid, bwaddr, bwdata, bwstrb);
   bm.mem_watch(0, 63);
 
   // Force a read recompute after enabling watch.
@@ -1143,19 +1134,19 @@ int main() {
   bwdata = Wire<32>(0xAABBCCDDu);
   bwstrb = Wire<4>(0xFu);
   clk = Wire<1>(1);
-  bm.tick_compute();
+  bm.tick_sample();
   bm.tick_commit();
 
   const bool has_byte_read = [&]() {
     for (const auto &ev : bm.mem_watch_events()) {
-      if (ev.kind == pyc_byte_mem<8, 32, 64>::MemWatchEvent::Kind::Read)
+      if (ev.kind == pycByteMem<8, 32, 64>::MemWatchEvent::Kind::Read)
         return true;
     }
     return false;
   }();
   const bool has_byte_write = [&]() {
     for (const auto &ev : bm.mem_watch_events()) {
-      if (ev.kind == pyc_byte_mem<8, 32, 64>::MemWatchEvent::Kind::Write)
+      if (ev.kind == pycByteMem<8, 32, 64>::MemWatchEvent::Kind::Write)
         return true;
     }
     return false;

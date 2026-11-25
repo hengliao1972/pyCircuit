@@ -41,7 +41,7 @@ V6 的核心概念：
 - **周期感知信号（`CycleAwareSignal`，简称 CAS）**：设计中流动的唯一信号类型。每个信号携带「逻辑周期」标签，编译器根据周期差**自动插入 DFF** 完成流水线对齐。
 - **前向声明寄存器（`domain.signal()` + `<<=`）**：先声明后赋值，读写周期差决定寄存器级数——寄存器是**推导**出来的，不是手写的。
 - **层次化组合（`domain.call()`）**：Python 函数调用链即硬件模块层次；每个模块既能独立编译，又能被父模块组合。
-- **类型化数据体系（`Data` / `Wire[DT]`）**：`Bits` / `Vector` / `Clock` / `Reset` 四种 `Data` 子类由统一的 `Wire[DT]` 句柄承载；向量 `vector<D0x...xiW>` 是一等公民，SIMD 运算逐 lane 并行，可保留到 Verilog（packed bus）或按需标量化。
+- **类型化数据体系（`Data` / `Wire[DT]`）**：`Bits` / `Vector` / `Clock` / `Reset` 四种 `Data` 子类由统一的 `Wire[DT]` 句柄承载；向量在前端是一等公民，SIMD 运算逐 lane 并行。发射 `.pyc` 时前端直接把向量展开为逐 lane 标量 op，端口写成单根 packed `i{leaf*lanes}` 总线（Verilog 侧即 `[N*W-1:0]`）。
 - **周期精确仿真**：同一 MLIR 同时生成 Verilog 和 C++ 仿真器，测试台（`CycleAwareTb`）用与设计对称的 `next()` 模型编写。
 
 ### 标准导入
@@ -108,7 +108,7 @@ PyCircuit 的所有硬件对象都建立在两个相互正交的概念之上：
 
 ### 3.1 Data 类型层级
 
-`pycircuit.data` 定义了一个冻结的（`frozen` dataclass）类型层级，`str(Data)` 直接给出 MLIR 类型字面量：
+`pycircuit.data` 定义了一个冻结的（`frozen` dataclass）类型层级，`str(Data)` 给出前端的类型字面量：
 
 ```
 Data (ABC)
@@ -118,10 +118,10 @@ Data (ABC)
 └── Reset                         → !pyc.reset
 ```
 
-| 子类 | MLIR 字面量 | `.width` 语义 | 说明 |
+| 子类 | 类型字面量 | `.width` 语义 | 说明 |
 |------|------------|--------------|------|
 | `Bits(N)` | `iN` | N | N 位标量；所有算术/逻辑/比较运算的操作数 |
-| `Vector(N, elem)` | `vector<NxiW>` | 叶元素宽度 | 一维向量；`elem` 可再为 `Vector`，得到多维 `vector<NxMxiW>` |
+| `Vector(N, elem)` | `vector<NxiW>`（前端） | 叶元素宽度 | 一维向量；`elem` 可再为 `Vector`，得到多维 `vector<NxMxiW>` |
 | `Clock` | `!pyc.clock` | 1 | 时钟信号，仅作 `pyc.reg` 的时钟输入 |
 | `Reset` | `!pyc.reset` | 1 | 复位信号，仅作 `pyc.reg` 的复位输入 |
 
@@ -133,7 +133,11 @@ Data (ABC)
 | `.datatype()` | 最内层非 `Vector` 叶元素。`Vector(4, Vector(3, Bits(8)))` → `Bits(8)` |
 | `Vector.from_shape([N, M], leaf)` | 反向构造：把 `leaf` 由外到内包成嵌套 `Vector` |
 
-> `Data` 实例可比较、可哈希（以 MLIR 字面量为键），并可用 `Data.from_str("vector<4xi8>")` 从 MLIR 文本反序列化。
+> `Data` 实例可比较、可哈希（以类型字面量为键），并可用 `Data.from_str("vector<4xi8>")` 反序列化。
+>
+> `Vector` 的类型字面量只服务于前端类型系统与 API：它不会出现在发射后的 `.pyc`
+> 里——前端在发射期把 Vector 值展开为逐 lane 标量 op，端口为单根 packed
+> `i{leaf*lanes}`（lane 0 在 LSB）。
 
 ### 3.2 Wire[DT] —— 信号句柄
 
@@ -141,8 +145,8 @@ Data (ABC)
 
 ```python
 a = m.input("a", width=8)                  # Wire[Bits[8]]     → i8
-v = m.input("v", width=8, shape=[4])       # Wire[Vector[Bits[8]]]  → vector<4xi8>
-mat = m.input("m", width=8, shape=[4,16])  # Wire[Vector[...]]      → vector<4x16xi8>
+v = m.input("v", width=8, shape=[4])       # Wire[Vector[Bits[8]]]  → packed i32 端口
+mat = m.input("m", width=8, shape=[4,16])  # Wire[Vector[...]]      → packed i512 端口
 ```
 
 `Wire[Bits]` 与 `Wire[Vector[...]]` **共享同一套重载运算符**——区别仅在结果类型：
@@ -182,15 +186,15 @@ low = data[0:8];  bit5 = data[5]            # 切片 / 索引（向量：取 lan
 
 只有 `Wire[Vector[...]]` 才有的方法（作用于 `Vector` 维度结构）：
 
-| 方法 | 说明 | MLIR |
+| 方法 | 说明 | IR（发射期逐 lane 展开） |
 |------|------|------|
-| `v.reduce_or(*, dim=None, mode="chain")` | 按位或归约；`dim=None` 全维归约成标量，`dim=int` 只归约指定维 | `pyc.v_or_reduce` |
-| `v.reduce_and(*, dim=None, mode="chain")` | 按位与归约；同上 | `pyc.v_and_reduce` |
-| `v.reduce_sum(*, dim=None, mode="chain")` | 求和归约；**保持叶元素宽度，溢出回绕**（不会自动扩展结果宽度） | `pyc.v_add_reduce` |
-| `v.broadcast(*, size, dim)` | 沿新维度重复 | `pyc.v_broadcast_dim` |
-| `priority_mux(sels, vals, *, mode="chain", default=None)` | 以 `sels`（i1 向量）为选择器在 `vals` 中选 lane；**最小索引优先**；模块级函数或 CAS 实例方法 `sels.priority_mux(vals, ...)`；`default=None` 时所有 selector 为 0 的回退值是 `vals` 的最后一个元素 | 组合展开 |
+| `v.reduce_or(*, dim=None, mode="chain")` | 按位或归约；`dim=None` 全维归约成标量，`dim=int` 只归约指定维 | 逐 lane `pyc.or`（chain=链式 / tree=平衡树） |
+| `v.reduce_and(*, dim=None, mode="chain")` | 按位与归约；同上 | 逐 lane `pyc.and` |
+| `v.reduce_sum(*, dim=None, mode="chain")` | 求和归约；**保持叶元素宽度，溢出回绕**（不会自动扩展结果宽度） | 逐 lane `pyc.add` |
+| `v.broadcast(*, size, dim)` | 沿新维度重复 | lane 引用重排 + `pyc.concat`（端口打包） |
+| `priority_mux(sels, vals, *, mode="chain", default=None)` | 以 `sels`（i1 向量）为选择器在 `vals` 中选 lane；**最小索引优先**；模块级函数或 CAS 实例方法 `sels.priority_mux(vals, ...)`；`default=None` 时所有 selector 为 0 的回退值是 `vals` 的最后一个元素 | 逐 lane `pyc.mux` + `pyc.or` |
 | `m.cat(*lanes)` | 把多个 lane 拼成 packed 标量位向量（MSB-first） | `pyc.concat` |
-| `v[i]` | 取 lane | `pyc.v_get` |
+| `v[i]` | 取 lane | `pyc.extract`（或 lane 别名） |
 
 `mode` 取值：`"chain"`（默认，逻辑深度 = lanes−1）或 `"tree"`（深度 = ⌈log₂(lanes)⌉）。深度敏感的宽归约应显式选 `"tree"`。
 
@@ -488,8 +492,8 @@ circ = compile_cycle_aware(top, eager=True, name="top", hierarchical=True)
 |----------|---------|------|
 | `m.fifo(...)` | `pyc.fifo` | 单时钟 ready/valid FIFO（attr `depth`） |
 | `m.byte_mem(...)` | `pyc.byte_mem` | 异步读、同步写、字节使能存储 |
-| `m.sync_mem(...)` | `pyc.sync_mem` | 同步 1R1W（读数据打拍） |
-| `m.sync_mem_dp(...)` | `pyc.sync_mem_dp` | 同步 2R1W |
+| `m.sync_mem_nm(...)` | `pyc.sync_mem_nm` | 同步 N 读 × M 写（读数据打拍；`read_mode` = forward/old） |
+| `m.sync_mem(...)` / `m.sync_mem_dp(...)` | `pyc.sync_mem_nm` | 上述的 1R1W / 2R1W 简写（发射 `read_mode="old"`） |
 | `m.async_fifo(...)` | `pyc.async_fifo` | 双时钟异步 FIFO |
 | `m.cdc_sync(...)` | `pyc.cdc_sync` | 多级同步器（attr `stages`，默认 2） |
 | `m.rv_queue(...)` | 组合原语 | ready/valid 队列；`pop()` 返回 `Pop(valid, data, fire)` |
@@ -633,17 +637,17 @@ pycircuit sidecar verify FILE
 
 ## 11. MLIR 映射参考
 
-前端构图产物为 `pyc` 方言 MLIR（`.pyc` 文件）。主要映射：
+前端构图产物为 `pyc` 方言 MLIR（`.pyc` 文件）。向量在前端是带形状的 `Wire`，发射期即展开为逐 lane 标量 IR，因此映射表只含标量类型/op。主要映射：
 
 ### 类型
 
 | 前端 | MLIR |
 |------|------|
 | `Bits(W)` / 标量信号 width=W | `iW` |
-| `Vector(N, Bits(W))`（shape=[N]，width=W） | `vector<NxiW>` |
+| `Vector(N, Bits(W))`（shape=[N]，width=W） | `i{N*W}` packed 端口；body 逐 lane `iW` + `pyc.extract`/`pyc.concat` |
 | `Clock` / `Reset` | `!pyc.clock` / `!pyc.reset` |
 
-### 运算（标量与逐元素向量共用）
+### 运算（前端标量与逐元素向量共用；IR 只有标量 op）
 
 | 前端 | MLIR op |
 |------|---------|
@@ -672,13 +676,17 @@ pycircuit sidecar verify FILE
 
 ### 向量
 
-| 前端 | MLIR op |
+向量没有专用 op：全部 API 在发射期展开为逐 lane 标量 op，`dim`、`mode`
+等只影响生成的 lane 拓扑，不写进 IR 属性。
+
+| 前端 | 发射后的 IR |
 |------|---------|
-| `v[i]` | `pyc.v_get` |
-| `m.vec(...)` | `pyc.v_create` |
-| 标量广播 | `pyc.v_broadcast` |
-| `broadcast(dim=)` | `pyc.v_broadcast_dim` |
-| `reduce_or / reduce_and / reduce_sum` | `pyc.v_or_reduce / v_and_reduce / v_add_reduce`（attrs `dim`, `mode`） |
+| `v[i]` | `pyc.extract`（或 lane 别名） |
+| `m.vec(...)` | 复用 lane 值；端口边界用 `pyc.concat` 打包 |
+| 标量广播 | lane 引用重排（标量被各 lane 复用） |
+| `broadcast(dim=)` | lane 引用重排 + `pyc.concat` |
+| `reduce_or / reduce_and / reduce_sum` | 逐 lane `pyc.or / pyc.and / pyc.add`（chain 或 tree 拓扑） |
+| 模块端口的 `Vector` | 单根 packed `i{leaf*lanes}`：入口 `pyc.extract`、出口 `pyc.concat` |
 
 测试台不产生硬件 op：`@testbench` 程序序列化为模块属性 `pyc.tb.payload`（inline 模式）或外置 sidecar 容器。
 

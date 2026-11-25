@@ -322,6 +322,49 @@ if [[ -n "${resume_from_case}" && "${resume_seen}" -eq 0 ]]; then
   pyc_die "resume case not found: ${resume_from_case}"
 fi
 
+# RTL primitive gate: a byte_mem with a narrow address must survive synthesis.
+# Out-of-range part selects on a narrow address (e.g. `raddr[31:0]` when
+# ADDR_WIDTH < 32) leave the address undefined, which lets synthesis remove the
+# whole storage while simulation still passes; only synthesis can catch it.
+if command -v yosys >/dev/null 2>&1; then
+  bm_dir="$(pyc_out_root)/rtl-primitives/byte_mem_synth"
+  rm -rf "${bm_dir}" >/dev/null 2>&1 || true
+  mkdir -p "${bm_dir}"
+  cat > "${bm_dir}/top.v" <<'V'
+module top (
+  input             clk,
+  input  [6:0]      raddr,
+  output [31:0]     rdata,
+  input             wvalid,
+  input  [6:0]      waddr,
+  input  [31:0]     wdata,
+  input  [3:0]      wstrb
+);
+  pyc_byte_mem #(.ADDR_WIDTH(7), .DATA_WIDTH(32), .DEPTH(128)) u_mem (
+    .clk(clk),
+    .raddr(raddr),
+    .rdata(rdata),
+    .wvalid(wvalid),
+    .waddr(waddr),
+    .wdata(wdata),
+    .wstrb(wstrb)
+  );
+endmodule
+V
+  pyc_log "rtl(primitive) pyc_byte_mem: ADDR_WIDTH=7 synthesis gate"
+  if ! yosys -p "read_verilog ${bm_dir}/top.v ${PYC_ROOT_DIR}/runtime/verilog/pyc_byte_mem.v; \
+      synth_xilinx -family xcup -nodsp -flatten -top top; stat" >"${bm_dir}/yosys.log" 2>&1; then
+    pyc_die "pyc_byte_mem synthesis gate failed to run (see ${bm_dir}/yosys.log)"
+  fi
+  lcs="$(sed -n 's/^ *Estimated number of LCs: *\([0-9][0-9]*\).*/\1/p' "${bm_dir}/yosys.log" | tail -1)"
+  if [[ -z "${lcs}" || "${lcs}" -le 0 ]]; then
+    pyc_die "pyc_byte_mem storage optimized away at ADDR_WIDTH=7 (LCs=${lcs:-missing}; see ${bm_dir}/yosys.log)"
+  fi
+  pyc_log "rtl(primitive) pyc_byte_mem: ${lcs} LCs retained"
+else
+  pyc_warn "yosys not found; skipping pyc_byte_mem synthesis gate"
+fi
+
 cat > "${docs_gate_dir}/run_sims_summary.json" <<EOF
 {
   "run_id": "${gate_run_id}",
