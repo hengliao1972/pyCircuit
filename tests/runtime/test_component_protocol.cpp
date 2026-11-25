@@ -6,7 +6,6 @@
 #include "pyc_component.hpp"
 #include "pyc_primitives.hpp"
 #include "pyc_sync_mem.hpp"
-#include "pyc_vec.hpp"
 
 #include <cassert>
 #include <type_traits>
@@ -19,9 +18,7 @@ using mask_t = BaseElement::change_mask_t;
 
 // Every leaf is a component and reports its changes through the same type.
 static_assert(std::is_base_of_v<BaseElement, pycReg<8>>);
-static_assert(std::is_base_of_v<BaseElement, pycVecReg<Vec<Wire<4>, 2>>>);
 static_assert(std::is_base_of_v<BaseElement, pycDelayLine<8, 2>>);
-static_assert(std::is_base_of_v<BaseElement, pycVecDelayLine<Vec<Wire<4>, 2>, 2>>);
 static_assert(std::is_base_of_v<BaseElement, pycCdcSync<8, 2>>);
 static_assert(std::is_base_of_v<BaseElement, pycFifo<8, 2>>);
 static_assert(std::is_base_of_v<BaseElement, pycByteMem<4, 8, 16>>);

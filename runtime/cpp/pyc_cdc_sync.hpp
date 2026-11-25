@@ -9,26 +9,28 @@
 namespace pyc::cpp {
 
 // CDC synchronizer modeled as a destination-clocked flop pipeline.
-template <class ValT, unsigned Stages>
-class CdcBase : public ClockedElement<CdcBase<ValT, Stages>> {
-  using Base = ClockedElement<CdcBase<ValT, Stages>>;
+template <unsigned Width, unsigned Stages>
+class pycCdcSync : public ClockedElement<pycCdcSync<Width, Stages>> {
+  using Base = ClockedElement<pycCdcSync<Width, Stages>>;
   using change_mask_t = typename Base::change_mask_t;
 
-  static_assert(Stages >= 1, "CdcBase requires Stages >= 1");
+  static_assert(Stages >= 1, "pycCdcSync requires Stages >= 1");
+  static_assert(Width > 0 && Width <= 64,
+                "pycCdcSync supports widths 1..64 in the prototype");
 
 public:
-  CdcBase(Wire<1> &clk, Wire<1> &rst, ValT &in, ValT &out)
+  pycCdcSync(Wire<1> &clk, Wire<1> &rst, Wire<Width> &in, Wire<Width> &out)
       : Base(clk), rst(rst), in(in), out(out) {
     for (auto &e : pipe_)
-      e = ValT(0);
-    out = ValT(0);
+      e = Wire<Width>(0);
+    out = Wire<Width>(0);
   }
 
   // Every destination-clock edge is pending: the pipeline always advances.
   bool sample() {
     if (rst.toBool()) {
       for (auto &e : pipeNext_)
-        e = ValT(0);
+        e = Wire<Width>(0);
       return true;
     }
     pipeNext_[0] = in;
@@ -50,22 +52,12 @@ public:
   }
 
   Wire<1> &rst;
-  ValT &in;
-  ValT &out;
+  Wire<Width> &in;
+  Wire<Width> &out;
 
 private:
-  std::array<ValT, Stages> pipe_{};
-  std::array<ValT, Stages> pipeNext_{};
-};
-
-template <unsigned Width, unsigned Stages>
-class pycCdcSync : public CdcBase<Wire<Width>, Stages> {
-  using Base = CdcBase<Wire<Width>, Stages>;
-
-public:
-  static_assert(Width > 0 && Width <= 64,
-                "pycCdcSync supports widths 1..64 in the prototype");
-  using Base::Base;
+  std::array<Wire<Width>, Stages> pipe_{};
+  std::array<Wire<Width>, Stages> pipeNext_{};
 };
 
 } // namespace pyc::cpp
