@@ -26,8 +26,13 @@ static LogicalResult canonicalizeAndCSE(func::FuncOp function) {
     dialect->getCanonicalizationPatterns(patterns);
   for (RegisteredOperationName op : context->getRegisteredOperations())
     op.getCanonicalizationPatterns(patterns, context);
-  if (failed(applyPatternsAndFoldGreedily(function, std::move(patterns),
-                                          GreedyRewriteConfig())))
+  // Large FIRRTL-derived functions converge only after serial folding chains
+  // settle; each chain advances one level per greedy walk, so the driver
+  // default of 10 iterations aborts mid-chain (observed on BOOM-scale designs
+  // in the C++ path, where this pass runs).
+  GreedyRewriteConfig cfg;
+  cfg.maxIterations = 100;
+  if (failed(applyPatternsAndFoldGreedily(function, std::move(patterns), cfg)))
     return failure();
   IRRewriter rewriter(context);
   DominanceInfo domInfo(function);
