@@ -4237,8 +4237,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     // tick_sample() detects the edge itself, so it keeps the stored level in
     // sync on every step; the armed gate above only trims the loops.
     emitEdgeCall("tick_sample", "        ");
-    if (failed(emitTapUpdates("        ")))
-      return failure();
+    // Tap probes are pure reads of the loop state that this rising edge just
+    // committed, so the fall recomputation is an identity: keep the value the
+    // rise wrote instead of recomputing every tap once more.
     os << "      } else {\n";
     for (int64_t loopId : phasedRegLoopIds) {
       os << "        " << regLoopName(loopId) << ".compute_generic(_pyc_now);\n";
