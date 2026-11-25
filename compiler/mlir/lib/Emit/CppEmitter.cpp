@@ -1706,7 +1706,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     return {inst, inst + "->pending", inst + "->qNext"};
   };
-  // Probe write-intent binding for a scalar reg: either its pyc_reg inst
+  // Probe write-intent binding for a scalar reg: either its pycReg inst
   // (unlooped) or the owning RegLoop's lane storage. Returns the C++ text
   // for `&...pending` and `&...qNext`.
   auto probePendingNext = [&](pyc::RegOp r) -> std::pair<std::string, std::string> {
@@ -2468,9 +2468,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 	    if (w == 0)
 	      return r.emitError("invalid reg width");
     if (isa<VectorType>(r.getQ().getType()))
-      os << "  pyc::cpp::pyc_vec_reg<" << cppType(r.getQ().getType()) << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
+      os << "  pyc::cpp::pycVecReg<" << cppType(r.getQ().getType()) << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
     else
-      os << "  pyc::cpp::pyc_reg<" << w << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
+      os << "  pyc::cpp::pycReg<" << w << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
   }
   for (int64_t loopId : regLoopIds) {
     os << "  pyc::cpp::RegLoop " << regLoopName(loopId) << ";\n";
@@ -2511,10 +2511,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       return delay.emitError("missing integer attribute `depth`");
     auto depth = depthAttr.getValue().getZExtValue();
     if (isa<VectorType>(delay.getQ().getType()))
-      os << "  pyc::cpp::pyc_vec_delay_line<" << cppType(delay.getQ().getType()) << ", " << depth << "> *"
+      os << "  pyc::cpp::pycVecDelayLine<" << cppType(delay.getQ().getType()) << ", " << depth << "> *"
          << nt.get(delay.getQ()) << "_inst = nullptr;\n";
     else
-      os << "  pyc::cpp::pyc_delay_line<" << w << ", " << depth << "> *" << nt.get(delay.getQ())
+      os << "  pyc::cpp::pycDelayLine<" << w << ", " << depth << "> *" << nt.get(delay.getQ())
          << "_inst = nullptr;\n";
   }
   for (auto fifo : fifos) {
@@ -2526,7 +2526,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       return fifo.emitError("missing integer attribute `depth`");
     auto depth = depthAttr.getValue().getZExtValue();
     std::string instName = nt.get(fifo.getInReady()) + "_inst";
-    os << "  pyc::cpp::pyc_fifo<" << w << ", " << depth << "> " << instName << ";\n";
+    os << "  pyc::cpp::pycFifo<" << w << ", " << depth << "> " << instName << ";\n";
     os << "  bool " << instName << "_eval_cache_valid = false;\n";
     os << "  " << cppType(fifo.getInValid().getType()) << " " << instName << "_eval_cache_in_valid{};\n";
     os << "  std::uint64_t " << instName << "_eval_cache_in_valid_ver = 1ull;\n";
@@ -2564,7 +2564,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       instName = sanitizeId(nameAttr.getValue());
     byteMemInstName.try_emplace(mem.getOperation(), instName);
 
-    os << "  pyc::cpp::pyc_byte_mem<" << addrW << ", " << dataW << ", " << depth << "> " << instName << ";\n";
+    os << "  pyc::cpp::pycByteMem<" << addrW << ", " << dataW << ", " << depth << "> " << instName << ";\n";
     os << "  bool " << instName << "_eval_cache_valid = false;\n";
       os << "  " << cppType(mem.getRaddr().getType()) << " " << instName << "_eval_cache_raddr{};\n";
     os << "  std::uint64_t " << instName << "_eval_cache_raddr_ver = 1ull;\n";
@@ -2610,7 +2610,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     unsigned wp = mem.getWvalids().size();
 
     std::string instName = syncMemNMInstName.lookup(mem.getOperation());
-    os << "  pyc::cpp::pyc_sync_mem_nm<" << addrW << ", " << dataW << ", " << depth << ", " << rp
+    os << "  pyc::cpp::pycSyncMemNM<" << addrW << ", " << dataW << ", " << depth << ", " << rp
        << ", " << wp << ", "
        << (mem.getReadMode() == "old" ? "true" : "false")
        << "> *" << instName << " = nullptr;\n";
@@ -2624,7 +2624,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       return fifo.emitError("missing integer attribute `depth`");
     auto depth = depthAttr.getValue().getZExtValue();
     std::string instName = nt.get(fifo.getInReady()) + "_inst";
-    os << "  pyc::cpp::pyc_async_fifo<" << w << ", " << depth << "> " << instName << ";\n";
+    os << "  pyc::cpp::pycAsyncFifo<" << w << ", " << depth << "> " << instName << ";\n";
     os << "  bool " << instName << "_eval_cache_valid = false;\n";
     os << "  " << cppType(fifo.getInRst().getType()) << " " << instName << "_eval_cache_in_rst{};\n";
     os << "  std::uint64_t " << instName << "_eval_cache_in_rst_ver = 1ull;\n";
@@ -2655,7 +2655,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     std::uint64_t stages = 2;
     if (auto st = s->getAttrOfType<IntegerAttr>("stages"))
       stages = st.getValue().getZExtValue();
-    os << "  pyc::cpp::pyc_cdc_sync<" << w << ", " << stages << "> " << nt.get(s.getOut()) << "_inst;\n";
+    os << "  pyc::cpp::pycCdcSync<" << w << ", " << stages << "> " << nt.get(s.getOut()) << "_inst;\n";
   }
   auto emitTickSnapshotDecls = [&](llvm::StringRef key,
                                    OperandRange operands) {
@@ -2765,10 +2765,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (w == 0)
       return r.emitError("invalid reg width");
     if (isa<VectorType>(r.getQ().getType()))
-      os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pyc_vec_reg<"
+      os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pycVecReg<"
          << cppType(r.getQ().getType()) << ">(";
     else
-      os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pyc_reg<" << w << ">(";
+      os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pycReg<" << w << ">(";
     os << nt.get(r.getClk()) << ", " << nt.get(r.getRst()) << ", " << nt.get(r.getEn()) << ", "
        << nt.get(r.getNext()) << ", " << nt.get(r.getInit()) << ", " << nt.get(r.getQ()) << ");\n";
   }
@@ -2809,10 +2809,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     unsigned w = bitWidth(delay.getQ().getType());
     auto depth = delay->getAttrOfType<IntegerAttr>("depth").getValue().getZExtValue();
     if (isa<VectorType>(delay.getQ().getType()))
-      os << "    " << nt.get(delay.getQ()) << "_inst = new pyc::cpp::pyc_vec_delay_line<"
+      os << "    " << nt.get(delay.getQ()) << "_inst = new pyc::cpp::pycVecDelayLine<"
          << cppType(delay.getQ().getType()) << ", " << depth << ">(";
     else
-      os << "    " << nt.get(delay.getQ()) << "_inst = new pyc::cpp::pyc_delay_line<" << w << ", " << depth
+      os << "    " << nt.get(delay.getQ()) << "_inst = new pyc::cpp::pycDelayLine<" << w << ", " << depth
          << ">(";
     os << nt.get(delay.getClk()) << ", " << nt.get(delay.getRst()) << ", " << nt.get(delay.getEn()) << ", "
        << nt.get(delay.getNext()) << ", " << nt.get(delay.getInit()) << ", " << nt.get(delay.getQ()) << ");\n";
@@ -2847,7 +2847,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "      static const pyc::cpp::Wire<" << addrW << "> *const nm_was_" << instName << "[] = {" << joinNames(mem.getWaddrs()) << "};\n";
     os << "      static const pyc::cpp::Wire<" << dataW << "> *const nm_wds_" << instName << "[] = {" << joinNames(mem.getWdatas()) << "};\n";
     os << "      static const pyc::cpp::Wire<" << ((dataW + 7) / 8) << "> *const nm_wss_" << instName << "[] = {" << joinNames(mem.getWstrbs()) << "};\n";
-    os << "      " << instName << " = new pyc::cpp::pyc_sync_mem_nm<" << addrW << ", " << dataW << ", " << depth
+    os << "      " << instName << " = new pyc::cpp::pycSyncMemNM<" << addrW << ", " << dataW << ", " << depth
        << ", " << rp << ", " << wp << ", "
        << (mem.getReadMode() == "old" ? "true" : "false") << ">("
        << nt.get(mem.getClk()) << ", "
@@ -4151,11 +4151,16 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "    tick_compute_part_" << i << "();\n";
   }
   os << "    // Local sequential primitives.\n";
-  auto emitEdgeCall = [&](const char *method, llvm::StringRef indent) {
+  // Call every edge-driven leaf. arg is the already-classified clock level,
+  // so leaves never re-read the clock wire on the fast path.
+  auto emitEdgeCall = [&](const char *method, llvm::StringRef indent,
+                          const char *arg = nullptr) {
     for (auto r : regs)
-      os << indent << nt.get(r.getQ()) << "_inst->" << method << "();\n";
+      os << indent << nt.get(r.getQ()) << "_inst->" << method << "("
+         << (arg ? arg : "") << ");\n";
     for (auto delay : delayLines)
-      os << indent << nt.get(delay.getQ()) << "_inst->" << method << "();\n";
+      os << indent << nt.get(delay.getQ()) << "_inst->" << method << "("
+         << (arg ? arg : "") << ");\n";
   };
   auto emitTapUpdates = [&](llvm::StringRef indent) -> LogicalResult {
     for (auto tap : delayTaps) {
@@ -4215,7 +4220,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_rise();\n";
-    emitEdgeCall("posedge_tick_compute", "        ");
+    emitEdgeCall("tick_sample", "        ");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "        _pyc_seq_armed = true;\n";
@@ -4227,9 +4232,11 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "          delay_loop_" << dbk << ".negedge();\n";
-    emitEdgeCall("negedge_update", "          ");
     os << "          _pyc_seq_armed = false;\n";
     os << "        }\n";
+    // tick_sample() detects the edge itself, so it keeps the stored level in
+    // sync on every step; the armed gate above only trims the loops.
+    emitEdgeCall("tick_sample", "        ");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "      } else {\n";
@@ -4238,7 +4245,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     }
     for (int64_t dbk : delayLoopIds)
       os << "        delay_loop_" << dbk << ".compute_generic(_pyc_now);\n";
-    emitEdgeCall("tick_compute", "        ");
+    emitEdgeCall("tick_sample", "        ");
     if (failed(emitTapUpdates("        ")))
       return failure();
     os << "        _pyc_commit_needed = true;\n";
@@ -4249,14 +4256,14 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       std::string key = nt.get(r.getQ()) + "_inst";
       emitStateTickCompute(key, r->getOperands(), "    ",
                            [&](llvm::StringRef indent) {
-                             os << indent << key << "->tick_compute();\n";
+                             os << indent << key << "->tick_sample();\n";
                            });
     }
     for (auto delay : delayLines) {
       std::string key = nt.get(delay.getQ()) + "_inst";
       emitStateTickCompute(key, delay->getOperands(), "    ",
                            [&](llvm::StringRef indent) {
-                             os << indent << key << "->tick_compute();\n";
+                             os << indent << key << "->tick_sample();\n";
                            });
     }
     for (int64_t dbk : delayLoopIds) {
@@ -4274,35 +4281,35 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     std::string key = nt.get(fifo.getInReady()) + "_inst";
     emitStateTickCompute(key, fifo->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   for (auto mem : byteMems) {
     std::string key = byteMemInstName.lookup(mem.getOperation());
     emitStateTickCompute(key, mem->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   for (auto mem : syncMemNMs) {
     std::string key = syncMemNMInstName.lookup(mem.getOperation());
     emitStateTickCompute(key, mem->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << "->tick_compute();\n";
+                           os << indent << key << "->tick_sample();\n";
                          });
   }
   for (auto fifo : asyncFifos) {
     std::string key = nt.get(fifo.getInReady()) + "_inst";
     emitStateTickCompute(key, fifo->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   for (auto sync : cdcSyncs) {
     std::string key = nt.get(sync.getOut()) + "_inst";
     emitStateTickCompute(key, sync->getOperands(), "    ",
                          [&](llvm::StringRef indent) {
-                           os << indent << key << ".tick_compute();\n";
+                           os << indent << key << ".tick_sample();\n";
                          });
   }
   if (!fusedRegLoopIds.empty()) {

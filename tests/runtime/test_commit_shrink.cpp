@@ -1,7 +1,7 @@
 // RegLoop::direct_commit fast-path equivalence: single-word lanes, 2-word and
 // multi-word lanes, idle edges (no rising edge, en=0), reset, and the opt-in
 // write-intent probe mirror. Values, per-lane wake bits, pending flags and the
-// qNext mirror must match the per-object pyc_reg semantics exactly.
+// qNext mirror must match the per-object pycReg semantics exactly.
 #include <cstdint>
 #include <cstdio>
 #include <random>
@@ -28,13 +28,13 @@ struct Lane {
 };
 
 // Drives one lane group through the generated-code shape: direct_commit() only
-// on the rising edge (tick-fuse phase), per-object pyc_reg as the reference.
+// on the rising edge (tick-fuse phase), per-object pycReg as the reference.
 template <unsigned W>
 int runGroup(const char *name, unsigned lanes, RegLoop &loop, Wire<1> &clk,
              Wire<1> &rst, Wire<1> &en, bool probe) {
   std::mt19937_64 rng(0xC0FFEEu + W);
   std::vector<Lane<W>> l(lanes);
-  std::vector<pyc_reg<W>> ref;
+  std::vector<pycReg<W>> ref;
   ref.reserve(lanes);
   const unsigned words = (W + 63) / 64;
   for (unsigned i = 0; i < lanes; ++i) {
@@ -69,10 +69,10 @@ int runGroup(const char *name, unsigned lanes, RegLoop &loop, Wire<1> &clk,
     // Reference: per-object sampling on the edge, commit right after.
     if (rise)
       for (auto &r : ref)
-        r.posedge_tick_compute();
+        r.tick_sample();
     else
       for (auto &r : ref)
-        r.tick_compute();
+        r.tick_sample();
     // Fused path: the generated code only calls direct_commit() on the edge.
     const std::vector<std::uint64_t> *dirty =
         rise ? &loop.direct_commit() : nullptr;
@@ -128,7 +128,7 @@ int runWakeConsume() {
   Wire<1> clk{0}, rst{0}, en{1};
   std::vector<Wire<8>> q(kLanes), qRef(kLanes), d(kLanes), init(kLanes);
   RegLoop loop;
-  std::vector<pyc_reg<8>> ref;
+  std::vector<pycReg<8>> ref;
   ref.reserve(kLanes);
   for (unsigned i = 0; i < kLanes; ++i) {
     d[i] = Wire<8>{static_cast<std::uint64_t>(i * 5 + 1)};
@@ -151,10 +151,12 @@ int runWakeConsume() {
         d[i] = Wire<8>{rng()};
     const bool rise = (!prev) & now;
     prev = now;
+    // Mirror the generated drive: the reference sees every clock level, so its
+    // previous-level latch stays in sync across falling edges too.
+    for (auto &r : ref)
+      r.tick_sample();
     if (!rise)
       continue;
-    for (auto &r : ref)
-      r.posedge_tick_compute();
     std::vector<std::uint64_t> &bits = loop.direct_commit();
     const std::vector<std::uint64_t> expected = [&] {
       std::vector<std::uint64_t> m((kLanes + 63) / 64, std::uint64_t{0});

@@ -416,8 +416,8 @@ def test_vector_state_assign_unroll_runs_cpp(
     )
     # Unrolled vector state must become scalar regs/wires, not keep vector ops.
     cpp_text = "\n".join(p.read_text(encoding="utf-8") for p in cpp_dir.rglob("*.cpp"))
-    assert "pyc_vec_reg" not in cpp_text
-    assert "pyc_reg" in cpp_text
+    assert "pycVecReg" not in cpp_text
+    assert "pycReg" in cpp_text
     verilog = out_dir / "vector_state_assign.v"
     run_cmd(
         [
@@ -433,7 +433,7 @@ def test_vector_state_assign_unroll_runs_cpp(
         env=env,
     )
     verilog_text = verilog.read_text(encoding="utf-8")
-    assert "pyc_reg" in verilog_text or "reg " in verilog_text
+    assert "pycReg" in verilog_text or "reg " in verilog_text
     # Keep-vector path should still compile and link a TB (smoke).
     run_cmd(
         [

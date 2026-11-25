@@ -36,7 +36,7 @@ int main() {
 
   std::vector<Wire<8>> rd(kRegLanes), rinit(kRegLanes), rqRef(kRegLanes),
       rqLoop(kRegLanes), rqFused(kRegLanes);
-  std::vector<pyc_reg<8>> regRef;
+  std::vector<pycReg<8>> regRef;
   regRef.reserve(kRegLanes);
   RegLoop regLoop, fusedLoop;  // fusedLoop: tick-fuse single-phase lanes
   for (unsigned i = 0; i < kRegLanes; ++i) {
@@ -51,7 +51,7 @@ int main() {
 
   std::vector<Wire<8>> dd(kDelayLanes), dinit(kDelayLanes), dqRef(kDelayLanes),
       dqLoop(kDelayLanes);
-  std::vector<pyc_delay_line<8, 4>> delayRef;
+  std::vector<pycDelayLine<8, 4>> delayRef;
   delayRef.reserve(kDelayLanes);
   DelayLoop delayLoop;
   for (unsigned i = 0; i < kDelayLanes; ++i) {
@@ -83,18 +83,18 @@ int main() {
     const bool rise = (!prev) & now, fall = prev & (!now);
     prev = now;
     if (rise) {
-      for (auto &r : regRef) r.posedge_tick_compute();
-      for (auto &r : delayRef) r.posedge_tick_compute();
+      for (auto &r : regRef) r.tick_sample();
+      for (auto &r : delayRef) r.tick_sample();
       regLoop.compute_rise();
       delayLoop.compute_rise();
     } else if (fall) {
-      for (auto &r : regRef) r.negedge_update();
-      for (auto &r : delayRef) r.negedge_update();
+      for (auto &r : regRef) r.tick_sample();
+      for (auto &r : delayRef) r.tick_sample();
       regLoop.negedge();
       delayLoop.negedge();
     } else {
-      for (auto &r : regRef) r.tick_compute();
-      for (auto &r : delayRef) r.tick_compute();
+      for (auto &r : regRef) r.tick_sample();
+      for (auto &r : delayRef) r.tick_sample();
       regLoop.compute_generic(now);
       delayLoop.compute_generic(now);
     }

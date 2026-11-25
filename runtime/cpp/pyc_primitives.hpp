@@ -4,6 +4,7 @@
 
 #include "pyc_bits.hpp"
 #include "pyc_clock.hpp"
+#include "pyc_component.hpp"
 
 namespace pyc::cpp {
 
@@ -67,133 +68,89 @@ struct pyc_not {
   void eval() { y = ~a; }
 };
 
-template <unsigned Width>
-class pyc_reg {
+// Register semantics shared by pycReg (scalar) and pycVecReg (vector): the
+// two differ only in the value type, so staging/publish lives here once and the
+// leaves are 0-line derivations that keep their generated constructor signature.
+// The edge protocol lives in ClockedElement; derived classes supply sample().
+template <class ValT>
+class RegBase : public ClockedElement<RegBase<ValT>> {
+  using Base = ClockedElement<RegBase<ValT>>;
+  using change_mask_t = typename Base::change_mask_t;
+
 public:
-  pyc_reg(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, Wire<Width> &d, Wire<Width> &init, Wire<Width> &q)
-      : clk(clk), rst(rst), en(en), d(d), init(init), q(q) {}
+  RegBase(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, ValT &d, ValT &init, ValT &q)
+      : Base(clk), rst(rst), en(en), d(d), init(init), q(q) {}
 
-  // Branch-optimized two-phase update.
-  // tick_compute: sample inputs; tick_commit: apply.
-  inline void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) & clkNow;
-    clkPrev = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
-      pending = false;
-      return;
-    }
-    posedge_compute_inner();
-  }
-
-  // Direct posedge path — caller guarantees a 0→1 edge just occurred.
-  // Saves the clkPrev read + posedge check (~2 branches per register).
-  inline void posedge_tick_compute() {
-    clkPrev = true;
-    posedge_compute_inner();
-  }
-
-  // Negedge bookkeeping — just reset clkPrev so next posedge is detected.
-  // Avoids running the full tick_compute logic on the falling edge.
-  inline void negedge_update() {
-    clkPrev = false;
-    pending = false;
-  }
-
-  // Applies a pending edge and reports whether the visible register output changed.
-  inline bool tick_commit() {
-    if (__builtin_expect(pending, 0)) {
-      const bool changed = q != qNext;
+  // Applies a pending edge and reports whether the visible output changed.
+  inline change_mask_t tick_commit() {
+    if (__builtin_expect(!this->pending, 1))
+      return 0;
+    this->pending = false;
+    const bool changed = q != qNext;
+    if (changed)
       q = qNext;
-      pending = false;
-      return changed;
-    }
-    return false;
+    return changed ? Base::kChanged : change_mask_t{0};
   }
 
-private:
-  inline void posedge_compute_inner() {
-    bool r = rst.toBool();
-    bool e = en.toBool();
-    pending = r | e;
+  bool sample() {
+    const bool r = rst.toBool();
+    const bool e = en.toBool();
     if (r)
       qNext = init;
     else
       qNext = d;
+    return r | e;
   }
 
-public:
-
-  Wire<1> &clk;
   Wire<1> &rst;
   Wire<1> &en;
-  Wire<Width> &d;
-  Wire<Width> &init;
-  Wire<Width> &q;
+  ValT &d;
+  ValT &init;
+  ValT &q;
 
-  bool clkPrev = false;
-  bool pending = false;
-  Wire<Width> qNext{};
+  ValT qNext{};
+};
+
+template <unsigned Width>
+class pycReg : public RegBase<Wire<Width>> {
+  using Base = RegBase<Wire<Width>>;
+
+public:
+  using Base::Base;
+};
+
+template <typename T>
+class pycVecReg : public RegBase<T> {
+  using Base = RegBase<T>;
+
+public:
+  using Base::Base;
 };
 
 // Simulator representation of DEPTH cascaded registers. A circular buffer
 // makes the normal enabled edge O(1); reset still initializes every stage so
-// reset/enable and compute-before-commit semantics match pyc_reg chains.
-template <unsigned Width, unsigned Depth>
-class pyc_delay_line {
-  static_assert(Depth > 1, "pyc_delay_line requires Depth > 1");
+// reset/enable and compute-before-commit semantics match pycReg chains.
+template <class ValT, unsigned Depth>
+class DelayBase : public ClockedElement<DelayBase<ValT, Depth>> {
+  using Base = ClockedElement<DelayBase<ValT, Depth>>;
+  using change_mask_t = typename Base::change_mask_t;
+
+  static_assert(Depth > 1, "DelayBase requires Depth > 1");
 
 public:
-  pyc_delay_line(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, Wire<Width> &d,
-                 Wire<Width> &init, Wire<Width> &q)
-      : clk(clk), rst(rst), en(en), d(d), init(init), q(q) {}
+  DelayBase(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, ValT &d, ValT &init,
+            ValT &q)
+      : Base(clk), rst(rst), en(en), d(d), init(init), q(q) {}
 
-  inline void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) & clkNow;
-    clkPrev = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
-      pending = false;
-      return;
-    }
-    posedge_compute_inner();
-  }
+  // True while an enabled edge is waiting for tick_commit. Tap consumers must
+  // wake on this (every enabled edge shifts every tap).
+  inline bool has_pending() const { return this->pending; }
 
-  inline void posedge_tick_compute() {
-    clkPrev = true;
-    posedge_compute_inner();
-  }
-
-  inline void negedge_update() {
-    clkPrev = false;
-    pending = false;
-  }
-
-  // Return the value at a fixed enabled-edge distance from the input.  The
-  // caller must pass 1..Depth; the verifier guarantees this for generated IR.
-  inline Wire<Width> tap(unsigned depth) const {
-    return stages[(head + Depth - depth) % Depth];
-  }
-
-  inline Wire<Width> tap_next(unsigned depth) const {
-    if (pendingReset)
-      return init;
-    if (!pending)
-      return tap(depth);
-    return depth == 1 ? sampledInput : tap(depth - 1);
-  }
-
-  // True while an enabled edge is waiting for tick_commit. Tap consumers
-  // must wake on this (every enabled edge shifts every tap), while tail-`q`
-  // consumers can use tick_commit's tail-change result directly.
-  inline bool has_pending() const { return pending; }
-
-  // Applies a pending edge and reports whether the tail `q` changed. Tap
-  // consumers wake via has_pending(); a tail-only result would leave them
-  // stale on cycles where the tail happens to repeat.
-  inline bool tick_commit() {
-    if (__builtin_expect(!pending, 1))
-      return false;
+  // Applies a pending edge and reports whether the tail q changed; tap
+  // consumers wake via has_pending() instead (see the scalar note above).
+  inline change_mask_t tick_commit() {
+    if (__builtin_expect(!this->pending, 1))
+      return 0;
     const bool changed = q != qNext;
     if (pendingReset) {
       stages.fill(init);
@@ -203,217 +160,80 @@ public:
       head = nextIndex(head);
     }
     q = qNext;
-    pending = false;
-    return changed;
+    this->pending = false;
+    return changed ? Base::kChanged : change_mask_t{0};
   }
 
-private:
-  static constexpr unsigned nextIndex(unsigned index) {
-    return index + 1u == Depth ? 0u : index + 1u;
+  inline ValT tap(unsigned depth) const {
+    return stages[(head + Depth - depth) % Depth];
   }
 
-  inline void posedge_compute_inner() {
+  inline ValT tap_next(unsigned depth) const {
+    if (pendingReset)
+      return init;
+    if (!this->pending)
+      return tap(depth);
+    return depth == 1 ? sampledInput : tap(depth - 1);
+  }
+
+  bool sample() {
     pendingReset = rst.toBool();
-    bool enabled = en.toBool();
-    pending = pendingReset | enabled;
+    const bool enabled = en.toBool();
     if (pendingReset) {
       qNext = init;
-      return;
+      return true;
     }
     if (enabled) {
       sampledInput = d;
       qNext = stages[nextIndex(head)];
     }
+    return enabled;
   }
 
-public:
-  Wire<1> &clk;
   Wire<1> &rst;
   Wire<1> &en;
-  Wire<Width> &d;
-  Wire<Width> &init;
-  Wire<Width> &q;
-
-  bool clkPrev = false;
-  bool pending = false;
+  ValT &d;
+  ValT &init;
+  ValT &q;
   bool pendingReset = false;
-  Wire<Width> qNext{};
-  Wire<Width> sampledInput{};
-  std::array<Wire<Width>, Depth> stages{};
+  ValT qNext{};
+  ValT sampledInput{};
+  std::array<ValT, Depth> stages{};
   unsigned head = 0;
-};
-
-template <typename T>
-class pyc_vec_reg {
-public:
-  pyc_vec_reg(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, T &d, T &init, T &q)
-      : clk(clk), rst(rst), en(en), d(d), init(init), q(q) {}
-
-  inline void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) & clkNow;
-    clkPrev = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
-      pending = false;
-      return;
-    }
-    posedge_compute_inner();
-  }
-
-  inline void posedge_tick_compute() {
-    clkPrev = true;
-    posedge_compute_inner();
-  }
-
-  inline void negedge_update() {
-    clkPrev = false;
-    pending = false;
-  }
-
-  // Applies a pending edge and reports whether the visible vector output changed.
-  inline bool tick_commit() {
-    if (__builtin_expect(pending, 0)) {
-      const bool changed = q != qNext;
-      q = qNext;
-      pending = false;
-      return changed;
-    }
-    return false;
-  }
 
 private:
-  inline void posedge_compute_inner() {
-    bool r = rst.toBool();
-    bool e = en.toBool();
-    pending = r | e;
-    if (r)
-      qNext = init;
-    else
-      qNext = d;
+  static constexpr unsigned nextIndex(unsigned index) {
+    return index + 1u == Depth ? 0u : index + 1u;
   }
-
-public:
-  Wire<1> &clk;
-  Wire<1> &rst;
-  Wire<1> &en;
-  T &d;
-  T &init;
-  T &q;
-  bool clkPrev = false;
-  bool pending = false;
-  T qNext{};
 };
 
-// Vector counterpart of pyc_delay_line; T is one complete vector value, so a
-// single circular-buffer slot advances every lane atomically.
+template <unsigned Width, unsigned Depth>
+class pycDelayLine : public DelayBase<Wire<Width>, Depth> {
+  using Base = DelayBase<Wire<Width>, Depth>;
+
+public:
+  using Base::Base;
+};
+
 template <typename T, unsigned Depth>
-class pyc_vec_delay_line {
-  static_assert(Depth > 1, "pyc_vec_delay_line requires Depth > 1");
+class pycVecDelayLine : public DelayBase<T, Depth> {
+  using Base = DelayBase<T, Depth>;
 
 public:
-  pyc_vec_delay_line(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, T &d, T &init,
-                     T &q)
-      : clk(clk), rst(rst), en(en), d(d), init(init), q(q) {}
-
-  inline void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) & clkNow;
-    clkPrev = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
-      pending = false;
-      return;
-    }
-    posedge_compute_inner();
-  }
-
-  inline void posedge_tick_compute() {
-    clkPrev = true;
-    posedge_compute_inner();
-  }
-
-  inline void negedge_update() {
-    clkPrev = false;
-    pending = false;
-  }
-
-  // True while an enabled edge is waiting for tick_commit. Tap consumers
-  // must wake on this (every enabled edge shifts every tap).
-  inline bool has_pending() const { return pending; }
-
-  // Applies a pending edge and reports whether the tail `q` changed; tap
-  // consumers wake via has_pending() (see the scalar note above).
-  inline bool tick_commit() {
-    if (__builtin_expect(!pending, 1))
-      return false;
-    const bool changed = q != qNext;
-    if (pendingReset) {
-      stages.fill(init);
-      head = 0;
-    } else {
-      stages[head] = sampledInput;
-      head = nextIndex(head);
-    }
-    q = qNext;
-    pending = false;
-    return changed;
-  }
-
-  inline T tap(unsigned depth) const {
-    return stages[(head + Depth - depth) % Depth];
-  }
-
-  inline T tap_next(unsigned depth) const {
-    if (pendingReset)
-      return init;
-    if (!pending)
-      return tap(depth);
-    return depth == 1 ? sampledInput : tap(depth - 1);
-  }
-
-private:
-  static constexpr unsigned nextIndex(unsigned index) {
-    return index + 1u == Depth ? 0u : index + 1u;
-  }
-
-  inline void posedge_compute_inner() {
-    pendingReset = rst.toBool();
-    bool enabled = en.toBool();
-    pending = pendingReset | enabled;
-    if (pendingReset) {
-      qNext = init;
-      return;
-    }
-    if (enabled) {
-      sampledInput = d;
-      qNext = stages[nextIndex(head)];
-    }
-  }
-
-public:
-  Wire<1> &clk;
-  Wire<1> &rst;
-  Wire<1> &en;
-  T &d;
-  T &init;
-  T &q;
-  bool clkPrev = false;
-  bool pending = false;
-  bool pendingReset = false;
-  T qNext{};
-  T sampledInput{};
-  std::array<T, Depth> stages{};
-  unsigned head = 0;
+  using Base::Base;
 };
 
 template <unsigned Width, unsigned Depth>
-class pyc_fifo {
+class pycFifo : public ClockedElement<pycFifo<Width, Depth>> {
 public:
-  using change_mask_t = std::uint8_t;
-  static constexpr change_mask_t kInReadyChanged = change_mask_t{1} << 0;
-  static constexpr change_mask_t kOutValidChanged = change_mask_t{1} << 1;
-  static constexpr change_mask_t kOutDataChanged = change_mask_t{1} << 2;
+  using change_mask_t = BaseElement::change_mask_t;
 
-  pyc_fifo(Wire<1> &clk,
+  // Bit numbers of the three visible outputs (rule: i-th output -> bit i).
+  static constexpr change_mask_t kInReadyChanged = BaseElement::change_bit(0);
+  static constexpr change_mask_t kOutValidChanged = BaseElement::change_bit(1);
+  static constexpr change_mask_t kOutDataChanged = BaseElement::change_bit(2);
+
+  pycFifo(Wire<1> &clk,
            Wire<1> &rst,
            Wire<1> &in_valid,
            Wire<1> &in_ready,
@@ -421,9 +241,9 @@ public:
            Wire<1> &out_valid,
            Wire<1> &out_ready,
            Wire<Width> &out_data)
-      : clk(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
+      : ClockedElement<pycFifo<Width, Depth>>(clk), rst(rst), in_valid(in_valid), in_ready(in_ready), in_data(in_data), out_valid(out_valid),
         out_ready(out_ready), out_data(out_data) {
-    static_assert(Depth > 0, "pyc_fifo Depth must be > 0");
+    static_assert(Depth > 0, "pycFifo Depth must be > 0");
     resetState();
     eval();
   }
@@ -455,14 +275,7 @@ public:
     lastEvalOutData_ = out_data_int;
   }
 
-  void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) && clkNow;
-    clkPrev = clkNow;
-    pending = false;
-    if (!posedge)
-      return;
-
+  void tick_sample() {
     pending = true;
     if (rst.toBool()) {
       rdNext_ = 0;
@@ -538,7 +351,6 @@ private:
   }
 
 public:
-  Wire<1> &clk;
   Wire<1> &rst;
 
   Wire<1> &in_valid;
@@ -549,7 +361,6 @@ public:
   Wire<1> &out_ready;
   Wire<Width> &out_data;
 
-  bool clkPrev = false;
   bool pending = false;
   bool evalValid_ = false;
   bool lastEvalOutReady_ = false;

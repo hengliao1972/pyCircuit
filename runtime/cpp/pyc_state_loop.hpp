@@ -15,10 +15,10 @@ namespace pyc::cpp {
 // Wire<W> (the model struct member), so comb reads, probe registry, trace and
 // VCD paths need no adaptation.
 //
-// Semantics contract (matches the per-object pyc_reg / pyc_delay_line):
-//   compute_rise()    == posedge_tick_compute() for every lane
-//   compute_generic() == tick_compute() for every lane
-//   negedge()         == negedge_update() for every lane
+// Semantics contract (matches the per-object pycReg / pycDelayLine):
+//   compute_rise()    == tick_compute(true)  for every lane (known rising edge)
+//   compute_generic() == tick_compute(clkNow) for every lane
+//   negedge()         == tick_compute(false) for every lane
 //   commit()          == tick_commit() for every lane; returns per-lane dirty
 //     bitmaps (one bit per lane, 64 lanes per word) so the change-driven
 //     fanout wake stays exactly as precise as the per-object path.
@@ -32,7 +32,7 @@ constexpr std::size_t loop_word_count(std::size_t lanes) {
 // Lane values are raw words (Wire<W>::data()); qNext lives in a packed
 // arena whose per-lane segment is kWords long, so write-intent probes can
 // still reinterpret the segment as Wire<W> via lane_qnext_raw(). Semantics
-// mirror the per-object pyc_reg exactly; the per-lane compare/copy loops
+// mirror the per-object pycReg exactly; the per-lane compare/copy loops
 // are bounded by the runtime word count.
 class RegLoop {
 public:
@@ -78,7 +78,7 @@ public:
     clkPrev_ = true;
     const std::size_t n = q_.size();
     // One control read per loop (not per lane): qNext stays written for
-    // every lane, matching the per-object pyc_reg sampling order.
+    // every lane, matching the per-object pycReg sampling order.
     const bool r = rst_->toBool();
     const bool e = en_->toBool();
     const bool go = r | e;
@@ -193,7 +193,7 @@ public:
   void clearDirty() { dirty_.assign(loop_word_count(q_.size()), 0); }
 
   // Probe/trace write-intent bindings: stable addresses for lane i's pending
-  // flag and sampled next value (mirror pyc_reg::pending/qNext). pending_
+  // flag and sampled next value (mirror pycReg::pending/qNext). pending_
   // stores char with values exactly 0/1; bool has the same object
   // representation on the Itanium ABI and consumers only test truthiness.
   bool *lane_pending(std::size_t i) {
@@ -374,7 +374,7 @@ public:
   // Wire<W> (Bits is standard-layout with words_ as its only member).
   void *lane_qnext_raw(std::size_t i) { return qNext_[i].data(); }
 
-  // Committed tap read for lane i (mirror pyc_delay_line::tap); the
+  // Committed tap read for lane i (mirror pycDelayLine::tap); the
   // emitter passes the width it knows as an explicit template argument.
   template <unsigned Width>
   Wire<Width> lane_tap(std::size_t i, unsigned depth) const {
@@ -384,7 +384,7 @@ public:
   }
 
   // tap_next for per-tap _qNext wires: recompute exactly like
-  // pyc_delay_line::tap_next for lane i.
+  // pycDelayLine::tap_next for lane i.
   template <unsigned Width>
   Wire<Width> lane_tap_next(std::size_t i, unsigned depth) const {
     const Lane &lane = lanes_[i];
@@ -409,7 +409,7 @@ private:
   void tapWords(std::size_t i, unsigned depth, std::uint64_t *out) const {
     const Lane &lane = lanes_[i];
     // Caller passes 1..Depth (verifier-guaranteed); ring layout matches
-    // pyc_delay_line::stages/head.
+    // pycDelayLine::stages/head.
     unsigned idx = head_[i] + lane.depth - depth;
     if (idx >= lane.depth)
       idx -= lane.depth;

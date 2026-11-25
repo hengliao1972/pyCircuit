@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "pyc_bits.hpp"
+#include "pyc_component.hpp"
 
 namespace pyc::cpp {
 
@@ -18,20 +19,23 @@ namespace pyc::cpp {
 // - Write uses `wstrb` byte enables relative to `waddr`.
 // - Addresses are low-bit indexed into host `size_t`; out-of-range bytes are 0.
 template <unsigned AddrWidth, unsigned DataWidth, std::size_t DepthBytes>
-class pyc_byte_mem {
+class pycByteMem
+    : public ClockedElement<pycByteMem<AddrWidth, DataWidth, DepthBytes>> {
 public:
-  static_assert(DataWidth > 0, "pyc_byte_mem requires DataWidth > 0");
-  static_assert((DataWidth % 8) == 0, "pyc_byte_mem requires DataWidth divisible by 8");
+  using change_mask_t = BaseElement::change_mask_t;
+
+  static_assert(DataWidth > 0, "pycByteMem requires DataWidth > 0");
+  static_assert((DataWidth % 8) == 0, "pycByteMem requires DataWidth divisible by 8");
   static constexpr unsigned StrbWidth = DataWidth / 8;
 
-  pyc_byte_mem(Wire<1> &clk,
-                              Wire<AddrWidth> &raddr,
+  pycByteMem(Wire<1> &clk,
+               Wire<AddrWidth> &raddr,
                Wire<DataWidth> &rdata,
                Wire<1> &wvalid,
                Wire<AddrWidth> &waddr,
                Wire<DataWidth> &wdata,
                Wire<StrbWidth> &wstrb)
-      : clk(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
+      : ClockedElement<pycByteMem<AddrWidth, DataWidth, DepthBytes>>(clk), raddr(raddr), rdata(rdata), wvalid(wvalid), waddr(waddr), wdata(wdata), wstrb(wstrb),
         mem_(DepthBytes, 0u) {
     eval();
   }
@@ -132,13 +136,7 @@ public:
     }
   }
 
-  void tick_compute() {
-    bool clkNow = clk.toBool();
-    bool posedge = (!clkPrev) && clkNow;
-    clkPrev = clkNow;
-    if (!posedge)
-      return;
-
+  void tick_sample() {
     pendingWrite = false;
     if (wvalid.toBool()) {
       pendingWrite = true;
@@ -149,7 +147,7 @@ public:
   }
 
   // Preserves write/watch/eval side effects and reports only a visible rdata change.
-  bool tick_commit() {
+  change_mask_t tick_commit() {
     const bool hadPendingWrite = pendingWrite;
     const Wire<DataWidth> oldRdata = rdata;
     if (pendingWrite) {
@@ -190,7 +188,7 @@ public:
     }
     pendingWrite = false;
     eval();
-    return hadPendingWrite && oldRdata != rdata;
+    return (hadPendingWrite && oldRdata != rdata) ? BaseElement::kChanged : change_mask_t{0};
   }
 
   // Convenience for testbenches.
@@ -213,8 +211,6 @@ public:
   }
 
 public:
-  Wire<1> &clk;
-
   Wire<AddrWidth> &raddr;
   Wire<DataWidth> &rdata;
 
@@ -223,7 +219,6 @@ public:
   Wire<DataWidth> &wdata;
   Wire<StrbWidth> &wstrb;
 
-  bool clkPrev = false;
   bool pendingWrite = false;
   std::size_t latchedAddr = 0;
   Wire<DataWidth> latchedData{};
