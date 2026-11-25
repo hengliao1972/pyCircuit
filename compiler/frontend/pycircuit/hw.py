@@ -24,6 +24,7 @@ from .data import Bits, DT, Clock, Data, Reset, Vector
 from .design import DesignError
 from .dsl import Module, Signal, is_bits_signal, is_vector_signal
 from .literals import LiteralValue, infer_literal_width
+from .vector_lower import lane_count
 VT = TypeVar("VT", bound=Data)
 
 
@@ -2192,6 +2193,18 @@ class Circuit(Module):
 
             if sig.ty == expected_ty:
                 return sig
+
+            # Vector <-> packed scalar of the same total width: the port ABI packs
+            # the whole lane set into one integer bus (lane 0 in the LSBs).
+            if isinstance(sig.ty, Vector) and isinstance(expected_ty, Bits):
+                info = self.lanes_of(sig)
+                assert info is not None
+                if int(info.leaf.width) * len(info.refs) == expected_ty.width:
+                    return self.pack_lanes(info.shape, info.leaf, info.refs)
+            if isinstance(sig.ty, Bits) and isinstance(expected_ty, Vector):
+                lanes = lane_count(tuple(int(d) for d in expected_ty.shape()))
+                if sig.ty.width == int(expected_ty.datatype().width) * lanes:
+                    return self.unpack_lanes(sig.ref, expected_ty.shape(), expected_ty.datatype())
 
             # Convenience: allow implicit integer resizing (zext/trunc) like `Circuit.assign`.
             if isinstance(sig.ty, Bits) and isinstance(expected_ty, Bits):
