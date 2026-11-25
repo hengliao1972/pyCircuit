@@ -25,12 +25,6 @@ static int64_t satMul(int64_t a, int64_t b) {
 static int64_t hardwareBitCount(Type ty) {
   if (auto i = dyn_cast<IntegerType>(ty))
     return static_cast<int64_t>(i.getWidth());
-  if (auto vt = dyn_cast<VectorType>(ty)) {
-    int64_t lanes = 1;
-    for (int64_t dim : vt.getShape())
-      lanes = satMul(lanes, dim);
-    return satMul(lanes, hardwareBitCount(vt.getElementType()));
-  }
   return 0;
 }
 

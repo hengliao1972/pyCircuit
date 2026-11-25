@@ -3,6 +3,7 @@
 #include "pyc/Dialect/PYC/PYCDialect.h"
 #include "pyc/Dialect/PYC/PYCTypes.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Pass/Pass.h"
@@ -13,19 +14,17 @@ namespace pyc {
 namespace {
 
 static bool isAllowedHardwareType(Type t) {
-  if (isa<IntegerType, pyc::ClockType, pyc::ResetType>(t))
-    return true;
-  if (auto vt = dyn_cast<VectorType>(t))
-    return isAllowedHardwareType(vt.getElementType());
-  return false;
+  return isa<IntegerType, pyc::ClockType, pyc::ResetType>(t);
 }
 
 struct CheckFlatTypesPass : public PassWrapper<CheckFlatTypesPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(CheckFlatTypesPass)
 
+  CheckFlatTypesPass() = default;
+
   StringRef getArgument() const override { return "pyc-check-flat-types"; }
   StringRef getDescription() const override {
-    return "Verify the PYC IR uses emission-supported integer or vector-of-integer hardware types";
+    return "Verify the PYC IR uses emission-supported hardware types and contains no vector types";
   }
 
   void runOnOperation() override {
@@ -47,33 +46,78 @@ struct CheckFlatTypesPass : public PassWrapper<CheckFlatTypesPass, OperationPass
     }
 
     bool ok = true;
+    auto rejectVector = [&](Operation *op, Type t, StringRef where) {
+      op->emitError() << where << " must not be a vector type: " << t;
+      ok = false;
+    };
+
+    for (Type t : f.getFunctionType().getInputs())
+      if (isa<VectorType>(t))
+        rejectVector(f.getOperation(), t, "func input");
+    for (Type t : f.getFunctionType().getResults())
+      if (isa<VectorType>(t))
+        rejectVector(f.getOperation(), t, "func result");
+    // Block arguments of nested regions (comb/scf bodies); the entry block
+    // arguments are the func signature already checked above.
+    f.walk([&](Operation *op) {
+      for (Region &region : op->getRegions())
+        for (Block &block : region.getBlocks())
+          for (BlockArgument arg : block.getArguments())
+            if (isa<VectorType>(arg.getType()))
+              rejectVector(op, arg.getType(), "block argument");
+    });
+    f.walk([&](Operation *op) {
+      for (Type t : op->getOperandTypes())
+        if (isa<VectorType>(t))
+          rejectVector(op, t, "operand");
+      for (Type t : op->getResultTypes())
+        if (isa<VectorType>(t))
+          rejectVector(op, t, "result");
+      // Shaped constants bypass the type-only check when their result is a
+      // tensor, and the emitter cannot lower DenseElements either way.
+      if (auto c = dyn_cast<arith::ConstantOp>(op)) {
+        if (isa<DenseElementsAttr>(c.getValue())) {
+          op->emitError() << "constant must not carry a DenseElements attribute: "
+                          << c.getValue();
+          ok = false;
+        }
+      }
+    });
+
+    if (!ok) {
+      signalPassFailure();
+      return;
+    }
+
+    bool typesOk = true;
     f.walk([&](Operation *op) {
       for (Type t : op->getOperandTypes()) {
         if (!isAllowedHardwareType(t)) {
           op->emitError() << "unsupported operand type for emission: " << t;
-          ok = false;
+          typesOk = false;
           return;
         }
       }
       for (Type t : op->getResultTypes()) {
         if (!isAllowedHardwareType(t)) {
           op->emitError() << "unsupported result type for emission: " << t;
-          ok = false;
+          typesOk = false;
           return;
         }
       }
     });
 
-    if (!ok)
+    if (!typesOk)
       signalPassFailure();
   }
 };
 
 } // namespace
 
-std::unique_ptr<::mlir::Pass> createCheckFlatTypesPass() { return std::make_unique<CheckFlatTypesPass>(); }
+std::unique_ptr<::mlir::Pass> createCheckFlatTypesPass() {
+  return std::make_unique<CheckFlatTypesPass>();
+}
 
 static PassRegistration<CheckFlatTypesPass> pass;
 
 } // namespace pyc
-

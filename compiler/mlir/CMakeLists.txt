@@ -94,12 +94,10 @@ add_library(pyc_transforms
   lib/Transforms/PrunePortsPass.cpp
   lib/Transforms/RetimePipelinesPass.cpp
   lib/Transforms/MergeRegCopiesPass.cpp
-  lib/Transforms/SLPPackWiresPass.cpp
   lib/Transforms/StateLoopPartitionPass.cpp
   lib/Transforms/StateOptimization.cpp
   lib/Transforms/StateOptimizePass.cpp
   lib/Support/PassIRDumper.cpp
-  lib/Transforms/VectorUnrollPass.cpp
 )
 llvm_update_compile_flags(pyc_transforms)
 target_include_directories(pyc_transforms PUBLIC

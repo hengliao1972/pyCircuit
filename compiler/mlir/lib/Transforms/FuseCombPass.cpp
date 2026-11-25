@@ -52,13 +52,6 @@ static bool isFusableCombKind(Operation *op) {
              pyc::ShlOp,
              pyc::LshrOp,
              pyc::AshrOp,
-             pyc::VGetOp,
-             pyc::VCreateOp,
-             pyc::VBroadcastOp,
-             pyc::VBroadcastDimOp,
-             pyc::VOrReduceOp,
-             pyc::VAndReduceOp,
-             pyc::VAddReduceOp,
              arith::SelectOp>(op);
 }
 
@@ -114,7 +107,7 @@ static void hoistSources(Block &block) {
     return isSourceOp(&op) && llvm::none_of(op.getOperands(), [&](Value v) {
              Operation *def = v.getDefiningOp();
              return def && !head.count(def) &&
-                    (isSourceOp(def) || !isa<IntegerType, VectorType>(v.getType()));
+                    (isSourceOp(def) || !isa<IntegerType>(v.getType()));
            });
   };
   for (Operation &op : block.without_terminator()) {
@@ -161,7 +154,7 @@ static void latchPolledInputs(ArrayRef<Operation *> run) {
   for (Operation *op : run)
     for (Value v : op->getOperands())
       if ((!v.getDefiningOp() || v.getDefiningOp<pyc::DelayTapOp>()) &&
-          isa<IntegerType, VectorType>(v.getType()))
+          isa<IntegerType>(v.getType()))
         polled.insert(v);
   if (polled.empty())
     return;

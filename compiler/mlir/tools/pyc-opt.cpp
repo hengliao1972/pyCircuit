@@ -60,8 +60,6 @@ static void forceLinkPycPasses() {
   (void)pyc::createCheckFlatTypesPass();
   (void)pyc::createPrunePortsPass();
   (void)pyc::createCppPlacementPass(pyc::CppEmitterOptions::kDefaultCombChunkNodes);
-  (void)pyc::createVectorUnrollPass();
-  (void)pyc::createSLPPackWiresPass();
   (void)pyc::createFlattenInstancesPass();
   (void)pyc::createEliminateDeadStatePass();
   (void)pyc::createEliminateDeadInstancesPass();

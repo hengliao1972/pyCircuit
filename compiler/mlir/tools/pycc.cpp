@@ -206,11 +206,6 @@ static llvm::cl::opt<bool> cppOnlyPreserveOps(
     llvm::cl::desc("Preserve operation-granular C++ scheduling in --sim-mode=cpp-only (disables comb fusion)"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<bool> unrollVector(
-    "unroll-vector",
-    llvm::cl::desc("Unroll vector operations to scalars at IR level before optimization passes"),
-    llvm::cl::init(false));
-
 static llvm::cl::opt<bool> noInline(
     "noinline",
     llvm::cl::desc("Disable MLIR inliner to preserve module boundaries (prevents merge/flatten)"),
@@ -2428,8 +2423,6 @@ int main(int argc, char **argv) {
   pm.addPass(createSymbolDCEPass());
 
   pm.addNestedPass<func::FuncOp>(pyc::createLowerSCFToPYCStaticPass());
-  if (unrollVector)
-    pm.addNestedPass<func::FuncOp>(pyc::createVectorUnrollPass());
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadStatePass());
   // State rewrites (delay-line formation) run on the C++ emit path only so
@@ -2439,8 +2432,6 @@ int main(int argc, char **argv) {
   // Must run after the state rewrites: retiming and chain forming crash on
   // the merged multiplicity.
   pm.addNestedPass<func::FuncOp>(pyc::createMergeRegCopiesPass());
-  if (!unrollVector)
-    pm.addNestedPass<func::FuncOp>(pyc::createSLPPackWiresPass());
   pm.addNestedPass<func::FuncOp>(pyc::createCombCanonicalizePass());
   pm.addPass(pyc::createCheckClockDomainsPass());
   pm.addNestedPass<func::FuncOp>(pyc::createPackI1RegsPass());

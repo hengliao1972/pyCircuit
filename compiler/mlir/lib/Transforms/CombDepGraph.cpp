@@ -48,27 +48,6 @@ static int64_t ceilLog2(int64_t n) {
   return depth;
 }
 
-template <typename ReduceOp>
-static int64_t vectorReduceCost(ReduceOp op) {
-  auto vecTy = dyn_cast<VectorType>(op.getVec().getType());
-  if (!vecTy)
-    return 1;
-  int64_t lanes = 1;
-  if (auto dim = op.getDim()) {
-    if (*dim >= static_cast<uint64_t>(vecTy.getRank()))
-      return 1;
-    lanes = vecTy.getDimSize(static_cast<int64_t>(*dim));
-  } else {
-    for (int64_t extent : vecTy.getShape())
-      lanes *= extent;
-  }
-  if (auto mode = op->template getAttrOfType<StringAttr>("mode")) {
-    if (mode.getValue() == "tree")
-      return std::max<int64_t>(1, ceilLog2(lanes));
-  }
-  return std::max<int64_t>(1, lanes - 1);
-}
-
 static int64_t opCost(Operation *op) {
   if (!op)
     return 0;
@@ -77,15 +56,6 @@ static int64_t opCost(Operation *op) {
   if (isa<pyc::WireOp, pyc::AliasOp, pyc::ResetActiveOp, pyc::ConstantOp, pyc::CombOp, pyc::YieldOp,
           pyc::DelayTapOp, arith::ConstantOp>(op))
     return 0;
-  if (isa<pyc::VGetOp, pyc::VCreateOp, pyc::VBroadcastOp,
-          pyc::VBroadcastDimOp>(op))
-    return 0;
-  if (auto vr = dyn_cast<pyc::VOrReduceOp>(op))
-    return vectorReduceCost(vr);
-  if (auto vr = dyn_cast<pyc::VAndReduceOp>(op))
-    return vectorReduceCost(vr);
-  if (auto vr = dyn_cast<pyc::VAddReduceOp>(op))
-    return vectorReduceCost(vr);
   return 1;
 }
 
@@ -120,9 +90,7 @@ static bool isKnownDirectCombOperation(Operation *op) {
              pyc::ZextOp, pyc::SextOp, pyc::ExtractOp, pyc::ShliOp,
              pyc::LshriOp, pyc::AshriOp, pyc::ShlOp, pyc::LshrOp,
              pyc::AshrOp, pyc::ConcatOp, pyc::AliasOp,
-             pyc::ResetActiveOp, pyc::VGetOp, pyc::VCreateOp,
-             pyc::VBroadcastOp, pyc::VBroadcastDimOp, pyc::VOrReduceOp,
-             pyc::VAndReduceOp, pyc::VAddReduceOp, arith::SelectOp>(op);
+             pyc::ResetActiveOp, arith::SelectOp>(op);
 }
 
 static FailureOr<ResultTransfer>
