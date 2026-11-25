@@ -33,6 +33,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace mlir;
@@ -2921,14 +2922,15 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   // their result fanout) is deferred into a per-instance word buffer and merged
   // by the forking thread after the join, so no atomic and no lost wakeup.
   //
-  // With parallelInstances == 0 every emission below is the untouched serial
-  // path, which keeps `--cpp-parallel-instances=0` byte-identical to the base
+  // With --cpp-parallel-instances=1 (the default) every emission below is the
+  // untouched serial path, which keeps the default byte-identical to the base
   // emitter.
-  const bool parallelInstances = opts.parallelInstances >= 2 && hasFullTopo &&
+  const unsigned requestedInstances =
+      resolveCppParallelInstances(opts.parallelInstances);
+  const bool parallelInstances = requestedInstances >= 2 && hasFullTopo &&
                                  instInfos.size() >= 2 &&
                                  instInfos.size() <= kMaxParallelInstances;
-  const unsigned parallelThreads =
-      parallelInstances ? static_cast<unsigned>(opts.parallelInstances) : 0u;
+  const unsigned parallelThreads = parallelInstances ? requestedInstances : 0u;
   const unsigned wakeWords =
       std::max(1u, static_cast<unsigned>((combs.size() + 63) / 64));
   // stage(op) is a valid topological position: ops that share a stage are
@@ -4572,6 +4574,13 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 
 } // namespace
 
+unsigned resolveCppParallelInstances(unsigned flag) {
+  if (flag != 0)
+    return flag;
+  return std::min(std::max(1u, std::thread::hardware_concurrency()),
+                  kMaxParallelInstances);
+}
+
 // ---------------------------------------------------------------------------
 // placement attribute readers (used by emit + profile consumers)
 // ---------------------------------------------------------------------------
@@ -4694,7 +4703,7 @@ LogicalResult emitCpp(ModuleOp module, llvm::raw_ostream &os, const CppEmitterOp
   os << "#include <cpp/pyc_sim.hpp>\n";
   os << "#include <cpp/pyc_state_loop.hpp>\n";
   os << "#include <cpp/pyc_change_scheduler.hpp>\n";
-  if (opts.parallelInstances >= 2)
+  if (resolveCppParallelInstances(opts.parallelInstances) >= 2)
     os << "#include <cpp/pyc_parallel.hpp>\n";
   os << "\n";
   os << "namespace pyc::gen {\n\n";

@@ -78,10 +78,11 @@ struct CppEmitterOptions {
   // Chunk fused comb helpers to avoid single mega-functions that dominate
   // downstream C++ TU cost even after file sharding.
   unsigned combChunkNodes = kDefaultCombChunkNodes;
-  // Sibling-instance parallelism (0 = off, N >= 2 = fork the independent
-  // instances of one stage onto an N-way persistent pool). 0 keeps the emitted
-  // code byte-identical to the serial emitter.
-  unsigned parallelInstances = 0;
+  // Sibling-instance parallelism (1 = serial and byte-identical to the serial
+  // emitter, 0 = one worker per hardware core capped at the max fork width,
+  // N >= 2 = fork the independent instances of one stage onto an N-way
+  // persistent pool).
+  unsigned parallelInstances = 1;
   std::string probePlanPath{};
 };
 
@@ -90,6 +91,11 @@ struct CppEmitterOptions {
 
 ::mlir::LogicalResult emitCppFunc(::mlir::ModuleOp module, ::mlir::func::FuncOp f, ::llvm::raw_ostream &os,
                                   const CppEmitterOptions &opts = {});
+
+/// Resolve the --cpp-parallel-instances flag: 0 = auto (one worker per
+/// hardware core, capped at the max fork width), 1 = serial, N >= 2 = fixed
+/// N-way pool.
+unsigned resolveCppParallelInstances(unsigned flag);
 
 // ---------------------------------------------------------------------------
 // Placement readers used by the emitter

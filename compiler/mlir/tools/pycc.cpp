@@ -150,9 +150,10 @@ static llvm::cl::opt<unsigned> cppShardMaxAstNodes(
 static llvm::cl::opt<unsigned> cppParallelInstances(
     "cpp-parallel-instances",
     llvm::cl::desc("Fork independent sibling instances of one schedule stage onto a persistent N-way pool "
-                   "(0 = serial and byte-identical to the serial emitter; N>=2 opts in, and a stage fork "
-                   "costs a bounded wait, so only enable it when the run has spare CPUs)"),
-    llvm::cl::init(0));
+                   "(1 = serial and byte-identical to the serial emitter (default); 0 = one worker per "
+                   "hardware core; N>=2 = fixed N-way pool; a stage fork costs a bounded wait, so only "
+                   "enable it when the run has spare CPUs)"),
+    llvm::cl::init(1));
 
 static llvm::cl::opt<std::string> cppManifestPath(
     "cpp-manifest",
@@ -2771,7 +2772,7 @@ int main(int argc, char **argv) {
         os << "#include <cpp/pyc_sim.hpp>\n";
         os << "#include <cpp/pyc_state_loop.hpp>\n";
         os << "#include <cpp/pyc_change_scheduler.hpp>\n";
-        if (cppParallelInstances >= 2)
+        if (pyc::resolveCppParallelInstances(cppParallelInstances) >= 2)
           os << "#include <cpp/pyc_parallel.hpp>\n";
       };
 
