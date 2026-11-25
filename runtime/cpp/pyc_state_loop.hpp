@@ -27,6 +27,24 @@ constexpr std::size_t loop_word_count(std::size_t lanes) {
   return (lanes + 63) / 64;
 }
 
+// Root of the state-loop family (RegLoop / DelayLoop). The only state shared
+// by every loop is the previous clock level: edge detection takes the clock
+// level from the caller (group counterpart of ClockedElement::rise). Sampling
+// and commit stay per-loop -- the two loops intentionally differ in pending
+// bookkeeping and commit signatures, so this base is deliberately tiny.
+class BaseLoop {
+public:
+  // Caller-supplied clock level: true exactly on a rising edge.
+  bool rise(bool clkNow) {
+    const bool isRise = !clkPrev_ && clkNow;
+    clkPrev_ = clkNow;
+    return isRise;
+  }
+
+protected:
+  bool clkPrev_ = false;
+};
+
 // RegLoop: lanes of different widths share one loop, so the
 // emitter groups by (loop id, fused) instead of (loop id, width, fused).
 // Lane values are raw words (Wire<W>::data()). Phased lanes park their
@@ -36,7 +54,7 @@ constexpr std::size_t loop_word_count(std::size_t lanes) {
 // copy of the state is kept for observation. Semantics mirror the
 // per-object pycReg exactly; the per-lane compare/copy loops are bounded
 // by the runtime word count.
-class RegLoop {
+class RegLoop : public BaseLoop {
 public:
   struct Lane {
     std::uint64_t *q;
@@ -94,9 +112,7 @@ public:
   }
 
   void compute_generic(bool clkNow) {
-    const bool posedge = (!clkPrev_) & clkNow;
-    clkPrev_ = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
+    if (__builtin_expect(!rise(clkNow), 1)) {
       pendingValid_ = false;
       clear_pending();
       return;
@@ -283,7 +299,6 @@ private:
   std::vector<std::size_t> pendingLanes_;  // lanes bound via lane_pending()
   std::vector<char> pendingSeen_;
   std::vector<std::uint64_t> dirty_;
-  bool clkPrev_ = false;
   bool pendingValid_ = false;  // compute ran, commit still owes this edge
 };
 
@@ -292,7 +307,7 @@ private:
 // so stage rings, sampled and qNext are per-lane word vectors of
 // lane.words entries; tap reads build a Wire<W> on the fly via the
 // explicit template argument the emitter knows.
-class DelayLoop {
+class DelayLoop : public BaseLoop {
 public:
   struct Lane {
     std::uint64_t *q;
@@ -370,9 +385,7 @@ public:
   }
 
   void compute_generic(bool clkNow) {
-    const bool posedge = (!clkPrev_) & clkNow;
-    clkPrev_ = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
+    if (__builtin_expect(!rise(clkNow), 1)) {
       clear_pending();
       return;
     }
@@ -490,7 +503,6 @@ private:
   std::vector<char> pendingReset_;  // 0/1
   std::vector<std::uint64_t> dirty_;
   std::vector<std::uint64_t> advanced_;
-  bool clkPrev_ = false;
   bool sharedCtrl_ = true;  // all lanes share one rst and one en pointer
 };
 
