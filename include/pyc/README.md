@@ -19,7 +19,9 @@ can stay backend-agnostic.
 Examples:
 
 - Verilog: `runtime/verilog/pyc_reg.v` defines `module pyc_reg #(WIDTH) (...)`
-- C++: `runtime/cpp/pyc_primitives.hpp` defines `template<unsigned Width> class pyc::cpp::pyc_reg { ... }`
+- C++: `runtime/cpp/pyc_reg.hpp` defines `template<unsigned Width> class pyc::cpp::pycReg { ... }`
+
+Runtime header ownership map: `runtime/cpp/README.md`.
 
 Current checked-in primitives (prototype):
 

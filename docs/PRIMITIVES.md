@@ -20,7 +20,7 @@ Represents a combinational value of width `W` bits.
 Represents a clocked storage element with synchronous reset and clock enable.
 
 - Verilog module: `pyc_reg` (`runtime/verilog/pyc_reg.v`)
-- C++ class: `pyc::cpp::pyc_reg<W>` (`runtime/cpp/pyc_primitives.hpp`)
+- C++ class: `pyc::cpp::pycReg<W>` (`runtime/cpp/pyc_reg.hpp`)
  
 Note: although the testbenches in `designs/examples/` are written in SystemVerilog for convenience,
 the *design* backend is plain Verilog.
@@ -77,7 +77,7 @@ stable “template library” layer for hand-written designs or future lowering.
 ### 3.1 `pyc_fifo` (single-clock, strict ready/valid)
 
 - Verilog: `module pyc_fifo #(WIDTH, DEPTH) (...)`
-- C++: `pyc::cpp::pyc_fifo<Width, Depth>` (`runtime/cpp/pyc_primitives.hpp`)
+- C++: `pyc::cpp::pycFifo<Width, Depth>` (`runtime/cpp/pyc_fifo.hpp`)
 
 Ports (explicit, for simple codegen):
 
@@ -170,7 +170,7 @@ Ports:
 
 Prototype-only utilities to help with bring-up and debugging:
 
-- Printing: `runtime/cpp/pyc_print.hpp` defines `operator<<` for `Wire`, `Vec`, and primitives.
+- Printing: `runtime/cpp/pyc_print.hpp` defines `operator<<` for `Wire` and primitives.
 - Testbench: `runtime/cpp/pyc_tb.hpp` provides `pyc::cpp::Testbench<Dut>` (multi-clock ready).
 - Tracing: `runtime/cpp/pyc_vcd.hpp` provides a tiny VCD dumper (usable via `Testbench::enableVcd()`).
 - Convenience include: `runtime/cpp/pyc_debug.hpp`.
