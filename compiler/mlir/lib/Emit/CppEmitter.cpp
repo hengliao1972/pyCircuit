@@ -2643,6 +2643,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     std::string array;
     std::string stale;
     llvm::SmallVector<std::pair<unsigned, std::uint64_t>, 16> always;
+    std::size_t lanes = 0;
     std::size_t words = 0;
   };
   LaneMarkTable laneMarkTable;
@@ -2701,6 +2702,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         }
         ++lane;
       }
+      info.lanes = lane;
       info.words = (lane + 63u) / 64u;
       laneMarkWords = std::max<std::size_t>(laneMarkWords, info.words);
     }
@@ -4473,9 +4475,20 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         os << "              {" << wm.first << "u, 0x" << llvm::utohexstr(wm.second)
            << "ull},\n";
       os << "          }};\n";
+      // Full fill covers real lanes only: the last mark word gets the lane
+      // tail mask (lanes is compile-time known) instead of ~0, so marks never
+      // carry padding bits and direct_commit_marked needs no bounds check.
+      const unsigned tailBits = static_cast<unsigned>(
+          markInfo.lanes - (markInfo.words - 1) * 64u);
+      const std::uint64_t tailMask =
+          tailBits == 64 ? ~std::uint64_t{0}
+                         : ((std::uint64_t{1} << tailBits) - 1);
       os << "          if (_pyc_full) {\n";
-      os << "            for (auto &_w : " << markInfo.array
-         << ") _w = ~std::uint64_t{0};\n";
+      if (markInfo.words > 1)
+        os << "            for (unsigned _w = 0; _w + 1 < " << markInfo.words
+           << "u; ++_w) " << markInfo.array << "[_w] = ~std::uint64_t{0};\n";
+      os << "            " << markInfo.array << "[" << (markInfo.words - 1)
+         << "u] = 0x" << llvm::utohexstr(tailMask) << "ull;\n";
       os << "          } else {\n";
       os << "            for (const auto &[_w, _m] : _pyc_lane_always) "
          << markInfo.array << "[_w] |= _m;\n";

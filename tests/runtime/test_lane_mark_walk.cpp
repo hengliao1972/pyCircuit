@@ -51,8 +51,14 @@ struct Fixture {
     return m;
   }
 
+  // Marks carry real lane bits only (the emitter's full fill covers the last
+  // word with the lane tail mask instead of ~0), so full_marks() mirrors that
+  // shape and the walk needs no bounds check.
   std::vector<std::uint64_t> full_marks() const {
-    return std::vector<std::uint64_t>((kLanes + 63) / 64, ~std::uint64_t{0});
+    std::vector<std::uint64_t> m((kLanes + 63) / 64, ~std::uint64_t{0});
+    const unsigned tail = kLanes - ((kLanes + 63) / 64 - 1) * 64u;
+    m.back() = (std::uint64_t{1} << tail) - 1;
+    return m;
   }
 
   std::vector<std::uint64_t> no_marks() const {
@@ -108,6 +114,19 @@ int main() {
           "marked walk after en 0->1 with empty marks leaves q stale");
     f.loop.direct_commit_marked(full.data(), full.size());
     check(f.q[7] == 0x4444, "full walk after en 0->1 publishes the new d");
+  }
+
+  // (4) tail-word shape: marks covering only the lanes of the last (partial)
+  //     word publish exactly those lanes -- the last mark word holds a tail
+  //     mask (real lane bits), mirroring the emitter's full fill.
+  {
+    Fixture f;
+    f.d[128] = 0x5A5A;
+    f.d[129] = 0xA5A5;
+    std::vector<std::uint64_t> tail = f.marks({128, 129});
+    f.loop.direct_commit_marked(tail.data(), tail.size());
+    check(f.q[128] == 0x5A5A && f.q[129] == 0xA5A5 && f.q[127] == 0,
+          "tail-lane-only marks publish exactly the last two lanes");
   }
 
   if (failures == 0) {
