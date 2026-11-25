@@ -33,6 +33,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace mlir;
@@ -114,6 +115,11 @@ static bool argumentIsClockOnly(
 // ---------------------------------------------------------------------------
 // placement attribute readers (used internally by the emitter)
 // ---------------------------------------------------------------------------
+
+// Above this many sibling instances the per-instance switch body of the fork
+// group costs more I-cache than the fork saves, so the serial chunked emission
+// is kept instead.
+static constexpr unsigned kMaxParallelInstances = 32;
 
 static CppEmitterOptions effectiveEmitOpts(ModuleOp module, const CppEmitterOptions &opts) {
   CppEmitterOptions out = opts;
@@ -985,7 +991,7 @@ static void collectFanoutWordMasks(
 static void emitMetadataCombFanout(
     Value value, llvm::raw_ostream &os, const EmissionSchedule &schedule,
     const llvm::DenseMap<Operation *, unsigned> &combIndices, NameTable &nt,
-    llvm::StringRef indent = "      ") {
+    llvm::StringRef indent = "      ", bool deferredWake = false) {
   llvm::SmallVector<std::pair<unsigned, uint64_t>> wordMasks;
   collectFanoutWordMasks(value, schedule, combIndices, wordMasks);
   if (wordMasks.empty())
@@ -998,7 +1004,10 @@ static void emitMetadataCombFanout(
   });
   os << "}};\n";
   os << indent << "for (const auto &[_pyc_w, _pyc_m] : " << fanoutName << ")\n";
-  os << indent << "  _pyc_comb_dirty.markWordUnchecked(_pyc_w, _pyc_m);\n";
+  if (deferredWake)
+    os << indent << "  _pyc_wake[_pyc_w] |= _pyc_m;\n";
+  else
+    os << indent << "  _pyc_comb_dirty.markWordUnchecked(_pyc_w, _pyc_m);\n";
 }
 
 static bool isDirtyDrivenInput(Value input) {
@@ -2903,6 +2912,135 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   llvm::SmallVector<Operation *> fullOrdered;
   bool hasFullTopo = topoOrder(/*includePrims=*/true, fullOrdered);
 
+  // Coarse-grained instance parallelism (--cpp-parallel-instances=N).
+  //
+  // Nothing here changes semantics: the stages are derived from the very same
+  // dependency edges topoOrder used, so ordering ops by stage is still a valid
+  // topological order and two ops sharing a stage are mutually independent.
+  // Instances of one stage may therefore be evaluated on separate threads; the
+  // only cross-thread state they touch (the fused-comb dirty words reached by
+  // their result fanout) is deferred into a per-instance word buffer and merged
+  // by the forking thread after the join, so no atomic and no lost wakeup.
+  //
+  // With --cpp-parallel-instances=1 (the default) every emission below is the
+  // untouched serial path, which keeps the default byte-identical to the base
+  // emitter.
+  const unsigned requestedInstances =
+      resolveCppParallelInstances(opts.parallelInstances);
+  const bool parallelInstances = requestedInstances >= 2 && hasFullTopo &&
+                                 instInfos.size() >= 2 &&
+                                 instInfos.size() <= kMaxParallelInstances;
+  const unsigned parallelThreads = parallelInstances ? requestedInstances : 0u;
+  const unsigned wakeWords =
+      std::max(1u, static_cast<unsigned>((combs.size() + 63) / 64));
+  // stage(op) is a valid topological position: ops that share a stage are
+  // mutually independent, so the instances of one stage can be forked.
+  //
+  // Levelization alone is not enough to group instances: two independent
+  // instances can sit at different levels only because their *input* comb
+  // cones have different depths (in the motivating design one subsystem's
+  // ports go through one extra top-level select stage). Sibling instances
+  // therefore group by the layer
+  // of instance-to-instance same-tick dependencies (all zero for two PE
+  // clusters), take the deepest member's level as their fork point, and the
+  // remaining ops are re-staged on top of that with the usual
+  // "one past the deepest dependency" rule, which keeps the order valid.
+  llvm::DenseMap<Operation *, unsigned> opStage;
+  unsigned parallelStageCount = 0;
+  if (parallelInstances) {
+    // producer mirrors topoOrder's valueProducer: results first, then the
+    // single driver of each wire (a late pyc.assign overrides, as there).
+    llvm::DenseMap<Value, unsigned> producer;
+    for (unsigned i = 0; i < fullOrdered.size(); ++i) {
+      Operation *op = fullOrdered[i];
+      for (Value r : op->getResults())
+        producer.try_emplace(r, i);
+    }
+    for (unsigned i = 0; i < fullOrdered.size(); ++i)
+      if (auto a = dyn_cast<pyc::AssignOp>(*fullOrdered[i]))
+        producer[a.getDst()] = i;
+
+    auto depValues = [](Operation *op, llvm::SmallVectorImpl<Value> &out) {
+      if (auto a = dyn_cast<pyc::AssignOp>(*op)) {
+        out.push_back(a.getSrc());
+        return;
+      }
+      for (Value v : op->getOperands())
+        out.push_back(v);
+    };
+
+    llvm::SmallVector<unsigned> level(fullOrdered.size(), 0);
+    llvm::SmallVector<Value, 16> deps;
+    for (unsigned i = 0; i < fullOrdered.size(); ++i) {
+      deps.clear();
+      depValues(fullOrdered[i], deps);
+      for (Value v : deps) {
+        auto it = producer.find(v);
+        if (it == producer.end() || it->second >= i)
+          continue;
+        level[i] = std::max(level[i], level[it->second] + 1);
+      }
+    }
+
+    // Instance layer: 1 + deepest instance reachable through same-tick comb
+    // logic. The walk stops at instance results, so a pure comb path between
+    // two instances counts as a dependency while shared input cone does not.
+    llvm::DenseMap<Operation *, unsigned> instLayer;
+    llvm::DenseMap<unsigned, unsigned> groupLevel;
+    for (unsigned i = 0; i < fullOrdered.size(); ++i) {
+      Operation *op = fullOrdered[i];
+      if (!isa<pyc::InstanceOp>(*op))
+        continue;
+      llvm::SmallDenseSet<Operation *, 16> visited;
+      llvm::SmallVector<Operation *, 8> instDeps;
+      llvm::SmallVector<Value, 32> work;
+      depValues(op, work);
+      while (!work.empty()) {
+        Value v = work.pop_back_val();
+        auto it = producer.find(v);
+        if (it == producer.end())
+          continue;
+        Operation *p = fullOrdered[it->second];
+        if (p == op)
+          continue;
+        if (isa<pyc::InstanceOp>(*p)) {
+          instDeps.push_back(p);
+          continue;
+        }
+        if (!visited.insert(p).second)
+          continue;
+        depValues(p, work);
+      }
+      unsigned layer = 0;
+      for (Operation *dep : instDeps) {
+        auto it = instLayer.find(dep);
+        layer = std::max(layer, it == instLayer.end() ? 0u : it->second + 1);
+      }
+      instLayer[op] = layer;
+      unsigned &deepest = groupLevel[layer];
+      deepest = std::max(deepest, level[i]);
+    }
+
+    llvm::SmallVector<unsigned> stage(fullOrdered.size(), 0);
+    for (unsigned i = 0; i < fullOrdered.size(); ++i) {
+      Operation *op = fullOrdered[i];
+      unsigned base = level[i];
+      if (auto inst = dyn_cast<pyc::InstanceOp>(*op))
+        base = std::max(base, groupLevel.lookup(instLayer.lookup(op)));
+      deps.clear();
+      depValues(op, deps);
+      for (Value v : deps) {
+        auto it = producer.find(v);
+        if (it == producer.end() || it->second >= i)
+          continue;
+        base = std::max(base, stage[it->second] + 1);
+      }
+      stage[i] = base;
+      opStage[op] = base;
+      parallelStageCount = std::max(parallelStageCount, base + 1);
+    }
+  }
+
   llvm::SmallVector<std::string> instanceEvalHelperNames;
   instanceEvalHelperNames.reserve(instInfos.size());
   for (unsigned idx = 0; idx < instInfos.size(); ++idx) {
@@ -2913,7 +3051,10 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   auto emitInstanceEvalHelperDefinition = [&](const InstInfo &ii, llvm::StringRef helperName) {
     auto inst = ii.op;
     bool usePackedCache = usePackedInstanceEvalCache(ii);
-    os << "  inline bool " << helperName << "() {\n";
+    os << "  inline bool " << helperName << "(";
+    if (parallelInstances)
+      os << "std::uint64_t *_pyc_wake";
+    os << ") {\n";
     os << "    bool _pyc_inst_changed = false;\n";
     os << "    #ifdef PYC_DISABLE_INSTANCE_EVAL_CACHE\n";
     for (unsigned i = 0; i < inst.getNumOperands(); ++i) {
@@ -3048,7 +3189,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       os << "    if (" << resultName << " != " << childOutput << ") {\n";
       os << "      " << resultName << " = " << childOutput << ";\n";
       os << "      _pyc_inst_output_changed = true;\n";
-      emitMetadataCombFanout(result, os, *schedule, combIndex, nt);
+      emitMetadataCombFanout(result, os, *schedule, combIndex, nt, "      ",
+                             parallelInstances);
       os << "    }\n";
     }
     // The fixed-point fallback converges on semantic output changes.
@@ -3066,7 +3208,21 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (it == instIndex.end())
       return;
     llvm::StringRef helperName = instanceEvalHelperNames[it->second];
-    if (!changedAnyVar.empty()) {
+    if (parallelInstances) {
+      // Sequential call site of a wake-deferring helper: buffer the fanout
+      // words, then merge them into the shared dirty set in order.
+      os << indent << "{\n";
+      os << indent << "  std::uint64_t _pyc_wake[" << wakeWords << "] = {};\n";
+      if (!changedAnyVar.empty())
+        os << indent << "  if (" << helperName << "(_pyc_wake)) " << changedAnyVar << " = true;\n";
+      else
+        os << indent << "  " << helperName << "(_pyc_wake);\n";
+      if (!combs.empty()) {
+        os << indent << "  for (unsigned _pyc_w = 0; _pyc_w < " << wakeWords << "u; ++_pyc_w)\n";
+        os << indent << "    if (_pyc_wake[_pyc_w]) _pyc_comb_dirty.markWordUnchecked(_pyc_w, _pyc_wake[_pyc_w]);\n";
+      }
+      os << indent << "}\n";
+    } else if (!changedAnyVar.empty()) {
       os << indent << "if (" << helperName << "()) " << changedAnyVar << " = true;\n";
     } else {
       os << indent << helperName << "();\n";
@@ -3739,7 +3895,46 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   }
 
   std::vector<std::string> topoEvalMethods;
-  if (hasFullTopo && !fullOrdered.empty()) {
+  std::vector<std::vector<std::string>> stageEvalMethods;
+  std::vector<std::vector<unsigned>> stageInstIndices;
+  if (parallelInstances) {
+    stageEvalMethods.resize(parallelStageCount);
+    stageInstIndices.resize(parallelStageCount);
+    std::vector<std::vector<Operation *>> stageOps(parallelStageCount);
+    for (Operation *op : fullOrdered) {
+      unsigned stage = opStage.lookup(op);
+      if (auto inst = dyn_cast<pyc::InstanceOp>(*op)) {
+        auto it = instIndex.find(inst.getOperation());
+        if (it != instIndex.end()) {
+          stageInstIndices[stage].push_back(it->second);
+          continue;
+        }
+      }
+      stageOps[stage].push_back(op);
+    }
+    unsigned stageChunkNodes = std::max(1u, opts.evalTopoChunkNodes);
+    for (unsigned stage = 0; stage < parallelStageCount; ++stage) {
+      auto &ops = stageOps[stage];
+      for (unsigned begin = 0, part = 0; begin < ops.size();
+           begin += stageChunkNodes, ++part) {
+        unsigned end = std::min<unsigned>(static_cast<unsigned>(ops.size()),
+                                         begin + stageChunkNodes);
+        std::string methodName = "eval_stage_" + std::to_string(stage) +
+                                 "_part_" + std::to_string(part);
+        stageEvalMethods[stage].push_back(methodName);
+        os << "  inline void " << methodName << "() {\n";
+        CombGuardGroupState stageGuard;
+        llvm::DenseMap<Operation *, bool> stageRunMember =
+            buildCombRunMember(ops, begin, end);
+        for (unsigned i = begin; i < end; ++i)
+          if (failed(emitEvalNode(ops[i], "    ", llvm::StringRef(), &stageGuard,
+                                  &stageRunMember)))
+            return failure();
+        closeCombGuardGroup(stageGuard, "    ");
+        os << "  }\n\n";
+      }
+    }
+  } else if (hasFullTopo && !fullOrdered.empty()) {
     unsigned evalTopoChunkNodes = std::max(1u, opts.evalTopoChunkNodes);
     if (fullOrdered.size() > evalTopoChunkNodes) {
       topoEvalMethods.reserve((fullOrdered.size() + evalTopoChunkNodes - 1) / evalTopoChunkNodes);
@@ -3760,7 +3955,44 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   }
 
   os << "  void eval() {\n";
-  if (hasFullTopo) {
+  if (parallelInstances) {
+    for (unsigned stage = 0; stage < parallelStageCount; ++stage) {
+      for (const std::string &methodName : stageEvalMethods[stage])
+        os << "    " << methodName << "();\n";
+      const std::vector<unsigned> &insts = stageInstIndices[stage];
+      if (insts.empty())
+        continue;
+      // One fork per stage. Each instance publishes its result wires and its
+      // comb dirty words into its own buffer; the forking thread merges the
+      // buffers in instance order, so the shared dirty set never sees two
+      // concurrent writers.
+      os << "    {\n";
+      os << "      std::uint64_t _pyc_wake[" << insts.size() << "]["
+         << wakeWords << "] = {};\n";
+      if (insts.size() == 1) {
+        os << "      eval_instance_cached_" << insts[0] << "(_pyc_wake[0]);\n";
+      } else {
+        os << "      pyc::cpp::ForkJoinPool<" << parallelThreads
+           << ">::instance().run(" << insts.size()
+           << ", [&](unsigned _pyc_worker) {\n";
+        os << "        switch (_pyc_worker) {\n";
+        for (unsigned slot = 0; slot < insts.size(); ++slot)
+          os << "          case " << slot << "u: eval_instance_cached_"
+             << insts[slot] << "(_pyc_wake[" << slot << "]); return;\n";
+        os << "        }\n";
+        os << "      });\n";
+      }
+      if (!combs.empty()) {
+        os << "      for (unsigned _pyc_i = 0; _pyc_i < " << insts.size()
+           << "u; ++_pyc_i)\n";
+        os << "        for (unsigned _pyc_w = 0; _pyc_w < " << wakeWords
+           << "u; ++_pyc_w)\n";
+        os << "          if (_pyc_wake[_pyc_i][_pyc_w])\n";
+        os << "            _pyc_comb_dirty.markWordUnchecked(_pyc_w, _pyc_wake[_pyc_i][_pyc_w]);\n";
+      }
+      os << "    }\n";
+    }
+  } else if (hasFullTopo) {
     if (!topoEvalMethods.empty()) {
       for (const std::string &methodName : topoEvalMethods)
         os << "    " << methodName << "();\n";
@@ -3853,21 +4085,58 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     os << "  }\n\n";
   };
 
+  // Parallel path: one tiny method per instance, so the fork body stays a flat
+  // switch and tick_compute/tick_commit can fork every submodule in one group
+  // (next-state sampling and commit are independent per instance: each reads
+  // only its own ports and its own inputs, and writes only its own state).
+  auto emitTickInstanceMethods = [&](unsigned idx) {
+    const auto &ii = instInfos[idx];
+    auto inst = ii.op;
+    os << "  inline void tick_compute_inst_" << idx << "() {\n";
+    emitStateTickCompute(
+        ii.member, inst->getOperands(), "    ", [&](llvm::StringRef indent) {
+          for (unsigned j = 0; j < inst.getNumOperands(); ++j)
+            os << indent << ii.member << "->" << ii.inPorts[j] << " = "
+               << nt.get(inst.getOperand(j)) << ";\n";
+          os << indent << ii.member << "->tick_compute();\n";
+        });
+    os << "  }\n\n";
+    os << "  inline void tick_commit_inst_" << idx << "() {\n";
+    os << "    " << ii.member << "->tick_commit();\n";
+    os << "  }\n\n";
+  };
+
   // Emit chunked submodule tick helpers.
   unsigned subParts = 0;
   if (!instInfos.empty()) {
-    for (unsigned b = 0; b < instInfos.size(); b += kTickChunk)
-      emitTickComputePart(b, std::min<unsigned>(static_cast<unsigned>(instInfos.size()), b + kTickChunk), subParts++);
-    unsigned commitParts = 0;
-    for (unsigned b = 0; b < instInfos.size(); b += kTickChunk)
-      emitTickCommitPart(b, std::min<unsigned>(static_cast<unsigned>(instInfos.size()), b + kTickChunk), commitParts++);
+    if (parallelInstances) {
+      for (unsigned i = 0; i < instInfos.size(); ++i)
+        emitTickInstanceMethods(i);
+    } else {
+      for (unsigned b = 0; b < instInfos.size(); b += kTickChunk)
+        emitTickComputePart(b, std::min<unsigned>(static_cast<unsigned>(instInfos.size()), b + kTickChunk), subParts++);
+      unsigned commitParts = 0;
+      for (unsigned b = 0; b < instInfos.size(); b += kTickChunk)
+        emitTickCommitPart(b, std::min<unsigned>(static_cast<unsigned>(instInfos.size()), b + kTickChunk), commitParts++);
+    }
   }
 
   os << "  void tick_compute() {\n";
   if (!instInfos.empty()) {
-    os << "    // Sub-modules.\n";
-    for (unsigned i = 0; i < subParts; ++i)
-      os << "    tick_compute_part_" << i << "();\n";
+    if (parallelInstances) {
+      os << "    // Sub-modules: independent next-state sampling, forked.\n";
+      os << "    pyc::cpp::ForkJoinPool<" << parallelThreads << ">::instance().run("
+         << instInfos.size() << ", [&](unsigned _pyc_worker) {\n";
+      os << "      switch (_pyc_worker) {\n";
+      for (unsigned i = 0; i < instInfos.size(); ++i)
+        os << "        case " << i << "u: tick_compute_inst_" << i << "(); return;\n";
+      os << "      }\n";
+      os << "    });\n";
+    } else {
+      os << "    // Sub-modules.\n";
+      for (unsigned i = 0; i < subParts; ++i)
+        os << "    tick_compute_part_" << i << "();\n";
+    }
   }
   os << "    // Local sequential primitives.\n";
   // Call every edge-driven leaf. arg is the already-classified clock level,
@@ -4078,10 +4347,21 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   if (fastEdge)
     os << "    _pyc_seq_armed = false;\n";
   if (!instInfos.empty()) {
-    os << "    // Sub-modules.\n";
-    unsigned commitParts = (static_cast<unsigned>(instInfos.size()) + kTickChunk - 1) / kTickChunk;
-    for (unsigned i = 0; i < commitParts; ++i)
-      os << "    tick_commit_part_" << i << "();\n";
+    if (parallelInstances) {
+      os << "    // Sub-modules: independent commits, forked.\n";
+      os << "    pyc::cpp::ForkJoinPool<" << parallelThreads << ">::instance().run("
+         << instInfos.size() << ", [&](unsigned _pyc_worker) {\n";
+      os << "      switch (_pyc_worker) {\n";
+      for (unsigned i = 0; i < instInfos.size(); ++i)
+        os << "        case " << i << "u: tick_commit_inst_" << i << "(); return;\n";
+      os << "      }\n";
+      os << "    });\n";
+    } else {
+      os << "    // Sub-modules.\n";
+      unsigned commitParts = (static_cast<unsigned>(instInfos.size()) + kTickChunk - 1) / kTickChunk;
+      for (unsigned i = 0; i < commitParts; ++i)
+        os << "    tick_commit_part_" << i << "();\n";
+    }
   }
   os << "    // Local sequential primitives.\n";
   auto emitCommitWake = [&](llvm::StringRef condition, Value output,
@@ -4294,6 +4574,13 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 
 } // namespace
 
+unsigned resolveCppParallelInstances(unsigned flag) {
+  if (flag != 0)
+    return flag;
+  return std::min(std::max(1u, std::thread::hardware_concurrency()),
+                  kMaxParallelInstances);
+}
+
 // ---------------------------------------------------------------------------
 // placement attribute readers (used by emit + profile consumers)
 // ---------------------------------------------------------------------------
@@ -4415,7 +4702,10 @@ LogicalResult emitCpp(ModuleOp module, llvm::raw_ostream &os, const CppEmitterOp
   os << "#include <utility>\n";
   os << "#include <cpp/pyc_sim.hpp>\n";
   os << "#include <cpp/pyc_state_loop.hpp>\n";
-  os << "#include <cpp/pyc_change_scheduler.hpp>\n\n";
+  os << "#include <cpp/pyc_change_scheduler.hpp>\n";
+  if (resolveCppParallelInstances(opts.parallelInstances) >= 2)
+    os << "#include <cpp/pyc_parallel.hpp>\n";
+  os << "\n";
   os << "namespace pyc::gen {\n\n";
 
   // Emit structs in dependency order so submodule types are defined before use.

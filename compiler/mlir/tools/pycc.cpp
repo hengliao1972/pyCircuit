@@ -147,6 +147,14 @@ static llvm::cl::opt<unsigned> cppShardMaxAstNodes(
     llvm::cl::desc("Chunk large eval topologies into helper methods (node budget per chunk; 0=default policy)"),
     llvm::cl::init(0));
 
+static llvm::cl::opt<unsigned> cppParallelInstances(
+    "cpp-parallel-instances",
+    llvm::cl::desc("Fork independent sibling instances of one schedule stage onto a persistent N-way pool "
+                   "(1 = serial and byte-identical to the serial emitter (default); 0 = one worker per "
+                   "hardware core; N>=2 = fixed N-way pool; a stage fork costs a bounded wait, so only "
+                   "enable it when the run has spare CPUs)"),
+    llvm::cl::init(1));
+
 static llvm::cl::opt<std::string> cppManifestPath(
     "cpp-manifest",
     llvm::cl::desc("C++ compile manifest path (default: <out-dir>/cpp_compile_manifest.json)"),
@@ -2722,6 +2730,7 @@ int main(int argc, char **argv) {
       std::vector<CppManifestSource> cppManifestSources;
       pyc::CppEmitterOptions cppEmitOpts;
       cppEmitOpts.probePlanPath = probePlanPath;
+      cppEmitOpts.parallelInstances = cppParallelInstances;
 
       // Collect direct dependencies per module for header includes.
       llvm::StringMap<llvm::SmallVector<std::string>> deps;
@@ -2763,6 +2772,8 @@ int main(int argc, char **argv) {
         os << "#include <cpp/pyc_sim.hpp>\n";
         os << "#include <cpp/pyc_state_loop.hpp>\n";
         os << "#include <cpp/pyc_change_scheduler.hpp>\n";
+        if (pyc::resolveCppParallelInstances(cppParallelInstances) >= 2)
+          os << "#include <cpp/pyc_parallel.hpp>\n";
       };
 
       auto writeSourcePreamble = [&](llvm::raw_ostream &os, llvm::StringRef headerName) {
@@ -3082,6 +3093,7 @@ int main(int argc, char **argv) {
   if (emitKind == "cpp") {
     pyc::CppEmitterOptions cppEmitOpts;
     cppEmitOpts.probePlanPath = probePlanPath;
+    cppEmitOpts.parallelInstances = cppParallelInstances;
     if (failed(pyc::emitCpp(*module, os, cppEmitOpts)))
       return 1;
     if (failed(writeSingleOutputStats()))
