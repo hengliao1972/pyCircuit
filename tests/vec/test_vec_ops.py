@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -147,10 +148,14 @@ def test_constant_vector_elementwise_and_reductions_emit(repo_root: Path) -> Non
     m.output("and_dim1", matrix.reduce_and(dim=1))
 
     mlir = m.emit_mlir()
-    assert mlir.count("pyc.v_create") >= 3
-    assert "pyc.v_add_reduce" in mlir
-    assert "pyc.v_or_reduce" in mlir
-    assert "pyc.v_and_reduce" in mlir
+    # Constant Vec forms fold per lane; only scalar ops and packed concats remain.
+    assert "vector<" not in mlir
+    assert "pyc.v_" not in mlir
+    assert "pyc.add" in mlir
+    assert "pyc.or" in mlir
+    assert "pyc.and" in mlir
+    assert "pyc.concat" in mlir
+    assert mlir.count("-> i16") == 2
 
 
 @pytest.mark.vec
@@ -172,7 +177,8 @@ def test_circuit_priority_mux_lowers_chain_and_tree_forms(repo_root: Path) -> No
 
     assert mlir.count("pyc.mux") == 6
     assert mlir.count("pyc.or") == 2
-    assert mlir.count("pyc.v_get") == 13
+    assert "vector<" not in mlir
+    assert "pyc.v_" not in mlir
 
 
 @pytest.mark.vec
@@ -208,8 +214,10 @@ def test_vector_api_functional_gaps_run_cpp(
                 '    rank2 = m.input("rank2", width=4, shape=[2, 2])',
                 '    m.output("slice_rank2", rank2.slice(lsb=1, width=2))',
                 '    shift = m.input("shift", width=2)',
-                '    m.output("shifted", a << shift)',
-                '    m.output("shifted_right", a >> shift)',
+                # << / >> with a Wire amount is rejected by the JIT (constant
+                # only); the method form is the dynamic-shift API.
+                '    m.output("shifted", a.shl(amount=shift))',
+                '    m.output("shifted_right", a.lshr(amount=shift))',
                 '    sels = m.input("sels", width=1, shape=[3])',
                 '    no_sels = m.input("no_sels", width=1, shape=[3])',
                 '    vals = m.input("vals", width=4, shape=[3])',
@@ -227,7 +235,7 @@ def test_vector_api_functional_gaps_run_cpp(
                 '    sa = m.input("sa", width=4, signed=True, shape=[2])',
                 '    sb = m.input("sb", width=4, signed=True, shape=[2])',
                 '    m.output("signed_add", sa + sb)',
-                '    m.output("signed_shifted_right", sa >> shift)',
+                '    m.output("signed_shifted_right", sa.ashr(amount=shift))',
                 "",
                 "",
                 "@testbench",
@@ -268,7 +276,7 @@ def test_vector_api_functional_gaps_run_cpp(
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     run_cmd(
         [
-            "python3",
+            sys.executable,
             "-m",
             "pycircuit.cli",
             "build",
@@ -330,34 +338,41 @@ def test_vector_api_rejects_invalid_shapes_and_priority_inputs(repo_root: Path) 
     m.output("and_rank2_all", rank2.reduce_and())
     m.output("sum_rank2_all", rank2.reduce_sum())
     mlir = m.emit_mlir()
-    assert mlir.count("pyc.v_or_reduce") == 1
-    assert mlir.count("pyc.v_and_reduce") == 1
-    assert mlir.count("pyc.v_add_reduce") == 1
-    assert mlir.count("-> i1") >= 3
+    assert "vector<" not in mlir
+    assert "pyc.v_" not in mlir
+    assert mlir.count("pyc.or ") == 3
+    assert mlir.count("pyc.and ") == 3
+    assert mlir.count("pyc.add ") == 3
+    assert "-> (i1, i1, i1)" in mlir
 
 
 @pytest.mark.vec
-def test_unroll_vector_precedes_wire_and_state_cleanup(repo_root: Path) -> None:
-    """Keep scalar cleanup after the optional Vector-to-lane expansion."""
+def test_scalar_lane_pipeline_precedes_wire_and_state_cleanup(repo_root: Path) -> None:
+    """Vector lanes are already scalar in the frontend-emitted IR.
+
+    pycc therefore has no Vector-unroll / SLP-pack stage; the scalar cleanup
+    passes simply run after static SCF lowering.
+    """
     pipeline = (repo_root / "compiler" / "mlir" / "tools" / "pycc.cpp").read_text(encoding="utf-8")
+    assert "createVectorUnrollPass" not in pipeline
+    assert "createSLPPackWiresPass" not in pipeline
+    assert "unroll-vector" not in pipeline
     lower_scf = pipeline.index("pm.addNestedPass<func::FuncOp>(pyc::createLowerSCFToPYCStaticPass());")
-    unroll = pipeline.index("pm.addNestedPass<func::FuncOp>(pyc::createVectorUnrollPass());")
     eliminate_wires = pipeline.index("pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());")
     eliminate_state = pipeline.index("pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadStatePass());")
-    slp_pack = pipeline.index("pm.addNestedPass<func::FuncOp>(pyc::createSLPPackWiresPass());")
 
-    assert lower_scf < unroll < eliminate_wires < eliminate_state < slp_pack
+    assert lower_scf < eliminate_wires < eliminate_state
 
 
 @pytest.mark.vec
-def test_vector_state_assign_unroll_runs_cpp(
+def test_vector_state_assign_runs_cpp(
     *,
     repo_root: Path,
     vec_test_root: Path,
     pyc_pythonpath: str,
     pycc: Path,
 ) -> None:
-    """Vector wire→assign→reg must remain legal after --unroll-vector."""
+    """Vector wire→assign→reg lowers to per-lane scalar state in the .pyc."""
     case_root = vec_test_root / "vector_state_assign"
     src_dir = case_root / "src"
     out_dir = case_root / "build"
@@ -394,12 +409,13 @@ def test_vector_state_assign_unroll_runs_cpp(
     )
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     pyc = out_dir / "vector_state_assign.pyc"
-    run_cmd(["python3", "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
+    run_cmd([sys.executable, "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
     mlir = pyc.read_text(encoding="utf-8")
-    assert "vector<" in mlir
+    assert "vector<" not in mlir
+    assert "pyc.v_" not in mlir
+    assert mlir.count("pyc.reg") == 2
     assert "pyc.assign" in mlir
-    assert "pyc.reg" in mlir
-    cpp_dir = out_dir / "cpp_unroll"
+    cpp_dir = out_dir / "cpp"
     run_cmd(
         [
             str(pycc),
@@ -409,15 +425,18 @@ def test_vector_state_assign_unroll_runs_cpp(
             "--out-dir",
             str(cpp_dir),
             "--build-profile=dev-fast",
-            "--unroll-vector",
         ],
         cwd=repo_root,
         env=env,
     )
-    # Unrolled vector state must become scalar regs/wires, not keep vector ops.
+    # Vector state must become scalar regs/wires, not keep the vector runtime.
     cpp_text = "\n".join(p.read_text(encoding="utf-8") for p in cpp_dir.rglob("*.cpp"))
-    assert "pycVecReg" not in cpp_text
-    assert "pycReg" in cpp_text
+    cpp_headers = "\n".join(p.read_text(encoding="utf-8") for p in cpp_dir.rglob("*.hpp"))
+    assert "pycVecReg" not in cpp_text + cpp_headers
+    assert "pycVecDelayLine" not in cpp_text + cpp_headers
+    assert "pyc::cpp::Vec<" not in cpp_text + cpp_headers
+    # Scalarized state may lower to individual regs or to a RegLoop bank.
+    assert any(tok in cpp_text + cpp_headers for tok in ("pycReg", "RegLoop", "pycDelayLine"))
     verilog = out_dir / "vector_state_assign.v"
     run_cmd(
         [
@@ -427,17 +446,16 @@ def test_vector_state_assign_unroll_runs_cpp(
             "-o",
             str(verilog),
             "--build-profile=dev-fast",
-            "--unroll-vector",
         ],
         cwd=repo_root,
         env=env,
     )
     verilog_text = verilog.read_text(encoding="utf-8")
     assert "pycReg" in verilog_text or "reg " in verilog_text
-    # Keep-vector path should still compile and link a TB (smoke).
+    # The full CLI build must still compile and link a TB (smoke).
     run_cmd(
         [
-            "python3",
+            sys.executable,
             "-m",
             "pycircuit.cli",
             "build",
@@ -474,10 +492,10 @@ def test_assign_dst_must_be_wire_verifier(
     pyc.write_text(
         "\n".join(
             [
-                "module {",
-                'func.func @bad_assign_dst(%a: vector<2xi4>) -> (i4) attributes {arg_names = ["a"], result_names = ["o"]} {',
-                "  %v0 = pyc.v_get %a[0] : vector<2xi4> -> i4",
-                "  %v1 = pyc.constant 1 : i4",
+                'module attributes {pyc.frontend.contract = "pycircuit"} {',
+                'func.func @bad_assign_dst(%a: i4) -> (i4) attributes {arg_names = ["a"], result_names = ["o"]} {',
+                "  %v0 = pyc.constant 1 : i4",
+                "  %v1 = pyc.constant 2 : i4",
                 "  pyc.assign %v0, %v1 : i4",
                 "  func.return %v0 : i4",
                 "}",
@@ -538,9 +556,10 @@ def test_vector_io_emit_and_pycc(
     )
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     pyc = out_dir / "vector_io.pyc"
-    run_cmd(["python3", "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
+    run_cmd([sys.executable, "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
     mlir = pyc.read_text(encoding="utf-8")
-    check_ir(VecCase("vector_io", "vector_io", ir_tokens=("vector<", "pyc.add")), mlir)
+    check_ir(VecCase("vector_io", "vector_io", ir_tokens=("pyc.extract", "pyc.add", "pyc.concat")), mlir)
+    assert "%a: i16" in mlir
     cpp_dir = out_dir / "cpp"
     run_cmd(
         [str(pycc), str(pyc), "--emit=cpp", "--cpp-split=module", "--out-dir", str(cpp_dir), "--build-profile=dev-fast"],
@@ -591,7 +610,7 @@ def test_rank2_vector_io_verilog_uses_packed_ports_and_yosys(
     )
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     pyc = out_dir / "rank2_vector_io.pyc"
-    run_cmd(["python3", "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
+    run_cmd([sys.executable, "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
     verilog = out_dir / "rank2_vector_io.v"
     run_cmd([str(pycc), str(pyc), "--emit=verilog", "-o", str(verilog), "--build-profile=dev-fast"], cwd=repo_root, env=env)
     verilog_text = verilog.read_text(encoding="utf-8")
@@ -646,7 +665,7 @@ def test_vector_port_cli_build_runs_tb(
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     run_cmd(
         [
-            "python3",
+            sys.executable,
             "-m",
             "pycircuit.cli",
             "build",
@@ -670,7 +689,7 @@ def test_vector_port_cli_build_runs_tb(
         verilator_out = case_root / "build_verilator"
         run_cmd(
             [
-                "python3",
+                sys.executable,
                 "-m",
                 "pycircuit.cli",
                 "build",
@@ -727,9 +746,10 @@ def test_eager_vec_broadcast_emit_and_pycc(
     )
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     pyc = out_dir / "eager_broadcast.pyc"
-    run_cmd(["python3", "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
+    run_cmd([sys.executable, "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
     mlir = pyc.read_text(encoding="utf-8")
-    check_ir(VecCase("eager_broadcast", "eager_broadcast", ir_tokens=("vector<", "pyc.v_create", "pyc.v_broadcast_dim")), mlir)
+    check_ir(VecCase("eager_broadcast", "eager_broadcast", ir_tokens=("pyc.concat",)), mlir)
+    assert "-> i32" in mlir
     cpp_dir = out_dir / "cpp"
     run_cmd(
         [str(pycc), str(pyc), "--emit=cpp", "--cpp-split=module", "--out-dir", str(cpp_dir), "--build-profile=dev-fast"],
@@ -779,12 +799,14 @@ def test_jit_instance_vec_port_emit_and_pycc(
     )
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     pyc = out_dir / "jit_instance_vec_port.pyc"
-    run_cmd(["python3", "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
+    run_cmd([sys.executable, "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
     mlir = pyc.read_text(encoding="utf-8")
     check_ir(
-        VecCase("jit_instance_vec_port", "jit_instance_vec_port", ir_tokens=("pyc.instance", "vector<4xi4>", "pyc.v_create")),
+        VecCase("jit_instance_vec_port", "jit_instance_vec_port", ir_tokens=("pyc.instance", "pyc.concat", "pyc.extract")),
         mlir,
     )
+    # The instance boundary carries one packed i16 bus per vector port.
+    assert "%a: i16" in mlir
     cpp_dir = out_dir / "cpp"
     run_cmd(
         [str(pycc), str(pyc), "--emit=cpp", "--cpp-split=module", "--out-dir", str(cpp_dir), "--build-profile=dev-fast"],
@@ -795,7 +817,9 @@ def test_jit_instance_vec_port_emit_and_pycc(
     run_cmd([str(pycc), str(pyc), "--emit=verilog", "-o", str(verilog), "--build-profile=dev-fast"], cwd=repo_root, env=env)
     verilog_text = verilog.read_text(encoding="utf-8")
     assert "input [15:0] a" in verilog_text
-    assert "__flat" in verilog_text
+    # The instance boundary hands over one packed bus (no per-lane bridge).
+    assert "__flat" not in verilog_text
+    assert ".a(pyc_comb_2)," in verilog_text
     assert "input [3:0] a [0:3]" not in verilog_text
     _run_yosys_smoke(verilog, top="JitInstanceVecPort", repo_root=repo_root)
     check_cpp_manifest_syntax(out_dir, repo_root=repo_root)
@@ -840,14 +864,14 @@ def test_dim_reduce_emit_and_pycc(
     )
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     pyc = out_dir / "dim_reduce.pyc"
-    run_cmd(["python3", "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
+    run_cmd([sys.executable, "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
     mlir = pyc.read_text(encoding="utf-8")
     check_ir(
-        VecCase("dim_reduce", "dim_reduce", ir_tokens=("vector<", "pyc.v_or_reduce", "pyc.v_and_reduce", "pyc.v_add_reduce")),
+        VecCase("dim_reduce", "dim_reduce", ir_tokens=("pyc.or", "pyc.and", "pyc.add")),
         mlir,
     )
-    assert "pyc.v_add_reduce" in mlir
-    assert "-> i1" in mlir
+    assert "pyc.concat" in mlir
+    assert "-> (i3, i2, i3, i2, i3, i2, i1)" in mlir
     cpp_dir = out_dir / "cpp"
     run_cmd(
         [str(pycc), str(pyc), "--emit=cpp", "--cpp-split=module", "--out-dir", str(cpp_dir), "--build-profile=dev-fast"],
@@ -911,30 +935,28 @@ def test_reduce_mode_attr_and_pycc(
     )
     env = merged_env(pythonpath=pyc_pythonpath, pycc=pycc)
     pyc = out_dir / "reduce_modes.pyc"
-    run_cmd(["python3", "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
+    run_cmd([sys.executable, "-m", "pycircuit.cli", "emit", str(src), "-o", str(pyc)], cwd=repo_root, env=env)
     mlir = pyc.read_text(encoding="utf-8")
-    assert "pyc.v_or_reduce" in mlir
-    assert "pyc.v_add_reduce" in mlir
-    assert mlir.count('mode = "tree"') == 2
-    assert mlir.count('mode = "chain"') == 1
+    assert "vector<" not in mlir
+    assert "pyc.v_" not in mlir
+    # chain_or + tree_or (3 lane ORs each) and tree_sum (3 lane ADDs): the
+    # reduce mode is a frontend choice realized in the scalar lane topology,
+    # not an MLIR attribute.
+    assert mlir.count("pyc.or ") == 6
+    assert mlir.count("pyc.add ") == 3
+    assert "mode = " not in mlir
 
     direct_verilog = out_dir / "reduce_modes.v"
     run_cmd([str(pycc), str(pyc), "--emit=verilog", "-o", str(direct_verilog), "--build-profile=dev-fast"], cwd=repo_root, env=env)
     direct_text = direct_verilog.read_text(encoding="utf-8")
     assert "chain_or" in direct_text
     assert "tree_or" in direct_text
-    # The reduction consumes the JIT alias, not the raw packed-port unpack view.
-    assert "(((a__reduce_modes__L8[0] | a__reduce_modes__L8[1]) | a__reduce_modes__L8[2]) | a__reduce_modes__L8[3])" in direct_text
-    assert "((a__reduce_modes__L8[0] | a__reduce_modes__L8[1]) | (a__reduce_modes__L8[2] | a__reduce_modes__L8[3]))" in direct_text
-
-    unrolled_verilog = out_dir / "reduce_modes_unroll.v"
-    run_cmd(
-        [str(pycc), str(pyc), "--emit=verilog", "-o", str(unrolled_verilog), "--build-profile=dev-fast", "--unroll-vector"],
-        cwd=repo_root,
-        env=env,
-    )
-    unrolled_text = unrolled_verilog.read_text(encoding="utf-8")
-    assert "v_or_reduce" not in unrolled_text
-    assert "v_add_reduce" not in unrolled_text
-    assert "assign pyc_or_7 = (pyc_or_6 | pyc_v_get_4);" in unrolled_text
-    assert "assign pyc_or_9 = (pyc_or_5 | pyc_or_8);" in unrolled_text
+    # Lane ops consume the packed-port extract view; chain reduces left to
+    # right, tree reduces balanced pairs.
+    assert "assign pyc_or_7 = (pyc_extract_3 | pyc_extract_4);" in direct_text
+    assert "assign pyc_or_8 = (pyc_or_7 | pyc_extract_5);" in direct_text
+    assert "assign pyc_or_9 = (pyc_or_8 | pyc_extract_6);" in direct_text
+    assert "assign pyc_or_10 = (pyc_extract_5 | pyc_extract_6);" in direct_text
+    assert "assign pyc_or_11 = (pyc_or_7 | pyc_or_10);" in direct_text
+    assert "v_or_reduce" not in direct_text
+    assert "v_add_reduce" not in direct_text

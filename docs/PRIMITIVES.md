@@ -39,12 +39,11 @@ Semantics (posedge `clk`):
 - if `rst`: `q <= init`
 - else if `en`: `q <= d`
 
-### 1.3 `Vec<T, N>`
+### 1.3 `Vec<T, N>`（已删除）
 
-Fixed-size container (useful for regfiles, bundles of lanes, etc.).
-
-- C++: `pyc::cpp::Vec<T, N>` (`runtime/cpp/pyc_vec.hpp`)
-- Verilog: use unpacked arrays (`T v [0:N-1]`) or packed arrays, depending on style.
+该运行时容器随 IR 层 `vector<>` 的移除一起删除（`runtime/cpp/pyc_vec.hpp` 不再存在）。
+向量在前端发射期即展开为逐 lane 标量 op，生成的 C++ 只用 `pyc::cpp::Wire<W>`；
+Verilog 端口是单根 packed 总线。
 
 ## 2) Primitive operations (combinational)
 

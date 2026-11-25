@@ -75,7 +75,7 @@ fi
 
 # Delay lines are C++-only: the Verilog backend must reject them with a clear
 # diagnostic instead of emitting primitives.
-"${PYCC}" "${TEST}/delay_line_vector_tap.mlir" \
+"${PYCC}" "${TEST}/delay_line_tap_verilog_reject.mlir" \
   --emit=verilog --include-primitives=false \
   -o "${TMP_DIR}/vector_tap.v" 2>"${TMP_DIR}/vector_tap.stderr" \
   && { echo "fail: verilog emit unexpectedly succeeded" >&2; exit 1; }

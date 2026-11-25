@@ -341,24 +341,6 @@ public:
     return id;
   }
 
-  // Register a scalar wire leaf (terminal case of the vector overload below).
-  template <unsigned W>
-  std::uint64_t addVec(std::string path, Wire<W> *wire, ProbeKind kind = ProbeKind::Wire) {
-    return addWire<W>(std::move(path), wire, kind);
-  }
-
-  // Register every leaf lane of a (possibly nested) vector under indexed paths
-  // (e.g. "a[0][1]"). The second template parameter constrains this to Vec-like
-  // types (those exposing a static size()) so scalar Wire<W>* dispatches to the
-  // leaf overload above. This stays a duck-typed member so the registry header
-  // need not depend on (and include) the Vec header. Leaf paths/IDs match
-  // per-element addWire() registration.
-  template <typename VecT, typename = decltype(VecT::size())>
-  void addVec(std::string path, VecT *vec, ProbeKind kind = ProbeKind::Wire) {
-    for (std::size_t i = 0; i < VecT::size(); ++i)
-      addVec(path + "[" + std::to_string(i) + "]", &(*vec)[i], kind);
-  }
-
   // write_post_transfer: write_data aliases the storage (q), so its value is
   // only final after commit; see Entry::write_post_transfer.
   template <unsigned W>

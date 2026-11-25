@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gate for fuse-comb barriers: a broadcast, an observed name or a state op must not split
+# Gate for fuse-comb barriers: a second op, an observed name or a state op must not split
 # a run; the name moves to a leaf alias of the fused result.  Ports enter
 # through a leading comb that only forwards them.
 set -euo pipefail
@@ -18,7 +18,7 @@ import re, sys
 ir = sys.stdin.read()
 combs = ir.count("pyc.comb(")
 body = re.findall(r"pyc\.comb\(.*?\n    \}", ir, re.S)[-1]
-if (combs != 2 or body.count("pyc.not") != 3 or "v_broadcast_dim" not in body
+if (combs != 2 or body.count("pyc.not") != 3 or body.count("pyc.and") != 1
         or "pyc.alias" in body):
     raise SystemExit(f"fail: run did not fuse into one comb\n{ir}")
 leaves = re.findall(r"pyc\.alias %\d+#\d+ \{pyc\.name = \"(\w+)\"\}", ir)

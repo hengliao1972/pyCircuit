@@ -32,4 +32,4 @@ PY
   -c "${OUT}/instance_vector_cache.cpp" \
   -o "${OUT}/instance_vector_cache.o"
 
-echo "ok: nested vector instance cache uses 48 packed words"
+echo "ok: wide scalar instance cache uses 48 packed words"

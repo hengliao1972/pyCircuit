@@ -7,7 +7,6 @@
 
 #include "pyc_bits.hpp"
 #include "pyc_primitives.hpp"
-#include "pyc_vec.hpp"
 
 namespace pyc::cpp {
 namespace detail {
@@ -48,18 +47,6 @@ inline void printBits(std::ostream &os, Bits<Width> v) {
 template <unsigned Width>
 inline std::ostream &operator<<(std::ostream &os, const Bits<Width> &v) {
   detail::printBits<Width>(os, v);
-  return os;
-}
-
-template <typename T, std::size_t N>
-inline std::ostream &operator<<(std::ostream &os, const Vec<T, N> &v) {
-  os << "{";
-  for (std::size_t i = 0; i < N; i++) {
-    if (i)
-      os << ", ";
-    os << v[i];
-  }
-  os << "}";
   return os;
 }
 

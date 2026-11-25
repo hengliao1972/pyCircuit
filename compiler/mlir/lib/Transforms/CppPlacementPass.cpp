@@ -49,21 +49,10 @@ static std::string methodForCombPart(unsigned combIdx, unsigned partIdx, bool ha
 
 // Approximate register / transfer cost used when scoring live wires and cuts.
 // Wider integers cost more (ceil(width/64) limbs) so cuts prefer thinner values.
-// Vectors cost proportionally to element count × element width, since a
-// crossing vector value copies the whole nested Vec across the cut.
 static uint64_t placementWeight(Value v) {
   Type ty = v.getType();
   if (auto intTy = dyn_cast<IntegerType>(ty))
     return 1 + (intTy.getWidth() + 63) / 64;
-  if (auto vecTy = dyn_cast<VectorType>(ty)) {
-    uint64_t elems = 1;
-    for (unsigned dim : vecTy.getShape())
-      elems *= dim;
-    uint64_t elemWeight = 1;
-    if (auto elemIntTy = dyn_cast<IntegerType>(vecTy.getElementType()))
-      elemWeight = 1 + (elemIntTy.getWidth() + 63) / 64;
-    return elems * elemWeight;
-  }
   return 1;
 }
 

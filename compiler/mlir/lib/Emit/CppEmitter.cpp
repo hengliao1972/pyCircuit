@@ -197,15 +197,6 @@ static std::string cppType(Type ty) {
     return "pyc::cpp::Wire<1>";
   if (auto intTy = dyn_cast<IntegerType>(ty))
     return "pyc::cpp::Wire<" + std::to_string(intTy.getWidth()) + ">";
-  if (auto vt = dyn_cast<VectorType>(ty)) {
-    // Build nested pyc::cpp::Vec from the shape (outermost to innermost).
-    // vector<4x8xi32> → pyc::cpp::Vec<pyc::cpp::Vec<Wire<32>, 8>, 4>
-    auto shape = vt.getShape();
-    std::string inner = cppType(vt.getElementType());
-    for (int i = shape.size() - 1; i >= 0; --i)
-      inner = "pyc::cpp::Vec<" + inner + ", " + std::to_string(shape[i]) + ">";
-    return inner;
-  }
   std::string msg;
   llvm::raw_string_ostream os(msg);
   os << "CppEmitter: unsupported type in cppType(): " << ty;
@@ -218,62 +209,31 @@ static unsigned bitWidth(Type ty) {
     return 1;
   if (auto intTy = dyn_cast<IntegerType>(ty))
     return intTy.getWidth();
-  if (auto vt = dyn_cast<VectorType>(ty))
-    return bitWidth(vt.getElementType());  // scalar element bit width
   return 0;
 }
 
-// Vec lanes keep the whole vector as one RegLoop lane: the storage is a
-// nested std::array (flat and standard-layout), so the lane covers the
-// leaf wires' words back to back.
 static unsigned planeWords(Type ty) {
-  if (auto vt = dyn_cast<VectorType>(ty)) {
-    std::uint64_t leaves = 1;
-    for (int64_t dim : vt.getShape())
-      leaves *= static_cast<std::uint64_t>(dim);
-    const unsigned leafW =
-        bitWidth(vt.getElementType());  // element type is scalar
-    return static_cast<unsigned>(leaves * ((leafW + 63u) / 64u));
-  }
   return (bitWidth(ty) + 63u) / 64u;
 }
 
-// Expression for the first leaf's raw words of a (possibly vector) value,
-// e.g. `v[0][0].data()` for a 2-D vector.
+// Raw-word expression for a value's storage.
 static std::string firstLeafData(Type ty, const std::string &name) {
-  std::string expr = name;
-  if (auto vt = dyn_cast<VectorType>(ty))
-    for (std::size_t d = 0, n = vt.getShape().size(); d < n; ++d)
-      expr += "[0]";
-  return expr + ".data()";
+  (void)ty;
+  return name + ".data()";
 }
 
-// Number of uint64_t words written by appendPackedWireWords for this type.
-// Unlike bitWidth(), this must include every lane of nested vector values.
 static std::size_t packedWireWordCount(Type ty) {
   if (isa<pyc::ClockType, pyc::ResetType>(ty))
     return 1;
   if (auto intTy = dyn_cast<IntegerType>(ty))
     return std::max<std::size_t>(1, (intTy.getWidth() + 63u) / 64u);
-  if (auto vectorTy = dyn_cast<VectorType>(ty)) {
-    std::size_t lanes = 1;
-    for (int64_t extent : vectorTy.getShape())
-      lanes *= static_cast<std::size_t>(extent);
-    return lanes * packedWireWordCount(vectorTy.getElementType());
-  }
   return 0;
 }
 
-// Emit ProbeRegistry registration for a (possibly vector) wire-kind value.
-// Scalars register directly via addWire; vectors lower to nested pyc::cpp::Vec
-// and use ProbeRegistry::addVec, which recurses to per-lane Wire<W>* leaves
-// under indexed paths (e.g. "a[0][1]").
+// Emit ProbeRegistry registration for a wire-kind value.
 static void emitWireProbes(llvm::raw_ostream &os, Type ty, unsigned w,
                            const std::string &fieldPath, const std::string &cppExpr) {
-  if (isa<VectorType>(ty)) {
-    os << "    reg.addVec(reg_path(" << cppStringLiteral(fieldPath) << "), &" << cppExpr << ");\n";
-    return;
-  }
+  (void)ty;
   os << "    reg.addWire<" << w << ">(reg_path(" << cppStringLiteral(fieldPath) << "), &" << cppExpr << ");\n";
 }
 
@@ -451,37 +411,6 @@ static FailureOr<EmissionSchedule> readEmissionSchedule(func::FuncOp func) {
   return schedule;
 }
 
-static std::string treeReduceExpr(llvm::SmallVectorImpl<std::string> &terms,
-                                  llvm::StringRef op) {
-  while (terms.size() > 1) {
-    llvm::SmallVector<std::string> next;
-    for (size_t i = 0; i < terms.size(); i += 2) {
-      if (i + 1 < terms.size())
-        next.push_back("(" + terms[i] + " " + op.str() + " " + terms[i + 1] + ")");
-      else
-        next.push_back(terms[i]);
-    }
-    terms = std::move(next);
-  }
-  return terms.empty() ? "" : terms[0];
-}
-
-static std::string chainReduceExpr(llvm::SmallVectorImpl<std::string> &terms,
-                                   llvm::StringRef op) {
-  if (terms.empty())
-    return "";
-  std::string out = terms[0];
-  for (size_t i = 1; i < terms.size(); ++i)
-    out = "(" + out + " " + op.str() + " " + terms[i] + ")";
-  return out;
-}
-
-static bool isTreeReduceMode(Operation *op) {
-  if (auto mode = op->getAttrOfType<StringAttr>("mode"))
-    return mode.getValue() == "tree";
-  return false;
-}
-
 static std::string getPortName(func::FuncOp f, unsigned idx, bool isResult) {
   if (!isResult) {
     if (auto names = f->getAttrOfType<ArrayAttr>("arg_names")) {
@@ -624,24 +553,21 @@ static std::string delayTapReadExpr(
     const llvm::DenseMap<int64_t, llvm::SmallVector<pyc::DelayLineOp>> &delayLoopLines) {
   const std::string inst = nt.get(delay.getQ()) + "_inst";
   if (auto idAttr = delay->getAttrOfType<IntegerAttr>("pyc.loop_id")) {
-    if (!isa<VectorType>(delay.getQ().getType())) {
-      const int64_t raw = idAttr.getValue().getSExtValue();
-      const unsigned dw = bitWidth(delay.getQ().getType());
-      if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
-        const int64_t key = raw * 256 +
-                            da.getValue().getZExtValue();
-        auto it = delayLoopLines.find(key);
-        if (it != delayLoopLines.end()) {
-          long lane = 0;
-          for (pyc::DelayLineOp c : it->second) {
-            if (c == delay)
-              break;
-            ++lane;
-          }
-          return "delay_loop_" + std::to_string(key) + ".lane_tap<" +
-                 std::to_string(dw) + ">(" +
-                 std::to_string(lane) + "u, " + std::to_string(depth) + "u)";
+    const int64_t raw = idAttr.getValue().getSExtValue();
+    const unsigned dw = bitWidth(delay.getQ().getType());
+    if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
+      const int64_t key = raw * 256 + da.getValue().getZExtValue();
+      auto it = delayLoopLines.find(key);
+      if (it != delayLoopLines.end()) {
+        long lane = 0;
+        for (pyc::DelayLineOp c : it->second) {
+          if (c == delay)
+            break;
+          ++lane;
         }
+        return "delay_loop_" + std::to_string(key) + ".lane_tap<" +
+               std::to_string(dw) + ">(" +
+               std::to_string(lane) + "u, " + std::to_string(depth) + "u)";
       }
     }
   }
@@ -783,15 +709,10 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     unsigned w = bitWidth(m.getResult().getType());
     if (w == 0)
       return m.emitError("invalid mux width");
-    bool selIsVec = isa<VectorType>(m.getSel().getType());
     assignExpr(m.getResult(), m.getType(), os, nt,
                [&](llvm::raw_ostream &e) {
-                 if (selIsVec)
-                   e << "pyc::cpp::mux_vec<" << w << ">(" << nt.get(m.getSel()) << ", " << nt.get(m.getA()) << ", "
-                     << nt.get(m.getB()) << ")";
-                 else
-                   e << "pyc::cpp::mux<" << w << ">(" << nt.get(m.getSel()) << ", " << nt.get(m.getA()) << ", "
-                     << nt.get(m.getB()) << ")";
+                 e << "pyc::cpp::mux<" << w << ">(" << nt.get(m.getSel()) << ", " << nt.get(m.getA()) << ", "
+                   << nt.get(m.getB()) << ")";
                },
                ps);
     return success();
@@ -862,16 +783,10 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
     unsigned w = bitWidth(s.getLhs().getType());
     if (w == 0)
       return s.emitError("invalid slt width");
-    const bool vectorResult = isa<VectorType>(s.getResult().getType());
     assignExpr(s.getResult(), s.getType(), os, nt,
                [&](llvm::raw_ostream &e) {
-                 if (vectorResult) {
-                   e << "pyc::cpp::slt<" << w << ">(" << nt.get(s.getLhs()) << ", "
-                     << nt.get(s.getRhs()) << ")";
-                 } else {
-                   e << "pyc::cpp::Wire<1>((pyc::cpp::slt<" << w << ">(" << nt.get(s.getLhs()) << ", "
-                     << nt.get(s.getRhs()) << ")) ? 1u : 0u)";
-                 }
+                 e << "pyc::cpp::Wire<1>((pyc::cpp::slt<" << w << ">(" << nt.get(s.getLhs()) << ", "
+                   << nt.get(s.getRhs()) << ")) ? 1u : 0u)";
                },
                ps);
     return success();
@@ -1029,177 +944,6 @@ static LogicalResult emitCombAssign(Operation &op, llvm::raw_ostream &os, NameTa
                },
                ps);
     return success();
-  }
-  if (auto vg = dyn_cast<pyc::VGetOp>(op)) {
-    auto vecTy = dyn_cast<VectorType>(vg.getVec().getType());
-    if (!vecTy)
-      return vg.emitError("C++ emitter expects vector operand for pyc.v_get");
-    std::int64_t idx = vg.getIndexAttr().getInt();
-    if (idx < 0 || idx >= vecTy.getDimSize(0))
-      return vg.emitError("pyc.v_get index out of range for C++ emission");
-    assignExpr(vg.getResult(), vg.getType(), os, nt,
-               [&](llvm::raw_ostream &e) { e << nt.get(vg.getVec()) << "[" << idx << "]"; }, ps);
-    return success();
-  }
-  if (auto vc = dyn_cast<pyc::VCreateOp>(op)) {
-    assignExpr(vc.getResult(), vc.getType(), os, nt,
-               [&](llvm::raw_ostream &e) {
-                 e << cppType(vc.getType()) << "{{";
-                 for (auto [i, v] : llvm::enumerate(vc.getElements())) {
-                   if (i)
-                     e << ", ";
-                   e << nt.get(v);
-                 }
-                 e << "}}";
-               },
-               ps);
-    return success();
-  }
-  if (auto vb = dyn_cast<pyc::VBroadcastOp>(op)) {
-    std::int64_t size = vb.getSizeAttr().getInt();
-    if (size < 0)
-      return vb.emitError("negative size is invalid for pyc.v_broadcast");
-    assignExpr(vb.getResult(), vb.getType(), os, nt,
-               [&](llvm::raw_ostream &e) {
-                 e << cppType(vb.getType()) << "{{";
-                 for (std::int64_t i = 0; i < size; ++i) {
-                   if (i)
-                     e << ", ";
-                   e << nt.get(vb.getScalar());
-                 }
-                 e << "}}";
-               },
-               ps);
-    return success();
-  }
-  if (auto vbd = dyn_cast<pyc::VBroadcastDimOp>(op)) {
-    auto srcVT = dyn_cast<VectorType>(vbd.getVec().getType());
-    auto dstVT = dyn_cast<VectorType>(vbd.getResult().getType());
-    if (!srcVT || !dstVT)
-      return vbd.emitError("C++ emitter expects vector types for v_broadcast_dim");
-    std::int64_t dim = vbd.getDimAttr().getInt();
-    assignExpr(vbd.getResult(), vbd.getType(), os, nt,
-               [&](llvm::raw_ostream &e) {
-                 e << cppType(dstVT) << "{{";
-                 // Walk all result lanes, mapping to source.
-                 std::function<void(unsigned, std::vector<int64_t> &)> walk;
-                 bool emittedAny = false;
-                 walk = [&](unsigned depth, std::vector<int64_t> &idx) {
-                   if (depth == static_cast<unsigned>(dstVT.getRank())) {
-                     if (emittedAny)
-                       e << ", ";
-                     emittedAny = true;
-                     // Build source index by dropping the broadcast dim.
-                     std::string srcIdx;
-                     for (unsigned d = 0; d < dstVT.getRank(); ++d)
-                       if (static_cast<int64_t>(d) != dim)
-                         srcIdx += "[" + std::to_string(idx[d]) + "]";
-                     e << nt.get(vbd.getVec()) << srcIdx;
-                     return;
-                   }
-                   for (int64_t i = 0; i < dstVT.getDimSize(depth); ++i) {
-                     idx.push_back(i);
-                     walk(depth + 1, idx);
-                     idx.pop_back();
-                   }
-                 };
-                 std::vector<int64_t> idx;
-                 walk(0, idx);
-                 e << "}}";
-               },
-               ps);
-    return success();
-  }
-  auto emitVectorReduce = [&](auto vr, const char *opName, const char *opToken) -> LogicalResult {
-    auto vt = dyn_cast<VectorType>(vr.getVec().getType());
-    if (!vt)
-      return vr.emitError("C++ emitter expects vector operand for pyc.") << opName;
-    if (vt.getRank() < 1 || vt.getRank() > 2)
-      return vr.emitError("C++ emitter currently supports rank-1/rank-2 pyc.") << opName;
-    for (std::int64_t lanes : vt.getShape()) {
-      if (lanes <= 0)
-        return vr.emitError("pyc.") << opName << " requires non-empty vector dimensions";
-    }
-    bool useTree = isTreeReduceMode(vr.getOperation());
-
-    if (!vr.getDim()) {
-      assignExpr(vr.getResult(), vr.getType(), os, nt,
-                 [&](llvm::raw_ostream &e) {
-                   llvm::SmallVector<std::string> terms;
-                   if (vt.getRank() == 1) {
-                     for (std::int64_t i = 0; i < vt.getShape()[0]; ++i)
-                       terms.push_back(nt.get(vr.getVec()) + "[" +
-                                       std::to_string(static_cast<long long>(i)) + "]");
-                   } else {
-                     for (std::int64_t i = 0; i < vt.getShape()[0]; ++i)
-                       for (std::int64_t j = 0; j < vt.getShape()[1]; ++j)
-                         terms.push_back(nt.get(vr.getVec()) + "[" +
-                                         std::to_string(static_cast<long long>(i)) + "][" +
-                                         std::to_string(static_cast<long long>(j)) + "]");
-                   }
-                   e << (useTree ? treeReduceExpr(terms, opToken) : chainReduceExpr(terms, opToken));
-                 },
-                 ps);
-      return success();
-    }
-
-    std::int64_t dim = *vr.getDim();
-    if (dim < 0 || dim >= vt.getRank())
-      return vr.emitError("pyc.") << opName << " dim out of range";
-
-    std::int64_t lanes = vt.getShape()[0];
-    if (vt.getRank() == 1) {
-      assignExpr(vr.getResult(), vr.getType(), os, nt,
-                 [&](llvm::raw_ostream &e) {
-                   llvm::SmallVector<std::string> terms;
-                   for (std::int64_t i = 0; i < lanes; ++i) {
-                     terms.push_back(nt.get(vr.getVec()) + "[" +
-                                     std::to_string(static_cast<long long>(i)) + "]");
-                   }
-                   e << (useTree ? treeReduceExpr(terms, opToken) : chainReduceExpr(terms, opToken));
-                 },
-                 ps);
-      return success();
-    }
-
-    std::int64_t rows = vt.getShape()[0];
-    std::int64_t cols = vt.getShape()[1];
-    if (rows <= 0 || cols <= 0)
-      return vr.emitError("pyc.") << opName << " requires non-empty vector";
-    assignExpr(vr.getResult(), vr.getType(), os, nt,
-               [&](llvm::raw_ostream &e) {
-                 e << cppType(vr.getResult().getType()) << "{{";
-                 std::int64_t outLanes = (dim == 0) ? cols : rows;
-                 std::int64_t reduceLanes = (dim == 0) ? rows : cols;
-                 for (std::int64_t i = 0; i < outLanes; ++i) {
-                   if (i)
-                     e << ", ";
-                   llvm::SmallVector<std::string> terms;
-                   for (std::int64_t j = 0; j < reduceLanes; ++j) {
-                     if (dim == 0)
-                       terms.push_back(nt.get(vr.getVec()) + "[" +
-                                       std::to_string(static_cast<long long>(j)) + "][" +
-                                       std::to_string(static_cast<long long>(i)) + "]");
-                     else
-                       terms.push_back(nt.get(vr.getVec()) + "[" +
-                                       std::to_string(static_cast<long long>(i)) + "][" +
-                                       std::to_string(static_cast<long long>(j)) + "]");
-                   }
-                   e << (useTree ? treeReduceExpr(terms, opToken) : chainReduceExpr(terms, opToken));
-                 }
-                 e << "}}";
-               },
-               ps);
-    return success();
-  };
-  if (auto vr = dyn_cast<pyc::VOrReduceOp>(op)) {
-    return emitVectorReduce(vr, "v_or_reduce", "|");
-  }
-  if (auto vr = dyn_cast<pyc::VAndReduceOp>(op)) {
-    return emitVectorReduce(vr, "v_and_reduce", "&");
-  }
-  if (auto vr = dyn_cast<pyc::VAddReduceOp>(op)) {
-    return emitVectorReduce(vr, "v_add_reduce", "+");
   }
   return op.emitError("unsupported combinational op for C++ emission");
 }
@@ -1638,8 +1382,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   for (pyc::RegOp r : unloopedRegs)
     regs.push_back(r);
 
-  // DelayLoop buckets: key = (loop_id, depth); width is per-lane now, and
-  // vector delays stay per-object.
+  // DelayLoop buckets: key = (loop_id, depth); width is per-lane now.
   llvm::DenseMap<int64_t, llvm::SmallVector<pyc::DelayLineOp>> delayLoopLines;
   llvm::SmallVector<pyc::DelayLineOp> unloopedDelays;
   // Same control refinement as RegLoop: (rst, en) must match within one
@@ -1650,7 +1393,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   for (pyc::DelayLineOp dl : delayLines) {
     auto idAttr = dl->getAttrOfType<IntegerAttr>("pyc.loop_id");
     auto depthAttr = dl->getAttrOfType<IntegerAttr>("depth");
-    if (isa<VectorType>(dl.getQ().getType()) || !idAttr || !depthAttr) {
+    if (!idAttr || !depthAttr) {
       unloopedDelays.push_back(dl);
       continue;
     }
@@ -1681,26 +1424,23 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       -> std::tuple<std::string, std::string, std::string> {
     const std::string inst = nt.get(delay.getQ()) + "_inst";
     if (auto idAttr = delay->getAttrOfType<IntegerAttr>("pyc.loop_id")) {
-      if (!isa<VectorType>(delay.getQ().getType())) {
-        const int64_t raw = idAttr.getValue().getSExtValue();
-        const unsigned dw = bitWidth(delay.getQ().getType());
-        if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
-          const int64_t key = raw * 256 +
-                              da.getValue().getZExtValue();
-          auto it = delayLoopLines.find(key);
-          if (it != delayLoopLines.end()) {
-            long lane = 0;
-            for (pyc::DelayLineOp c : it->second) {
-              if (c == delay)
-                break;
-              ++lane;
-            }
-            const std::string loop = "delay_loop_" + std::to_string(key);
-            return {"", loop + ".lane_pending(" + std::to_string(lane) + "u)",
-                    "reinterpret_cast<pyc::cpp::Wire<" + std::to_string(dw) +
-                        "> *>(" + loop + ".lane_qnext_raw(" +
-                        std::to_string(lane) + "u))"};
+      const int64_t raw = idAttr.getValue().getSExtValue();
+      const unsigned dw = bitWidth(delay.getQ().getType());
+      if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
+        const int64_t key = raw * 256 + da.getValue().getZExtValue();
+        auto it = delayLoopLines.find(key);
+        if (it != delayLoopLines.end()) {
+          long lane = 0;
+          for (pyc::DelayLineOp c : it->second) {
+            if (c == delay)
+              break;
+            ++lane;
           }
+          const std::string loop = "delay_loop_" + std::to_string(key);
+          return {"", loop + ".lane_pending(" + std::to_string(lane) + "u)",
+                  "reinterpret_cast<pyc::cpp::Wire<" + std::to_string(dw) +
+                      "> *>(" + loop + ".lane_qnext_raw(" +
+                      std::to_string(lane) + "u))"};
         }
       }
     }
@@ -1727,12 +1467,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       // call site out of this string (callers concatenate it verbatim
       // after &). lane_write_data is the lane's own q storage, so it holds
       // the written value once commit ran; the cast reinterprets that
-      // standard-layout storage as the value (Wire<W> or the whole Vec).
-      const std::string valTy =
-          isa<VectorType>(r.getQ().getType())
-              ? cppType(r.getQ().getType())
-              : ("pyc::cpp::Wire<" +
-                 std::to_string(bitWidth(r.getQ().getType())) + ">");
+      // standard-layout storage as the value (a scalar Wire<W>).
+      const std::string valTy = "pyc::cpp::Wire<" +
+                               std::to_string(bitWidth(r.getQ().getType())) + ">";
       return {loop + ".lane_pending(" + std::to_string(lane) + "u)",
               "reinterpret_cast<" + valTy + " *>(" + loop +
                   ".lane_write_data(" + std::to_string(lane) + "u))"};
@@ -2122,7 +1859,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 		    unsigned w = bitWidth(f.getResultTypes()[i]);
 		    if (w == 0)
 		      return f.emitError("invalid output port width for ProbeRegistry: ") << getPortCanonicalFieldPath(f, i, /*isResult=*/true);
-			    if (outIsReg[i] && !isa<VectorType>(f.getResultTypes()[i])) {
+		    if (outIsReg[i]) {
 		      const auto &source = *outRegQ[i];
 		      const unsigned storageWidth = bitWidth(source.q.getType());
 		      // Resolve the owning pyc.reg (if any) for RegLoop lane bindings.
@@ -2187,7 +1924,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 		    }
 		  }
       for (const auto &named : namedProbes) {
-        if (named.isReg && !isa<VectorType>(named.type)) {
+        if (named.isReg) {
           const bool loopedN = named.cppRegInst.rfind("reg_loop_", 0) == 0 ||
                        named.cppRegInst.rfind("delay_loop_", 0) == 0;
           const bool namedPost = named.cppRegInst.rfind("reg_loop_", 0) == 0;
@@ -2478,10 +2215,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
 	    unsigned w = bitWidth(r.getQ().getType());
 	    if (w == 0)
 	      return r.emitError("invalid reg width");
-    if (isa<VectorType>(r.getQ().getType()))
-      os << "  pyc::cpp::pycVecReg<" << cppType(r.getQ().getType()) << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
-    else
-      os << "  pyc::cpp::pycReg<" << w << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
+    os << "  pyc::cpp::pycReg<" << w << "> *" << nt.get(r.getQ()) << "_inst = nullptr;\n";
   }
   for (int64_t loopId : regLoopIds) {
     os << "  pyc::cpp::RegLoop " << regLoopName(loopId) << ";\n";
@@ -2521,12 +2255,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     if (!depthAttr)
       return delay.emitError("missing integer attribute `depth`");
     auto depth = depthAttr.getValue().getZExtValue();
-    if (isa<VectorType>(delay.getQ().getType()))
-      os << "  pyc::cpp::pycVecDelayLine<" << cppType(delay.getQ().getType()) << ", " << depth << "> *"
-         << nt.get(delay.getQ()) << "_inst = nullptr;\n";
-    else
-      os << "  pyc::cpp::pycDelayLine<" << w << ", " << depth << "> *" << nt.get(delay.getQ())
-         << "_inst = nullptr;\n";
+    os << "  pyc::cpp::pycDelayLine<" << w << ", " << depth << "> *" << nt.get(delay.getQ())
+       << "_inst = nullptr;\n";
   }
   for (auto fifo : fifos) {
     unsigned w = bitWidth(fifo.getOutData().getType());
@@ -2775,11 +2505,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
     unsigned w = bitWidth(r.getQ().getType());
     if (w == 0)
       return r.emitError("invalid reg width");
-    if (isa<VectorType>(r.getQ().getType()))
-      os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pycVecReg<"
-         << cppType(r.getQ().getType()) << ">(";
-    else
-      os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pycReg<" << w << ">(";
+    os << "    " << nt.get(r.getQ()) << "_inst = new pyc::cpp::pycReg<" << w << ">(";
     os << nt.get(r.getClk()) << ", " << nt.get(r.getRst()) << ", " << nt.get(r.getEn()) << ", "
        << nt.get(r.getNext()) << ", " << nt.get(r.getInit()) << ", " << nt.get(r.getQ()) << ");\n";
   }
@@ -2819,12 +2545,8 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   for (auto delay : delayLines) {
     unsigned w = bitWidth(delay.getQ().getType());
     auto depth = delay->getAttrOfType<IntegerAttr>("depth").getValue().getZExtValue();
-    if (isa<VectorType>(delay.getQ().getType()))
-      os << "    " << nt.get(delay.getQ()) << "_inst = new pyc::cpp::pycVecDelayLine<"
-         << cppType(delay.getQ().getType()) << ", " << depth << ">(";
-    else
-      os << "    " << nt.get(delay.getQ()) << "_inst = new pyc::cpp::pycDelayLine<" << w << ", " << depth
-         << ">(";
+    os << "    " << nt.get(delay.getQ()) << "_inst = new pyc::cpp::pycDelayLine<" << w << ", " << depth
+       << ">(";
     os << nt.get(delay.getClk()) << ", " << nt.get(delay.getRst()) << ", " << nt.get(delay.getEn()) << ", "
        << nt.get(delay.getNext()) << ", " << nt.get(delay.getInit()) << ", " << nt.get(delay.getQ()) << ");\n";
   }
@@ -3137,13 +2859,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             pyc::ShlOp,
             pyc::LshrOp,
             pyc::AshrOp,
-            pyc::VGetOp,
-            pyc::VCreateOp,
-            pyc::VBroadcastOp,
-            pyc::VBroadcastDimOp,
-            pyc::VOrReduceOp,
-            pyc::VAndReduceOp,
-            pyc::VAddReduceOp,
             arith::SelectOp>(*op)) {
       // Plain wire computation must run every pass: it feeds outputs, polled
       // combs, and downstream combs regardless of dirty state, so it must
@@ -3699,13 +3414,6 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             pyc::ShlOp,
             pyc::LshrOp,
             pyc::AshrOp,
-            pyc::VGetOp,
-            pyc::VCreateOp,
-            pyc::VBroadcastOp,
-            pyc::VBroadcastDimOp,
-            pyc::VOrReduceOp,
-            pyc::VAndReduceOp,
-            pyc::VAddReduceOp,
             arith::SelectOp>(*op)) {
       if (failed(emitCombAssign(*op, os, nt, /*ps=*/nullptr, &delayLoopLines)))
         return failure();
@@ -4181,28 +3889,26 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
         return tap.emitError("invalid delay tap source or depth");
       std::string tapExpr;
       if (auto idAttr = delay->getAttrOfType<IntegerAttr>("pyc.loop_id")) {
-        if (!isa<VectorType>(delay.getQ().getType())) {
-          // The tap's own depth indexes the stage, not the loop; the loop
-          // key is (clock id, lane depth).
-          if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
-            const unsigned w = bitWidth(delay.getQ().getType());
-            const int64_t key =
-                idAttr.getValue().getSExtValue() * 256 +
-                da.getValue().getZExtValue();
-            auto it = delayLoopLines.find(key);
-            if (it != delayLoopLines.end()) {
-              long lane = 0;
-              bool hit = false;
-              for (pyc::DelayLineOp c : it->second) {
-                if (c == delay) { hit = true; break; }
-                ++lane;
-              }
-              if (hit)
-                tapExpr = "delay_loop_" + std::to_string(key) +
-                          ".lane_tap_next<" + std::to_string(w) + ">(" +
-                          std::to_string(lane) + "u, " +
-                          std::to_string(depth.getValue().getZExtValue()) + "u)";
+        // The tap's own depth indexes the stage, not the loop; the loop
+        // key is (clock id, lane depth).
+        if (auto da = delay->getAttrOfType<IntegerAttr>("depth")) {
+          const unsigned w = bitWidth(delay.getQ().getType());
+          const int64_t key =
+              idAttr.getValue().getSExtValue() * 256 +
+              da.getValue().getZExtValue();
+          auto it = delayLoopLines.find(key);
+          if (it != delayLoopLines.end()) {
+            long lane = 0;
+            bool hit = false;
+            for (pyc::DelayLineOp c : it->second) {
+              if (c == delay) { hit = true; break; }
+              ++lane;
             }
+            if (hit)
+              tapExpr = "delay_loop_" + std::to_string(key) +
+                        ".lane_tap_next<" + std::to_string(w) + ">(" +
+                        std::to_string(lane) + "u, " +
+                        std::to_string(depth.getValue().getZExtValue()) + "u)";
           }
         }
       }

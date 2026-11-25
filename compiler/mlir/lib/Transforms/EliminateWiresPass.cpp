@@ -115,7 +115,7 @@ static void wireCutInputs(Block &block) {
     for (OpOperand &use : op.getOpOperands()) {
       Value v = use.get();
       Operation *def = v.getDefiningOp();
-      if (!def || def->getBlock() != &block || !isa<IntegerType, VectorType>(v.getType()) ||
+      if (!def || def->getBlock() != &block || !isa<IntegerType>(v.getType()) ||
           isWireReadCut(def) || isa<pyc::WireOp, pyc::ConstantOp>(def))
         continue;
       builder.setInsertionPointToStart(&block);

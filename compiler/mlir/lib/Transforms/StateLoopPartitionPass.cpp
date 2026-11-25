@@ -57,8 +57,7 @@ struct StateLoopPartitionPass
       if (auto reg = dyn_cast<pyc::RegOp>(op))
         regs.push_back(reg);
       else if (auto delay = dyn_cast<pyc::DelayLineOp>(op))
-        if (!isa<VectorType>(delay.getQ().getType()))
-          delays.push_back(delay);
+        delays.push_back(delay);
     });
     if (regs.empty() && delays.empty()) {
       setI64Attr(function, kLoopGroups, 0);

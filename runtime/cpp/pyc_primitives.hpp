@@ -201,6 +201,7 @@ public:
   std::array<ValT, Depth> stages{};
   unsigned head = 0;
 
+
 private:
   static constexpr unsigned nextIndex(unsigned index) {
     return index + 1u == Depth ? 0u : index + 1u;
@@ -210,14 +211,6 @@ private:
 template <unsigned Width, unsigned Depth>
 class pycDelayLine : public DelayBase<Wire<Width>, Depth> {
   using Base = DelayBase<Wire<Width>, Depth>;
-
-public:
-  using Base::Base;
-};
-
-template <typename T, unsigned Depth>
-class pycVecDelayLine : public DelayBase<T, Depth> {
-  using Base = DelayBase<T, Depth>;
 
 public:
   using Base::Base;

@@ -1,20 +1,13 @@
 #include "pyc_primitives.hpp"
-#include "pyc_vec.hpp"
 
 #include <cassert>
 #include <type_traits>
 
 using pyc::cpp::Wire;
 using pyc::cpp::pycDelayLine;
-using pyc::cpp::pycVecDelayLine;
-using pyc::cpp::Vec;
-
 using pyc::cpp::BaseElement;
 static_assert(std::is_same_v<decltype(std::declval<pycDelayLine<8, 2>&>().tick_commit()),
                              BaseElement::change_mask_t>);
-static_assert(std::is_same_v<
-    decltype(std::declval<pycVecDelayLine<Vec<Wire<8>, 2>, 2>&>().tick_commit()),
-    BaseElement::change_mask_t>);
 
 namespace {
 

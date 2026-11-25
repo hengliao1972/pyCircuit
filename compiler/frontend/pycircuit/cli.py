@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .api_contract import collect_local_python_graph, nearest_project_root, scan_file
+from .data import Data
 from .diagnostics import render_diagnostic
 from .dsl import Module
 from .design import FRONTEND_CONTRACT, Design, DesignError, value_params_of
@@ -44,6 +45,7 @@ from .trace_dsl import (
     compute_trace_plan_from_artifacts,
     load_trace_config,
 )
+from .vector_lower import port_mlir_type
 
 
 def _default_top_name(src: Path) -> str:
@@ -467,6 +469,11 @@ def _as_int_width(ty: str) -> int:
     return _port_info(ty).total_width
 
 
+def _packed_port_ty(ty: Any) -> str:
+    """Port ABI type: vector ports are emitted as one packed integer bus."""
+    return str(port_mlir_type(ty if isinstance(ty, Data) else Data.from_str(str(ty))))
+
+
 def _collect_build(mod: object, src: Path, args: argparse.Namespace) -> Module | Design:
     if not hasattr(mod, "build"):
         raise SystemExit(f"{src} must define a pyCircuit entrypoint: `@module def build(m: Circuit, ...)`")
@@ -520,15 +527,15 @@ def _top_iface(design: Module | Design) -> _TopIface:
         return _TopIface(
             sym=cm.sym_name,
             in_raw=list(cm.arg_names),
-            in_tys=list(cm.arg_types),
+            in_tys=[_packed_port_ty(t) for t in cm.arg_types],
             out_raw=list(cm.result_names),
-            out_tys=list(cm.result_types),
+            out_tys=[_packed_port_ty(t) for t in cm.result_types],
         )
 
     in_raw = [n for n, _ in getattr(design, "_args", [])]  # noqa: SLF001
-    in_tys = [sig.ty for _, sig in getattr(design, "_args", [])]  # noqa: SLF001
+    in_tys = [_packed_port_ty(sig.ty) for _, sig in getattr(design, "_args", [])]  # noqa: SLF001
     out_raw = [n for n, _ in getattr(design, "_results", [])]  # noqa: SLF001
-    out_tys = [sig.ty for _, sig in getattr(design, "_results", [])]  # noqa: SLF001
+    out_tys = [_packed_port_ty(sig.ty) for _, sig in getattr(design, "_results", [])]  # noqa: SLF001
     return _TopIface(sym=str(getattr(design, "name", "Top")), in_raw=in_raw, in_tys=in_tys, out_raw=out_raw, out_tys=out_tys)
 
 
@@ -543,9 +550,9 @@ def _top_iface_from_manifest(manifest: Mapping[str, Any]) -> _TopIface:
         if str(m.get("name", "")).strip() != top:
             continue
         in_raw = [str(x) for x in (m.get("arg_names") or [])]
-        in_tys = [str(x) for x in (m.get("arg_types") or [])]
+        in_tys = [_packed_port_ty(x) for x in (m.get("arg_types") or [])]
         out_raw = [str(x) for x in (m.get("result_names") or [])]
-        out_tys = [str(x) for x in (m.get("result_types") or [])]
+        out_tys = [_packed_port_ty(x) for x in (m.get("result_types") or [])]
         return _TopIface(sym=top, in_raw=in_raw, in_tys=in_tys, out_raw=out_raw, out_tys=out_tys)
     raise SystemExit(f"invalid project_manifest.json: top module {top!r} not found in modules list")
 
