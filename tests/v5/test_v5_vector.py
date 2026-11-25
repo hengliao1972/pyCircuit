@@ -40,8 +40,12 @@ def test_v5_vector_ports_constants_and_cycle_alignment() -> None:
 
     mlir = m.emit_mlir()
     assert "pyc.reg" in mlir
-    assert "vector<2x2xi4>" in mlir
-    assert "pyc.add" in mlir
+    # Vector values are expanded to scalar lanes when the IR is emitted:
+    # packed ports (2x2 lanes of i4 -> i16) and one add per lane.
+    assert "vector<" not in mlir
+    assert "%early: i16" in mlir
+    assert "%late: i16" in mlir
+    assert mlir.count("pyc.add ") == 4
 
 
 def test_v5_vector_operations_delegate_to_wire_api() -> None:
@@ -91,7 +95,12 @@ def test_v5_vector_state_preserves_shape() -> None:
     assert len(state) == 2
     assert state[0].ty == Bits(4)
     assert state.reduce_or().ty == Bits(4)
-    assert "vector<2xi4>" in m.emit_mlir()
+    mlir = m.emit_mlir()
+    # Packed port (2 lanes of i4 -> i8) with per-lane registers and reduction.
+    assert "vector<" not in mlir
+    assert "%update: i8" in mlir
+    assert mlir.count("pyc.reg") == 2
+    assert "pyc.or " in mlir
 
 
 def test_v5_signal_type_surface_matches_wire() -> None:

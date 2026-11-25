@@ -317,6 +317,22 @@ def _emit_scf_yield(m: Circuit, values: list[Wire]) -> None:
     m.emit_line(f"scf.yield {refs} : {tys}")
 
 
+def _lane_wires(m: Circuit, w: Wire) -> list[Wire]:
+    """Flat scalar lane wires of a vector value (a single wire for scalars)."""
+    if not isinstance(w.ty, Vector):
+        return [w]
+    info = m.lanes_of(w.sig)
+    assert info is not None
+    return [Wire(m, Signal(ref=ref, ty=info.leaf), signed=w.signed) for ref in info.refs]
+
+
+def _lane_count_of(ty: Vector) -> int:
+    n = 1
+    for d in ty.shape():
+        n *= int(d)
+    return n
+
+
 def _emit_scf_if_header(m: Circuit, results: list[str], cond: Wire, result_types: list[Data]) -> None:
     if not results:
         m.emit_line(f"scf.if {cond.ref} {{")
@@ -406,6 +422,18 @@ class _Compiler:
             v = v.read()
         if isinstance(v, Reg):
             v = v.q
+        if isinstance(expected_ty, Vector) and isinstance(v, (bool, int, LiteralValue)):
+            # Scalar constant assigned into a vector slot: broadcast the leaf constant.
+            leaf = expected_ty.datatype()
+            iv = int(v.value) if isinstance(v, LiteralValue) else int(v)
+            c = self.m.const(iv, width=int(leaf.width))
+            shape = tuple(int(d) for d in expected_ty.shape())
+            lanes = [c.sig.ref] * _lane_count_of(expected_ty)
+            return Wire(
+                self.m,
+                self.m.mk_vec(shape, leaf, lanes),
+                signed=bool(getattr(v, "signed", False)),
+            )
         if isinstance(v, Wire):
             w = v
         elif isinstance(v, Signal):
@@ -682,6 +710,10 @@ class _Compiler:
             # compiler normally wraps assigned values in `pyc.alias` for stable
             # naming, but that would break assignable/backedge wires.
             if getattr(v, "assignable", False):
+                return v
+            # pyc-lower-scf-static only admits side-effect-free ops inside scf
+            # regions; vector lane aliases are debug-only and optional.
+            if isinstance(v.ty, Vector) and self.m._indent_level > 1:
                 return v
             n = self._scoped_name(self._name_with_loc(base_name, node))
             return Wire(self.m, self.m.alias(v.sig, name=n), signed=v.signed)
@@ -1748,11 +1780,19 @@ class _Compiler:
             w = max(int_width(tv_i), int_width(ev_i))
             expected_types.append(Bits(w))
 
+        # Vector phi values are carried as N scalar results (one per lane).
+        slot_types: list[Data] = []
+        for ty in expected_types:
+            if isinstance(ty, Vector):
+                slot_types.extend([ty.datatype()] * _lane_count_of(ty))
+            else:
+                slot_types.append(ty)
+
         results: list[str] = []
         if phi_vars:
-            results = [self.m._get_next_temp_var() for _ in phi_vars]  # noqa: SLF001
+            results = [self.m._get_next_temp_var() for _ in slot_types]  # noqa: SLF001
 
-        _emit_scf_if_header(self.m, results, cond, expected_types)
+        _emit_scf_if_header(self.m, results, cond, slot_types)
 
         # then (captured body + captured yield epilogue)
         def emit_then_yield() -> None:
@@ -1761,7 +1801,8 @@ class _Compiler:
                 then_vals: list[Wire] = []
                 for name, ty in zip(phi_vars, expected_types):
                     v = then_comp.env.get(name, 0)
-                    then_vals.append(then_comp._coerce_to_type(v, expected_ty=ty, ctx="if then"))
+                    w = then_comp._coerce_to_type(v, expected_ty=ty, ctx="if then")
+                    then_vals.extend(_lane_wires(then_comp.m, w))
                 _emit_scf_yield(self.m, then_vals)
             finally:
                 self.m.pop_indent()
@@ -1778,7 +1819,8 @@ class _Compiler:
                 else_vals: list[Wire] = []
                 for name, ty in zip(phi_vars, expected_types):
                     v = else_comp.env.get(name, 0)
-                    else_vals.append(else_comp._coerce_to_type(v, expected_ty=ty, ctx="if else"))
+                    w = else_comp._coerce_to_type(v, expected_ty=ty, ctx="if else")
+                    else_vals.extend(_lane_wires(else_comp.m, w))
                 _emit_scf_yield(self.m, else_vals)
             finally:
                 self.m.pop_indent()
@@ -1788,7 +1830,17 @@ class _Compiler:
         self.m.emit_line("}")
 
         # Merge results back into env (including newly introduced names).
-        for name, res_ref, ty in zip(phi_vars, results, expected_types):
+        slot = 0
+        for name, ty in zip(phi_vars, expected_types):
+            if isinstance(ty, Vector):
+                n = _lane_count_of(ty)
+                lane_refs = results[slot : slot + n]
+                slot += n
+                sig = self.m.mk_vec(ty.shape(), ty.datatype(), lane_refs)
+                self.env[name] = self._alias_if_wire(Wire(self.m, sig), base_name=name, node=node)
+                continue
+            res_ref = results[slot]
+            slot += 1
             self.env[name] = self._alias_if_wire(Wire(self.m, Signal(ref=res_ref, ty=ty)), base_name=name, node=node)
 
     def compile_match(self, node: ast.Match) -> None:

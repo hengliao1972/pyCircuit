@@ -445,21 +445,22 @@ PyCircuit 的硬件对象建立在两个正交概念上：
 - **数据类型 `Data`**（`pycircuit.data`）：描述信号承载的「值的形状」——标量位宽、向量维度、时钟/复位语义；
 - **信号句柄 `Wire[DT]`**：描述信号在电路图里的「身份」。`DT` 是泛型参数，绑定到 `Data`，决定该 `Wire` 走哪种 MLIR 类型、哪些运算合法。
 
-`Data` 是一个冻结的类型层级，`str(Data)` 直接给出 MLIR 类型字面量：
+`Data` 是一个冻结的类型层级，`str(Data)` 给出前端类型字面量（`Vector` 只是
+前端类型，不会出现在发射后的 `.pyc` 中）：
 
 ```
 Data (ABC)
 ├── Bits(N)              → iN              标量位向量（算术/逻辑运算的操作数）
-├── Vector(len, elem)    → vector<Nx...xiW> 向量；elem 可再为 Vector → 多维
+├── Vector(len, elem)    → vector<Nx...xiW> 向量（前端类型）；elem 可再为 Vector → 多维
 ├── Clock                → !pyc.clock      时钟（仅作 pyc.reg 的 clk 输入）
 └── Reset                → !pyc.reset      复位（仅作 pyc.reg 的 rst 输入）
 ```
 
-| 声明 | Python 类型 | MLIR 类型 |
-|------|------------|----------|
+| 声明 | Python 类型 | 发射后的 IR 端口 |
+|------|------------|------------------|
 | `m.input("x", width=8)` | `Wire[Bits[8]]` | `i8` |
-| `m.input("v", width=8, shape=[4])` | `Wire[Vector[Bits[8]]]` | `vector<4xi8>` |
-| `m.input("m", width=8, shape=[4,16])` | `Wire[Vector[...]]` | `vector<4x16xi8>` |
+| `m.input("v", width=8, shape=[4])` | `Wire[Vector[Bits[8]]]` | `i32`（packed，body 逐 lane `i8`） |
+| `m.input("m", width=8, shape=[4,16])` | `Wire[Vector[...]]` | `i512`（packed，body 逐 lane `i8`） |
 
 **关键点**：标量 `Wire[Bits]` 与向量 `Wire[Vector[...]]` **共享同一套运算符**——`+ - * & | ^ ~ == != < >` 都重载了，区别只在结果类型：
 
@@ -489,7 +490,11 @@ def simd_add(m: CycleAwareCircuit, domain: CycleAwareDomain,
     m.output("vsum", vsum)      # 向量 Wire 可直接作为输出
 ```
 
-生成的 MLIR 中这是**一条** `pyc.add : vector<8xi32>`；Verilog 端口是 packed bus（`[lanes*width-1:0]`），C++ 仿真器用嵌套 `pyc::cpp::Vec` 模板并可走 SIMD 加速。
+生成的 `.pyc` 里没有向量类型：端口是**一根** packed `i{lanes*width}` 总线
+（lane 0 在 LSB），body 对每个 lane 发一条标量 `pyc.add : i32`，入口用
+`pyc.extract` 拆 lane、出口用 `pyc.concat` 打包。Verilog 端口同样是 packed
+bus（`[lanes*width-1:0]`），C++ 仿真器只用 `pyc::cpp::Wire<W>`（每个 lane
+一条 `Wire<32>`），不需要向量运行时。
 
 ### 8.3 归约与广播：旁路匹配的经典范式
 
@@ -553,11 +558,18 @@ lane 之间逻辑**不同构**时（比如每个表项有独立的复杂状态�
 寄存器堆 / RAM / 队列不要用 `domain.signal()` 数组硬堆（会展开成海量 mux），用内建原语：
 
 ```python
-# 同步 1R1W 存储（读数据打一拍）→ pyc.sync_mem → Verilog pyc_sync_mem 原语
-rdata = m.sync_mem(clk, rst,
+# 同步 1R1W 存储（读数据打一拍）→ pyc.sync_mem_nm（read_mode="old"）→ Verilog pyc_sync_mem_nm 原语
+rdata = m.sync_mem(clk,
                    ren=ren, raddr=raddr,
                    wvalid=wen, waddr=waddr, wdata=wdata, wstrb=strb,
                    depth=64, name="dcache_data")
+
+# 任意 N 读 × M 写形状走通用入口；read_mode="forward"（默认）时同拍同址写会转发到读口
+rdatas = m.sync_mem_nm(clk,
+                       [(ren0, raddr0), (ren1, raddr1)],
+                       [(wen0, waddr0, wdata0, strb0)],
+                       depth=64, name="dcache_2r1w")
+rdata0, rdata1 = rdatas
 
 # ready/valid FIFO → pyc.fifo
 in_ready, out_valid, out_data = m.fifo(clk, rst,

@@ -11,6 +11,7 @@ from .api_contract import FRONTEND_CONTRACT
 from .data import Data
 from .dsl import Module
 from .jit_cache import get_structural_metrics
+from .vector_lower import port_mlir_type
 
 if TYPE_CHECKING:
     from .hw import Circuit
@@ -423,10 +424,10 @@ class Design:
 
     @staticmethod
     def _emit_dep_decl_mlir(cm: CompiledModule) -> str:
-        args_sig = ", ".join(str(t) for t in cm.arg_types)
+        args_sig = ", ".join(str(port_mlir_type(t)) for t in cm.arg_types)
         sig = f"({args_sig})"
         if cm.result_types:
-            sig += f" -> ({', '.join(str(t) for t in cm.result_types)})"
+            sig += f" -> ({', '.join(str(port_mlir_type(t)) for t in cm.result_types)})"
         kind = _kind_of(cm.fn)
         inline = "true" if _inline_of(cm.fn) else "false"
         base = _base_name(cm.fn)

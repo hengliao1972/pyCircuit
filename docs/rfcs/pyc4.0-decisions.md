@@ -3291,3 +3291,41 @@ or invalidate probe paths.
 
 **Source**
 - Follow-up in #linx-core (2026-03-01): "好继续补" after incremental build decisions.
+
+## Decision 0148: State write-intent probes read the storage itself at the post-transfer observation point
+
+**Status:** Accepted
+
+**Context / Goal**
+Decision 0053 requires an explicit "a write happened" signal independent of whether
+the value changed, which needs both a validity flag and the written value. Two-phase
+state only publishes `q` at `transfer()`, so probes were bound to a sampled-next-value
+copy (`qNext`) held next to every register. For the single-phase (tick-fused) lanes
+that copy exists purely for observation: nobody reads it unless a trace writer is
+attached, yet it is stored every edge.
+
+**Decision (strong constraint / required changes)**
+- Write-intent probes for state in a `RegLoop` bind the lane's own `q` as write data
+  and declare `write_post_transfer`; the trace writer emits those `Write` events in
+  the transfer (`XFER-OBS`) phase block.
+- Write data that is captured at the edge (memory write ports, delay heads, registers
+  still on the per-object two-phase path) stays in the tick (`TICK-OBS`) block.
+- The write-intent validity flag MUST remain observable at `XFER-OBS`: `commit()` does
+  not clear it per lane; the next edge's compute overwrites it. A per-edge
+  "commit already applied" guard keeps the falling-edge `commit()` O(1).
+- A probe MUST NOT require an extra copy of authoritative state. New observation
+  surfaces read the storage, they do not shadow it.
+
+**Implications**
+- The observation-only copy of state disappears for single-phase lanes, along with the
+  per-lane write-intent mirror bookkeeping.
+- Within a cycle the `Write` chunks now appear after the commit `CycleBegin` boundary.
+  The stream stays self-describing (the phase boundary carries the observation point),
+  so the schema id does not change.
+- Tick-fused lanes keep their validity flag from the in-compute commit until the next
+  edge; it is therefore only defined at an edge's post-transfer point. Writers must
+  sample at an observation point, never mid-cycle.
+
+**Source**
+- Single-phase commit simplification: make the fused update path the mainline and let
+  the two-phase path be the fallback for feedback, memories, delay lines and CDC.
