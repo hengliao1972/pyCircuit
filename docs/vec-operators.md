@@ -5,7 +5,7 @@
 直接实例化的独立 `Vec` 类。
 
 除非特别说明，逐元素运算支持一维和多维 Vector，结果形状与输入 Vector
-一致。当前归约操作的 MLIR gate 支持 rank 1 和 rank 2 Vector。
+一致；归约支持 rank 1 和 rank 2。
 
 ## 算子一览
 
@@ -31,17 +31,23 @@
 | 归约 | `.reduce_or()`、`.reduce_and()`、`.reduce_sum()`  | 标量或低一维 Vector | `dim=None` 为全维归约；默认 `dim=None`；`mode="chain"/"tree"` 影响组合结构|
 
 
-## Vec MLIR 扩展函数一览
+## IR 表示：前端展开为标量 lane
 
-| MLIR op | 前端函数 / 操作 | 说明 |
-| --- | --- | --- |
-| `pyc.v_create` | `m.vec([x0, x1, ...])` | 从同类型元素构造最外层 Vector |
-| `pyc.v_broadcast` | 内部标量广播 | 将标量复制为一维 Vector，供 Vec-标量运算使用 |
-| `pyc.v_get` | `x[i]`、`for lane in x` | 读取 Vector 的常量索引元素 |
-| `pyc.v_broadcast_dim` | `x.broadcast(size=n, dim=d)` | 在指定位置插入并复制一个维度 |
-| `pyc.v_or_reduce` | `x.reduce_or(dim=..., mode=...)` | 按维或全维按位 OR 归约 |
-| `pyc.v_and_reduce` | `x.reduce_and(dim=..., mode=...)` | 按维或全维按位 AND 归约 |
-| `pyc.v_add_reduce` | `x.reduce_sum(dim=..., mode=...)` | 按维或全维加法归约；保持叶宽，溢出回绕 |
+Vector 只存在于前端/API 层。发射 `.pyc` 时，前端把每个逐 lane 运算写成
+一条标量 op，模块端口合并为单根 packed `i{leaf*lanes}` 总线（lane 0 在
+LSB，入口 `pyc.extract`、出口 `pyc.concat`）。dialect 中没有 `vector<>`
+类型，也没有 `pyc.v_*` op。
+
+| 前端 API | 发射后的 IR |
+| --- | --- |
+| `m.vec([x0, x1, ...])` | 直接复用各 lane 值；端口边界 `pyc.concat` 打包 |
+| 标量广播 | 各 lane 复用同一标量引用 |
+| `x[i]`、`for lane in x` | `pyc.extract`（或 lane 别名） |
+| `x.broadcast(size=n, dim=d)` | lane 引用重排 + `pyc.concat` |
+| `x.reduce_or(dim=..., mode=...)` | 逐 lane `pyc.or`（chain / tree 拓扑） |
+| `x.reduce_and(dim=..., mode=...)` | 逐 lane `pyc.and` |
+| `x.reduce_sum(dim=..., mode=...)` | 逐 lane `pyc.add`；保持叶宽，溢出回绕 |
+| `m.priority_mux(sels, vals, ...)` | 逐 lane `pyc.mux` + `pyc.or` |
 
 
 ## 创建与访问
@@ -49,8 +55,8 @@
 ### `Circuit.input`
 
 ```python
-a = m.input("a", width=8, shape=[4])       # vector<4xi8>
-b = m.input("b", width=1, shape=[2, 3])    # vector<2x3xi1>
+a = m.input("a", width=8, shape=[4])       # 端口 i32（packed），body 逐 lane i8
+b = m.input("b", width=1, shape=[2, 3])    # 端口 i6（packed），body 逐 lane i1
 ```
 
 - `shape` 必须是 `list[int]`，每一维必须大于 0。
@@ -264,7 +270,7 @@ tree_total = a.reduce_sum(mode="tree")
 - `"chain"`：从低索引到高索引的线性归约（默认）。
 - `"tree"`：平衡树形归约。
 
-模式会明确写入 MLIR IR；它影响组合路径结构，不改变功能结果。
+模式在前端展开时决定生成的标量 lane 组合拓扑（chain 为链式、tree 为平衡树）；它影响组合路径结构，不改变功能结果，也不会作为属性写进 IR。
 
 ## 验证状态
 

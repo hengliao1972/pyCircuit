@@ -39,12 +39,11 @@ Semantics (posedge `clk`):
 - if `rst`: `q <= init`
 - else if `en`: `q <= d`
 
-### 1.3 `Vec<T, N>`
+### 1.3 `Vec<T, N>`（已删除）
 
-Fixed-size container (useful for regfiles, bundles of lanes, etc.).
-
-- C++: `pyc::cpp::Vec<T, N>` (`runtime/cpp/pyc_vec.hpp`)
-- Verilog: use unpacked arrays (`T v [0:N-1]`) or packed arrays, depending on style.
+该运行时容器随 IR 层 `vector<>` 的移除一起删除（`runtime/cpp/pyc_vec.hpp` 不再存在）。
+向量在前端发射期即展开为逐 lane 标量 op，生成的 C++ 只用 `pyc::cpp::Wire<W>`；
+Verilog 端口是单根 packed 总线。
 
 ## 2) Primitive operations (combinational)
 
@@ -128,40 +127,32 @@ Semantics (prototype):
 - Simulation initializes memory bytes to 0 by default (deterministic).
 - Reset does not clear memory; testbenches can initialize contents via `memh` (SV) or poke helpers (C++).
 
-### 4.2 `pyc_sync_mem` (1R1W, synchronous read, registered output)
+### 4.2 `pyc_sync_mem_nm` (N-read x M-write, synchronous read, registered outputs)
 
-- Verilog: `module pyc_sync_mem #(ADDR_WIDTH, DATA_WIDTH, DEPTH) (...)` (`runtime/verilog/pyc_sync_mem.v`)
-- C++: `pyc::cpp::pyc_sync_mem<AddrWidth, DataWidth, DepthEntries>` (`runtime/cpp/pyc_sync_mem.hpp`)
+The single synchronous-memory primitive: every 1R1W / 2R1W / N x M shape is
+this op with a different port count (`pyc.sync_mem` / `pyc.sync_mem_dp` were
+unified into it).
 
-Ports:
+- Verilog: `module pyc_sync_mem_nm #(ADDR_WIDTH, DATA_WIDTH, DEPTH, R_PORTS, W_PORTS, READ_MODE) (...)` (`runtime/verilog/pyc_sync_mem_nm.v`)
+- C++: `pyc::cpp::pyc_sync_mem_nm<AddrWidth, DataWidth, DepthEntries, RPorts, WPorts, bool OldData = false>` (`runtime/cpp/pyc_sync_mem.hpp`)
+- DSL: `m.sync_mem_nm(clk, [(ren, raddr), ...], [(wvalid, waddr, wdata, wstrb), ...], depth=..., name=..., read_mode=...)` returns one read-data signal per read port; `sync_mem()` / `sync_mem_dp()` remain as 1R1W / 2R1W shorthands (they emit `read_mode="old"`).
 
-- `clk`, `rst`
-- read: `ren`, `raddr`, `rdata` (registered)
-- write: `wvalid`, `waddr`, `wdata`, `wstrb`
+Ports (Verilog packs port *k* into bits `[k*WIDTH +: WIDTH]`):
 
-Semantics (prototype):
+- `clk`
+- read: `rens`, `raddrs`, `rdatas` (registered)
+- write: `wvalids`, `waddrs`, `wdatas`, `wstrbs`
 
-- Read data updates on posedge when `ren` is asserted (registered read).
-- Write occurs on posedge when `wvalid` is asserted (byte enables via `wstrb`).
-- Read-during-write to the same address returns **old-data** by default (read observes the pre-write value).
-- Simulation initializes memory entries to 0 by default (deterministic). Reset does not clear memory contents.
+`read_mode` (attribute; `READ_MODE` = 0/1 in Verilog, `OldData` in C++):
 
-### 4.3 `pyc_sync_mem_dp` (2R1W, synchronous read, registered outputs)
+- `"forward"` (default): a same-cycle write to the read address is forwarded to
+  that read output (register-file / write-first semantics).
+- `"old"`: the read output is the pre-write entry (plain SRAM semantics).
 
-- Verilog: `module pyc_sync_mem_dp #(ADDR_WIDTH, DATA_WIDTH, DEPTH) (...)` (`runtime/verilog/pyc_sync_mem_dp.v`)
-- C++: `pyc::cpp::pyc_sync_mem_dp<AddrWidth, DataWidth, DepthEntries>` (`runtime/cpp/pyc_sync_mem.hpp`)
-
-Ports:
-
-- `clk`, `rst`
-- read0: `ren0`, `raddr0`, `rdata0` (registered)
-- read1: `ren1`, `raddr1`, `rdata1` (registered)
-- write: `wvalid`, `waddr`, `wdata`, `wstrb`
-
-Semantics (prototype):
-
-- Read-during-write to the same address returns **old-data** by default on both read ports.
-- Simulation initializes memory entries to 0 by default (deterministic). Reset does not clear memory contents.
+Write ports apply in index order, so a higher index wins a same-address
+same-cycle conflict. Simulation initializes memory entries to 0 by default
+(deterministic). Reset does not clear memory contents, and the port carries no
+`rst`.
 
 ## 5) CDC
 

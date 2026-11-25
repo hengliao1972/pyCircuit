@@ -11,4 +11,3 @@
 #include "pyc_async_fifo.hpp"
 #include "pyc_ops.hpp"
 #include "pyc_primitives.hpp"
-#include "pyc_vec.hpp"

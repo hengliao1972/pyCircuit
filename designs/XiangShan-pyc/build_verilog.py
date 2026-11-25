@@ -661,7 +661,6 @@ def run_pycc(pycc: Path, pyc_path: Path, verilog_dir: Path, *, name: str, logic_
         "--hierarchy-policy=strict",
         "--inline-policy=off",
         f"--logic-depth={logic_depth}",
-        "--unroll-vector", # todo: temp, remove it after bug fixed
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

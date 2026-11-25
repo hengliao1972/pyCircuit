@@ -30,16 +30,20 @@ constexpr unsigned clog2(std::size_t value) {
 // - Strict ready/valid handshake (no combinational cross-domain paths).
 // - Depth must be a power of two and >= 2.
 template <unsigned Width, std::size_t Depth>
-class pyc_async_fifo {
+class pycAsyncFifo {
 public:
-  static_assert(Width > 0 && Width <= 64, "pyc_async_fifo supports widths 1..64 in the prototype");
-  static_assert(Depth >= 2, "pyc_async_fifo requires Depth >= 2");
-  static_assert(detail::isPowerOfTwo(Depth), "pyc_async_fifo requires power-of-two Depth");
+  static_assert(Width > 0 && Width <= 64, "pycAsyncFifo supports widths 1..64 in the prototype");
+  static_assert(Depth >= 2, "pycAsyncFifo requires Depth >= 2");
+  static_assert(detail::isPowerOfTwo(Depth), "pycAsyncFifo requires power-of-two Depth");
 
   static constexpr unsigned AW = detail::clog2(Depth);
-  static_assert(AW >= 1, "internal: pyc_async_fifo requires AW >= 1");
+  static_assert(AW >= 1, "internal: pycAsyncFifo requires AW >= 1");
+  using change_mask_t = std::uint8_t;
+  static constexpr change_mask_t kInReadyChanged = change_mask_t{1} << 0;
+  static constexpr change_mask_t kOutValidChanged = change_mask_t{1} << 1;
+  static constexpr change_mask_t kOutDataChanged = change_mask_t{1} << 2;
 
-  pyc_async_fifo(Wire<1> &in_clk,
+  pycAsyncFifo(Wire<1> &in_clk,
                  Wire<1> &in_rst,
                  Wire<1> &in_valid,
                  Wire<1> &in_ready,
@@ -67,7 +71,7 @@ public:
     lastEvalOutData_ = out_data_r_;
   }
 
-  void tick_compute() {
+  void tick_sample() {
     pendingIn_ = false;
     pendingOut_ = false;
 
@@ -85,12 +89,25 @@ public:
       tick_compute_out();
   }
 
-  void tick_commit() {
+  // Commits both clock domains and identifies each externally visible change.
+  change_mask_t tick_commit() {
+    const Wire<1> oldInReady = in_ready;
+    const Wire<1> oldOutValid = out_valid;
+    const Wire<Width> oldOutData = out_data;
     if (pendingIn_)
       tick_commit_in();
     if (pendingOut_)
       tick_commit_out();
     eval();
+
+    change_mask_t changed = 0;
+    if (oldInReady != in_ready)
+      changed |= kInReadyChanged;
+    if (oldOutValid != out_valid)
+      changed |= kOutValidChanged;
+    if (oldOutData != out_data)
+      changed |= kOutDataChanged;
+    return changed;
   }
 
 private:
