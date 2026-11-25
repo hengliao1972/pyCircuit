@@ -5,7 +5,9 @@ concept; generated code only ever includes the umbrella `pyc_sim.hpp`.
 
 The vector containers (`pyc_vec.hpp`, `Vec<T, N>`, `pycVecReg`, `pycVecDelayLine`)
 are gone together with the IR `vector<>` type; fronts expand vectors into scalar
-lanes, so every remaining component is scalar-valued.
+lanes, so every remaining component is scalar-valued. The value-type sharing
+bases (`RegBase`, `DelayBase`, `CdcBase`) went with them: each family now has
+exactly one leaf, so its semantics live directly in the generated class.
 
 ## Type layer
 
@@ -25,10 +27,10 @@ lanes, so every remaining component is scalar-valued.
 
 | File | Owns |
 |---|---|
-| `pyc_reg.hpp` | `RegBase<ValT>`, `pycReg<W>` |
-| `pyc_delay_line.hpp` | `DelayBase<ValT, Depth>`, `pycDelayLine` |
-| `pyc_fifo.hpp` | `pycFifo<Width, Depth>` |
-| `pyc_cdc_sync.hpp` | `CdcBase<ValT, Stages>`, `pycCdcSync` |
+| `pyc_reg.hpp` | `pycReg<W>` |
+| `pyc_delay_line.hpp` | `pycDelayLine<W, Depth>` |
+| `pyc_fifo.hpp` | `pycFifo<W, Depth>` |
+| `pyc_cdc_sync.hpp` | `pycCdcSync<W, Stages>` |
 | `pyc_sync_mem.hpp` | `pycSyncMemNM` (N read ports, M write ports) |
 | `pyc_byte_mem.hpp` | `pycByteMem` (byte-addressed) |
 | `pyc_async_fifo.hpp` | `pycAsyncFifo` (dual clock) |

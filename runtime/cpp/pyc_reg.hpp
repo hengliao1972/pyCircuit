@@ -5,17 +5,16 @@
 
 namespace pyc::cpp {
 
-// Register semantics shared by the register leaves: staging/publish lives here
-// once and the leaf stays a 0-line derivation that keeps its generated
-// constructor signature. The edge protocol lives in ClockedElement; derived
-// classes supply sample().
-template <class ValT>
-class RegBase : public ClockedElement<RegBase<ValT>> {
-  using Base = ClockedElement<RegBase<ValT>>;
+// Generated register. Staging and publish live here; the clock-edge protocol
+// comes from ClockedElement, which calls sample() and tick_commit().
+template <unsigned Width>
+class pycReg : public ClockedElement<pycReg<Width>> {
+  using Base = ClockedElement<pycReg<Width>>;
   using change_mask_t = typename Base::change_mask_t;
 
 public:
-  RegBase(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, ValT &d, ValT &init, ValT &q)
+  pycReg(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, Wire<Width> &d,
+         Wire<Width> &init, Wire<Width> &q)
       : Base(clk), rst(rst), en(en), d(d), init(init), q(q) {}
 
   // Applies a pending edge and reports whether the visible output changed.
@@ -41,19 +40,11 @@ public:
 
   Wire<1> &rst;
   Wire<1> &en;
-  ValT &d;
-  ValT &init;
-  ValT &q;
+  Wire<Width> &d;
+  Wire<Width> &init;
+  Wire<Width> &q;
 
-  ValT qNext{};
-};
-
-template <unsigned Width>
-class pycReg : public RegBase<Wire<Width>> {
-  using Base = RegBase<Wire<Width>>;
-
-public:
-  using Base::Base;
+  Wire<Width> qNext{};
 };
 
 } // namespace pyc::cpp

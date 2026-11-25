@@ -10,16 +10,16 @@ namespace pyc::cpp {
 // Simulator representation of DEPTH cascaded registers. A circular buffer
 // makes the normal enabled edge O(1); reset still initializes every stage so
 // reset/enable and compute-before-commit semantics match pycReg chains.
-template <class ValT, unsigned Depth>
-class DelayBase : public ClockedElement<DelayBase<ValT, Depth>> {
-  using Base = ClockedElement<DelayBase<ValT, Depth>>;
+template <unsigned Width, unsigned Depth>
+class pycDelayLine : public ClockedElement<pycDelayLine<Width, Depth>> {
+  using Base = ClockedElement<pycDelayLine<Width, Depth>>;
   using change_mask_t = typename Base::change_mask_t;
 
-  static_assert(Depth > 1, "DelayBase requires Depth > 1");
+  static_assert(Depth > 1, "pycDelayLine requires Depth > 1");
 
 public:
-  DelayBase(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, ValT &d, ValT &init,
-            ValT &q)
+  pycDelayLine(Wire<1> &clk, Wire<1> &rst, Wire<1> &en, Wire<Width> &d,
+               Wire<Width> &init, Wire<Width> &q)
       : Base(clk), rst(rst), en(en), d(d), init(init), q(q) {}
 
   // True while an enabled edge is waiting for tick_commit. Tap consumers must
@@ -27,7 +27,7 @@ public:
   inline bool has_pending() const { return this->pending; }
 
   // Applies a pending edge and reports whether the tail q changed; tap
-  // consumers wake via has_pending() instead (see the scalar note above).
+  // consumers wake via has_pending() instead.
   inline change_mask_t tick_commit() {
     if (__builtin_expect(!this->pending, 1))
       return 0;
@@ -44,11 +44,11 @@ public:
     return changed ? Base::kChanged : change_mask_t{0};
   }
 
-  inline ValT tap(unsigned depth) const {
+  inline Wire<Width> tap(unsigned depth) const {
     return stages[(head + Depth - depth) % Depth];
   }
 
-  inline ValT tap_next(unsigned depth) const {
+  inline Wire<Width> tap_next(unsigned depth) const {
     if (pendingReset)
       return init;
     if (!this->pending)
@@ -72,27 +72,19 @@ public:
 
   Wire<1> &rst;
   Wire<1> &en;
-  ValT &d;
-  ValT &init;
-  ValT &q;
+  Wire<Width> &d;
+  Wire<Width> &init;
+  Wire<Width> &q;
   bool pendingReset = false;
-  ValT qNext{};
-  ValT sampledInput{};
-  std::array<ValT, Depth> stages{};
+  Wire<Width> qNext{};
+  Wire<Width> sampledInput{};
+  std::array<Wire<Width>, Depth> stages{};
   unsigned head = 0;
 
 private:
   static constexpr unsigned nextIndex(unsigned index) {
     return index + 1u == Depth ? 0u : index + 1u;
   }
-};
-
-template <unsigned Width, unsigned Depth>
-class pycDelayLine : public DelayBase<Wire<Width>, Depth> {
-  using Base = DelayBase<Wire<Width>, Depth>;
-
-public:
-  using Base::Base;
 };
 
 } // namespace pyc::cpp
