@@ -47,13 +47,13 @@ public:
 
   ~ChainCollapseDriver() override { rewriter.setListener(nullptr); }
 
-  mlir::LogicalResult collapse(mlir::Region &region) {
+  mlir::LogicalResult collapse(mlir::Region &region, int64_t iterationCap = 100) {
     bool changed = false;
     int64_t iteration = 0;
     do {
       // Safety cap: one drain converges all use-side chains; iterations only
       // guard against a hypothetical non-confluent pattern interaction.
-      if (++iteration > 100)
+      if (++iteration > iterationCap)
         return mlir::failure();
       worklist.clear();
       worklistMap.clear();
