@@ -4,12 +4,8 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Interfaces/SideEffectInterfaces.h"
-#include "mlir/IR/Matchers.h"
-#include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Rewrite/PatternApplicator.h"
-#include "mlir/Transforms/FoldUtils.h"
+#include "pyc/Transforms/WorklistDriver.h"
 
 
 using namespace mlir;
@@ -256,186 +252,6 @@ struct OrAndXorFactor : public OpRewritePattern<pyc::OrOp> {
 };
 
 
-/// A worklist driver for the five patterns above. It follows the upstream
-/// greedy driver's processing semantics (fold, then match patterns, LIFO over
-/// a postorder population, constant materialization included) with one crucial
-/// difference: the users of every replaced value are re-enqueued immediately.
-/// The upstream greedy driver restarts from a full region walk each iteration
-/// and never re-enqueues users of replaced values, so a folding chain in which
-/// each level only becomes foldable after the previous one collapsed advances
-/// exactly one level per iteration and aborts once it outgrows the iteration
-/// budget. With users re-enqueued, such chains collapse within a single
-/// worklist drain and no iteration budget is needed.
-class ChainCollapseDriver : public RewriterBase::Listener {
-public:
-  ChainCollapseDriver(MLIRContext *ctx, const FrozenRewritePatternSet &patterns)
-      : context(ctx), rewriter(ctx), matcher(patterns) {
-    matcher.applyDefaultCostModel();
-    rewriter.setListener(this);
-  }
-
-  ~ChainCollapseDriver() override { rewriter.setListener(nullptr); }
-
-  LogicalResult collapse(Region &region) {
-    bool changed = false;
-    int64_t iteration = 0;
-    do {
-      // Safety cap: one drain converges all use-side chains; iterations only
-      // guard against a hypothetical non-confluent pattern interaction.
-      if (++iteration > 100)
-        return failure();
-      worklist.clear();
-      worklistMap.clear();
-      OperationFolder folder(context, this);
-      auto insertKnownConstant = [&](Operation *op) {
-        Attribute constValue;
-        if (matchPattern(op, m_Constant(&constValue)))
-          if (!folder.insertKnownConstant(op, constValue))
-            return true;
-        return false;
-      };
-      region.walk([&](Operation *op) {
-        if (!insertKnownConstant(op))
-          addToWorklist(op);
-      });
-      changed = processWorklist();
-    } while (changed);
-    return success();
-  }
-
-private:
-  void addToWorklist(Operation *op) {
-    // Mirror the upstream scope handling: enqueue the op and its ancestors.
-    SmallVector<Operation *, 8> ancestors;
-    Region *region = nullptr;
-    do {
-      ancestors.push_back(op);
-      region = op->getParentRegion();
-      if (region == nullptr)
-        break;
-      op = region->getParentOp();
-    } while (op);
-    for (Operation *op : ancestors)
-      push(op);
-  }
-
-  void push(Operation *op) {
-    if (!worklistMap.insert({op, worklist.size()}).second)
-      return;
-    worklist.push_back(op);
-  }
-
-  Operation *pop() {
-    while (!worklist.empty()) {
-      Operation *op = worklist.back();
-      worklist.pop_back();
-      if (!op)
-        continue;
-      worklistMap.erase(op);
-      return op;
-    }
-    return nullptr;
-  }
-
-  bool empty() const {
-    return !llvm::any_of(worklist, [](Operation *op) { return op != nullptr; });
-  }
-
-  void removeFromList(Operation *op) {
-    auto it = worklistMap.find(op);
-    if (it != worklistMap.end()) {
-      worklist[it->second] = nullptr;
-      worklistMap.erase(it);
-    }
-  }
-
-  bool processWorklist() {
-    bool changed = false;
-    while (!empty()) {
-      Operation *op = pop();
-
-      // If the operation is trivially dead - remove it.
-      if (isOpTriviallyDead(op)) {
-        rewriter.eraseOp(op);
-        changed = true;
-        continue;
-      }
-
-      // Try to fold this op. Do not fold constant ops; that would loop with
-      // the materialized constants.
-      if (!op->hasTrait<OpTrait::ConstantLike>()) {
-        SmallVector<OpFoldResult> foldResults;
-        if (succeeded(op->fold(foldResults))) {
-          if (foldResults.empty()) {
-            // In-place update; revisit the op itself.
-            push(op);
-            changed = true;
-            continue;
-          }
-          OpBuilder::InsertionGuard g(rewriter);
-          rewriter.setInsertionPoint(op);
-          SmallVector<Value> replacements;
-          bool materialized = true;
-          for (auto [ofr, resultType] :
-               llvm::zip_equal(foldResults, op->getResultTypes())) {
-            if (auto value = ofr.dyn_cast<Value>()) {
-              replacements.push_back(value);
-              continue;
-            }
-            Operation *constOp = op->getDialect()->materializeConstant(
-                rewriter, ofr.get<Attribute>(), resultType, op->getLoc());
-            if (!constOp) {
-              for (Value replacement : replacements)
-                if (Operation *def = replacement.getDefiningOp())
-                  rewriter.eraseOp(def);
-              materialized = false;
-              break;
-            }
-            replacements.push_back(constOp->getResult(0));
-          }
-          if (materialized) {
-            rewriter.replaceOp(op, replacements);
-            changed = true;
-            continue;
-          }
-        }
-      }
-
-      // Try to match one of the patterns.
-      if (succeeded(matcher.matchAndRewrite(op, rewriter)))
-        changed = true;
-    }
-    return changed;
-  }
-
-  void notifyOperationInserted(Operation *op,
-                               OpBuilder::InsertPoint previous) override {
-    push(op);
-  }
-
-  void notifyOperationModified(Operation *op) override { push(op); }
-
-  void notifyOperationReplaced(Operation *op,
-                               ValueRange replacement) override {
-    for (Value v : replacement)
-      for (Operation *user : v.getUsers())
-        push(user);
-  }
-
-  void notifyOperationErased(Operation *op) override {
-    removeFromList(op);
-    for (Value operand : op->getOperands())
-      if (Operation *def = operand.getDefiningOp())
-        push(def);
-  }
-
-  MLIRContext *context;
-  PatternRewriter rewriter;
-  PatternApplicator matcher;
-  std::vector<Operation *> worklist;
-  DenseMap<Operation *, unsigned> worklistMap;
-};
-
 struct CombCanonicalizePass : public PassWrapper<CombCanonicalizePass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(CombCanonicalizePass)
 
@@ -454,7 +270,7 @@ struct CombCanonicalizePass : public PassWrapper<CombCanonicalizePass, Operation
                  OrAndXorFactor>(f.getContext());
 
     FrozenRewritePatternSet frozen(std::move(patterns));
-    ChainCollapseDriver driver(f.getContext(), frozen);
+    pyc::ChainCollapseDriver driver(f.getContext(), frozen);
     if (failed(driver.collapse(f.getBody())))
       signalPassFailure();
   }

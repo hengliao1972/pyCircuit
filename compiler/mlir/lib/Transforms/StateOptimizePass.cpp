@@ -9,7 +9,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/CSE.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "pyc/Transforms/WorklistDriver.h"
 
 using namespace mlir;
 
@@ -26,13 +26,13 @@ static LogicalResult canonicalizeAndCSE(func::FuncOp function) {
     dialect->getCanonicalizationPatterns(patterns);
   for (RegisteredOperationName op : context->getRegisteredOperations())
     op.getCanonicalizationPatterns(patterns, context);
-  // Large FIRRTL-derived functions converge only after serial folding chains
-  // settle; each chain advances one level per greedy walk, so the driver
-  // default of 10 iterations aborts mid-chain (observed on BOOM-scale designs
-  // in the C++ path, where this pass runs).
-  GreedyRewriteConfig cfg;
-  cfg.maxIterations = 100;
-  if (failed(applyPatternsAndFoldGreedily(function, std::move(patterns), cfg)))
+  // Same rationale as comb-canonicalize: serial folding chains only collapse
+  // when users of replaced values are re-enqueued, which the upstream greedy
+  // driver does not do (it advances one level per full re-walk and aborts
+  // once the chain depth outgrows the iteration budget).
+  FrozenRewritePatternSet frozen(std::move(patterns));
+  ChainCollapseDriver driver(context, frozen);
+  if (failed(driver.collapse(function.getBody())))
     return failure();
   IRRewriter rewriter(context);
   DominanceInfo domInfo(function);
