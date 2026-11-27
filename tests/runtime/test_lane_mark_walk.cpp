@@ -1,5 +1,5 @@
-// direct_commit_marked() contract: the caller marks the lanes whose producing comb
-// ran, and the edge handler forces a full walk in the three situations where a lane
+// direct_commit_marked() contract: the caller marks the lanes whose next value
+// changed, and the edge handler forces a full walk in the three situations where a lane
 // can change with no comb activity at all -- first edge, reset, and an en 0->1
 // transition. These cases pin that contract.
 #include <cstdint>
