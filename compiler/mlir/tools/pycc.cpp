@@ -18,7 +18,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "pyc/Transforms/WorklistDriver.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
@@ -78,26 +78,34 @@ static void addRemoveDeadValuesPassIfSupported(PassManager &pm) {
 #endif
 }
 
-template <typename T, typename = void>
-struct GreedyRewriteConfigHasSetters : std::false_type {};
+namespace {
+/// Module-level canonicalizer built on the pyc worklist driver: users of
+/// replaced values are re-enqueued, so serial folding chains collapse in a
+/// single drain instead of advancing one level per greedy iteration.
+struct CanonicalizeWorklistPass
+    : public PassWrapper<CanonicalizeWorklistPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(CanonicalizeWorklistPass)
 
-template <typename T>
-struct GreedyRewriteConfigHasSetters<
-    T, std::void_t<decltype(std::declval<T &>().setMaxIterations(int64_t{})),
-                   decltype(std::declval<T &>().setMaxNumRewrites(int64_t{}))>>
-    : std::true_type {};
-
-template <typename T>
-static void configureGreedyRewriteBudget(T &cfg, int64_t maxIterations,
-                                         int64_t maxNumRewrites) {
-  if constexpr (GreedyRewriteConfigHasSetters<T>::value) {
-    cfg.setMaxIterations(maxIterations);
-    cfg.setMaxNumRewrites(maxNumRewrites);
-  } else {
-    cfg.maxIterations = maxIterations;
-    cfg.maxNumRewrites = maxNumRewrites;
+  StringRef getArgument() const override { return "pyc-canonicalize-worklist"; }
+  StringRef getDescription() const override {
+    return "Canonicalize with the pyc worklist driver (users re-enqueued)";
   }
-}
+
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+    RewritePatternSet patterns(module.getContext());
+    for (Dialect *dialect : module.getContext()->getLoadedDialects())
+      dialect->getCanonicalizationPatterns(patterns);
+    for (RegisteredOperationName op :
+         module.getContext()->getRegisteredOperations())
+      op.getCanonicalizationPatterns(patterns, module.getContext());
+    FrozenRewritePatternSet frozen(std::move(patterns));
+    pyc::ChainCollapseDriver driver(module.getContext(), frozen);
+    if (failed(driver.collapse(module->getRegion(0))))
+      signalPassFailure();
+  }
+};
+} // namespace
 
 static llvm::cl::opt<std::string> inputFilename(llvm::cl::Positional, llvm::cl::desc("<input .pyc>"),
                                                 llvm::cl::init("-"));
@@ -234,10 +242,6 @@ static llvm::cl::opt<std::string> hierarchyPolicy(
     llvm::cl::desc("Module hierarchy policy: strict | instantiate"),
     llvm::cl::init("strict"));
 
-static llvm::cl::opt<unsigned> canonicalizeBudget(
-    "canonicalize-budget",
-    llvm::cl::desc("Canonicalizer budget (max iterations; 0 keeps profile default)"),
-    llvm::cl::init(0));
 
 static llvm::cl::opt<std::string> profileJsonPath(
     "profile-json",
@@ -2367,17 +2371,6 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  unsigned effectiveCanonicalizeBudget = canonicalizeBudget;
-  if (effectiveCanonicalizeBudget == 0 && isDevFastProfile)
-    effectiveCanonicalizeBudget = 6;
-
-  GreedyRewriteConfig canonicalizeCfg;
-  if (effectiveCanonicalizeBudget > 0) {
-    configureGreedyRewriteBudget(
-        canonicalizeCfg, static_cast<int64_t>(effectiveCanonicalizeBudget),
-        static_cast<int64_t>(effectiveCanonicalizeBudget) * 4096);
-  }
-
   const unsigned cppCombChunkNodes = cppShardMaxAstNodes > 0 ? cppShardMaxAstNodes
                                                            : pyc::CppEmitterOptions::kDefaultCombChunkNodes;
 
@@ -2423,7 +2416,7 @@ int main(int argc, char **argv) {
   pm.addPass(createSymbolDCEPass());
   if (inlineDecision.enableInline)
     pm.addPass(createInlinerPass());
-  pm.addPass(createCanonicalizerPass(canonicalizeCfg));
+  pm.addPass(std::make_unique<CanonicalizeWorklistPass>());
   pm.addPass(createCSEPass());
   pm.addPass(createSCCPPass());
   addRemoveDeadValuesPassIfSupported(pm);
@@ -2459,7 +2452,7 @@ int main(int argc, char **argv) {
     pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());
     pm.addNestedPass<func::FuncOp>(pyc::createFuseCombPass());
   }
-  pm.addPass(createCanonicalizerPass(canonicalizeCfg));
+  pm.addPass(std::make_unique<CanonicalizeWorklistPass>());
   pm.addPass(createCSEPass());
   addRemoveDeadValuesPassIfSupported(pm);
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadInstancesPass());
@@ -2542,7 +2535,6 @@ int main(int argc, char **argv) {
     obj["inline_enabled"] = inlineDecision.enableInline;
     obj["inline_threshold_ops"] = static_cast<int64_t>(inlineDecision.thresholdOps);
     obj["inline_reason"] = inlineDecision.reason;
-    obj["canonicalize_budget"] = static_cast<int64_t>(effectiveCanonicalizeBudget);
     obj["module_op_count"] = static_cast<int64_t>(moduleOpCount);
     obj["cpp_shard_threshold_lines"] = static_cast<int64_t>(cppShardThresholdLines);
     obj["cpp_shard_threshold_bytes"] = static_cast<int64_t>(cppShardThresholdBytes);
@@ -2600,7 +2592,6 @@ int main(int argc, char **argv) {
     hierarchyObj["module_count_after"] = static_cast<int64_t>(moduleSymbolsAfter.size());
     hierarchyObj["preserved"] = hierarchyPreserved;
     root["hierarchy"] = std::move(hierarchyObj);
-    root["canonicalize_budget"] = static_cast<int64_t>(effectiveCanonicalizeBudget);
 
     llvm::json::Object stats;
     stats["reg_count"] = compileStats.regCount;

@@ -4,9 +4,8 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "pyc/Transforms/WorklistDriver.h"
 
 
 using namespace mlir;
@@ -270,8 +269,9 @@ struct CombCanonicalizePass : public PassWrapper<CombCanonicalizePass, Operation
                  OrBasicSimplify,
                  OrAndXorFactor>(f.getContext());
 
-    GreedyRewriteConfig cfg;
-    if (failed(applyPatternsAndFoldGreedily(f, std::move(patterns), cfg)))
+    FrozenRewritePatternSet frozen(std::move(patterns));
+    pyc::ChainCollapseDriver driver(f.getContext(), frozen);
+    if (failed(driver.collapse(f.getBody())))
       signalPassFailure();
   }
 };
