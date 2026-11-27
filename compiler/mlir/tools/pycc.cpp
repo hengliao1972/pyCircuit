@@ -86,9 +86,6 @@ struct CanonicalizeWorklistPass
     : public PassWrapper<CanonicalizeWorklistPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(CanonicalizeWorklistPass)
 
-  CanonicalizeWorklistPass(int64_t maxIterations)
-      : maxIterations(maxIterations) {}
-
   StringRef getArgument() const override { return "pyc-canonicalize-worklist"; }
   StringRef getDescription() const override {
     return "Canonicalize with the pyc worklist driver (users re-enqueued)";
@@ -104,11 +101,9 @@ struct CanonicalizeWorklistPass
       op.getCanonicalizationPatterns(patterns, module.getContext());
     FrozenRewritePatternSet frozen(std::move(patterns));
     pyc::ChainCollapseDriver driver(module.getContext(), frozen);
-    if (failed(driver.collapse(module->getRegion(0), maxIterations)))
+    if (failed(driver.collapse(module->getRegion(0))))
       signalPassFailure();
   }
-
-  int64_t maxIterations;
 };
 } // namespace
 
@@ -239,10 +234,6 @@ static llvm::cl::opt<std::string> hierarchyPolicy(
     llvm::cl::desc("Module hierarchy policy: strict | instantiate"),
     llvm::cl::init("strict"));
 
-static llvm::cl::opt<unsigned> canonicalizeBudget(
-    "canonicalize-budget",
-    llvm::cl::desc("Canonicalize worklist drain cap (iterations; 0 keeps profile default)"),
-    llvm::cl::init(0));
 
 static llvm::cl::opt<std::string> profileJsonPath(
     "profile-json",
@@ -2372,14 +2363,6 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  unsigned effectiveCanonicalizeBudget = canonicalizeBudget;
-  if (effectiveCanonicalizeBudget == 0 && isDevFastProfile)
-    effectiveCanonicalizeBudget = 6;
-
-  const int64_t canonicalizeIterations = effectiveCanonicalizeBudget
-                                             ? static_cast<int64_t>(effectiveCanonicalizeBudget)
-                                             : 10;
-
   const unsigned cppCombChunkNodes = cppShardMaxAstNodes > 0 ? cppShardMaxAstNodes
                                                            : pyc::CppEmitterOptions::kDefaultCombChunkNodes;
 
@@ -2425,7 +2408,7 @@ int main(int argc, char **argv) {
   pm.addPass(createSymbolDCEPass());
   if (inlineDecision.enableInline)
     pm.addPass(createInlinerPass());
-  pm.addPass(std::make_unique<CanonicalizeWorklistPass>(canonicalizeIterations));
+  pm.addPass(std::make_unique<CanonicalizeWorklistPass>());
   pm.addPass(createCSEPass());
   pm.addPass(createSCCPPass());
   addRemoveDeadValuesPassIfSupported(pm);
@@ -2461,7 +2444,7 @@ int main(int argc, char **argv) {
     pm.addNestedPass<func::FuncOp>(pyc::createEliminateWiresPass());
     pm.addNestedPass<func::FuncOp>(pyc::createFuseCombPass());
   }
-  pm.addPass(std::make_unique<CanonicalizeWorklistPass>(canonicalizeIterations));
+  pm.addPass(std::make_unique<CanonicalizeWorklistPass>());
   pm.addPass(createCSEPass());
   addRemoveDeadValuesPassIfSupported(pm);
   pm.addNestedPass<func::FuncOp>(pyc::createEliminateDeadInstancesPass());
@@ -2544,7 +2527,6 @@ int main(int argc, char **argv) {
     obj["inline_enabled"] = inlineDecision.enableInline;
     obj["inline_threshold_ops"] = static_cast<int64_t>(inlineDecision.thresholdOps);
     obj["inline_reason"] = inlineDecision.reason;
-    obj["canonicalize_budget"] = static_cast<int64_t>(effectiveCanonicalizeBudget);
     obj["module_op_count"] = static_cast<int64_t>(moduleOpCount);
     obj["cpp_shard_threshold_lines"] = static_cast<int64_t>(cppShardThresholdLines);
     obj["cpp_shard_threshold_bytes"] = static_cast<int64_t>(cppShardThresholdBytes);
@@ -2602,7 +2584,6 @@ int main(int argc, char **argv) {
     hierarchyObj["module_count_after"] = static_cast<int64_t>(moduleSymbolsAfter.size());
     hierarchyObj["preserved"] = hierarchyPreserved;
     root["hierarchy"] = std::move(hierarchyObj);
-    root["canonicalize_budget"] = static_cast<int64_t>(effectiveCanonicalizeBudget);
 
     llvm::json::Object stats;
     stats["reg_count"] = compileStats.regCount;
