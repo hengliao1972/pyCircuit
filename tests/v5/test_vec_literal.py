@@ -13,15 +13,16 @@ from pycircuit.hw import Circuit
 
 
 def test_vec_accepts_typed_literals() -> None:
-    """m.vec(u(8,1), u(8,2), u(8,3)) builds vector<3xi8>."""
+    """m.vec(u(8,1), u(8,2), u(8,3)) is a 3-lane i8 vector; IR holds lanes."""
     c = Circuit("vec_typed_lit")
     v = c.vec(u(8, 1), u(8, 2), u(8, 3))
 
     assert v.ty == Vector(3, Bits(8))
     assert v.signed is False
     mlir = c.emit_mlir()
-    assert "pyc.v_create" in mlir
-    assert "vector<3xi8>" in mlir
+    assert "pyc.v_create" not in mlir
+    assert "vector<" not in mlir
+    assert mlir.count("pyc.constant") == 3
 
 
 def test_vec_accepts_signed_literals() -> None:
@@ -123,7 +124,9 @@ def test_vec_backward_compat_wires_only() -> None:
     v = c.vec(a, b)
 
     assert v.ty == Vector(2, Bits(8))
-    assert "pyc.v_create" in c.emit_mlir()
+    mlir = c.emit_mlir()
+    assert "pyc.v_create" not in mlir
+    assert "vector<" not in mlir
 
 
 # ── CycleAwareDomain.vec (v5 layer) ──────────────────────────────────────

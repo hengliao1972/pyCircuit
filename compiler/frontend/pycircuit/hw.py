@@ -24,6 +24,7 @@ from .data import Bits, DT, Clock, Data, Reset, Vector
 from .design import DesignError
 from .dsl import Module, Signal, is_bits_signal, is_vector_signal
 from .literals import LiteralValue, infer_literal_width
+from .vector_lower import lane_count
 VT = TypeVar("VT", bound=Data)
 
 
@@ -821,19 +822,22 @@ class Reg(Generic[DT]):
         *,
         when: Union[Wire, Signal, Connector, int, LiteralValue] = 1,
     ) -> None:
-        """Drive `self.next` (backedge) for a stateful variable.
+        """Accumulate this cycle's D input for a stateful variable.
 
-        - `r.set(v)` is equivalent to `m.assign(r.next, v)`
-        - `r.set(v, when=cond)` drives `cond ? v : r` (hold otherwise)
+        Successive calls fold in call order and emit one ``pyc.assign`` at
+        circuit seal. Conditional ``when=0`` keeps the already-decided next,
+        not the old Q. Unconditional ``r.set(v)`` replaces any pending next.
         """
         m = self.q.m
         if not isinstance(m, Circuit):
             raise TypeError("Reg.set requires the Reg to belong to a Circuit")
         
         next_w = Wire.as_wire(value, m=m, width=self.width)
+        prev = m._pending_assign.get(self.next.ref)
+        hold = prev[1] if prev is not None else self.q
 
         if isinstance(when, int) and int(when) == 1:
-            m.assign(self.next, next_w)
+            m._record_pending_assign(self.next, next_w)
             return
         
         cond = Wire.as_wire(when, m=m, width=1)
@@ -841,7 +845,7 @@ class Reg(Generic[DT]):
             raise TypeError("when width must be 1")
         when_w = Wire.as_wire(when, m=m)
 
-        m.assign(self.next, when_w._select_internal(value, self.q))
+        m._record_pending_assign(self.next, when_w._select_internal(value, hold))
 
 class Circuit(Module):
     """High-level wrapper over `Module` that returns `Wire`/`Reg` objects."""
@@ -862,6 +866,21 @@ class Circuit(Module):
         self._struct_instance_count = 0
         self._struct_state_alloc_count = 0
         self._struct_collections: list[dict[str, Any]] = []
+        # Last-wins pending assign (Reg.set / m.assign); one pyc.assign per dst.
+        self._pending_assign: dict[str, tuple[Wire, Wire]] = {}
+
+    def _record_pending_assign(self, dst: Wire, value: Wire) -> None:
+        """Replace the pending driver for ``dst``; emit once after finalizers."""
+        self._pending_assign[dst.ref] = (dst, value)
+
+    def _flush_pending_assign(self) -> None:
+        items = list(self._pending_assign.values())
+        self._pending_assign.clear()
+        for dst, value in items:
+            super().assign(dst.sig, value.sig)
+
+    def _after_finalizers(self) -> None:
+        self._flush_pending_assign()
 
     @staticmethod
     def _struct_identity(payload: Any) -> str:
@@ -1196,6 +1215,7 @@ class Circuit(Module):
         dst: Union[Wire, Reg, Signal, Connector],
         src: Union[Wire, Reg, Signal, Connector, int, LiteralValue],
     ) -> None:
+        """Drive ``dst``. A later assign to the same wire replaces the earlier one."""
         if isinstance(dst, Connector):
             if isinstance(dst, RegConnector):
                 dst.set(src)
@@ -1221,32 +1241,23 @@ class Circuit(Module):
         if isinstance(src, LiteralValue):
             lit_w, _ = _coerce_literal_width(src, ctx_width=dst_sig.ty.width, ctx_signed=is_signed_src(src))
             src_sig = super().const(int(src.value), width=lit_w)
-            super().assign(dst_sig, src_sig)
-            return
-        if isinstance(src, int):
+        elif isinstance(src, int):
             src_sig = super().const(int(src), width=dst_sig.ty.width)
-            super().assign(dst_sig, src_sig)
-            return
+        else:
+            src_signed = is_signed_src(src)
+            src_sig = Signal.as_sig(src)
+            if dst_sig.ty != src_sig.ty:
+                if not (isinstance(dst_sig.ty, Bits) and isinstance(src_sig.ty, Bits)):
+                    raise TypeError(f"assign requires same types, got {dst_sig.ty} and {src_sig.ty}")
+                dst_w = dst_sig.ty.width
+                src_w = src_sig.ty.width
+                if src_w < dst_w:
+                    src_sig = super().sext(src_sig, width=dst_w) if src_signed else super().zext(src_sig, width=dst_w)
+                elif src_w > dst_w:
+                    src_sig = super().trunc(src_sig, width=dst_w)
 
-        src_signed = is_signed_src(src)
-        src_sig = Signal.as_sig(src)
-        
-        if dst_sig.ty == src_sig.ty:
-            super().assign(dst_sig, src_sig)
-            return
-
-        # Implicit integer resizing for convenience (zext smaller, trunc larger).
-        if isinstance(dst_sig.ty, Bits) and isinstance(src_sig.ty, Bits):
-            dst_w = dst_sig.ty.width
-            src_w = src_sig.ty.width
-            if src_w < dst_w:
-                src_sig = super().sext(src_sig, width=dst_w) if src_signed else super().zext(src_sig, width=dst_w)
-            elif src_w > dst_w:
-                src_sig = super().trunc(src_sig, width=dst_w)
-            super().assign(dst_sig, src_sig)
-            return
-
-        raise TypeError(f"assign requires same types, got {dst_sig.ty} and {src_sig.ty}")
+        dst_w = dst if isinstance(dst, Wire) else Wire(self, dst_sig)
+        self._record_pending_assign(dst_w, Wire(self, src_sig))
 
     def assert_(self, cond: Union[Wire, Reg, Signal], *, msg: str | None = None) -> None:
         c = cond.q.sig if isinstance(cond, Reg) else cond
@@ -1267,7 +1278,8 @@ class Circuit(Module):
         en: Union[Wire, Signal, int, LiteralValue] = 1,
         shape: list[int],
         stage: str | None = None,
-        signed: bool | None = None
+        signed: bool | None = None,
+        generated: str | None = None,
     ) -> Reg[Vector]: ...
     
     @overload
@@ -1282,7 +1294,8 @@ class Circuit(Module):
         init: Union[Wire, Reg, Signal, int, list, LiteralValue] | None = None,
         en: Union[Wire, Signal, int, LiteralValue] = 1,
         stage: str | None = None,
-        signed: bool | None = None
+        signed: bool | None = None,
+        generated: str | None = None,
     ) -> Reg: ...
     
     def out(
@@ -1298,6 +1311,7 @@ class Circuit(Module):
         shape: list[int] | None = None,
         stage: str | None = None,
         signed: bool | None = None,  # reserved for future type inference / lowering
+        generated: str | None = None,
     ) -> Reg:
         """Declare a named stateful variable (backedge register).
 
@@ -1329,7 +1343,12 @@ class Circuit(Module):
 
         next_w = Wire(
             self,
-            super().new_signal(width=width, name=f"{fullname}__next", shape=shape),
+            super().new_signal(
+                width=width,
+                name=f"{fullname}__next",
+                shape=shape,
+                generated=generated,
+            ),
         )
 
         # ``pyc.reg`` enable is scalar i1 (shared across vector lanes).
@@ -1351,10 +1370,14 @@ class Circuit(Module):
         if shape and isinstance(init_w.ty, Vector) and init_w.ty.shape() != shape:
             raise TypeError(f"out() init shape must be {shape}, got {init_w.ty}")
 
-        r = self.reg(clk, rst, en_w, next_w, init_w)
+        r = self.reg(clk, rst, en_w, next_w, init_w, generated=generated)
 
         # Name the observable value of the state variable.
-        q_named = Wire(self, self.alias(r.q.sig, name=fullname), signed=r.q.signed)
+        q_named = Wire(
+            self,
+            self.alias(r.q.sig, name=fullname, generated=generated),
+            signed=r.q.signed,
+        )
         return Reg(q=q_named, clk=r.clk, rst=r.rst, en=r.en, next=r.next, init=r.init)
 
     def reg_wire(
@@ -1374,12 +1397,21 @@ class Circuit(Module):
         en: Union[Wire, Signal],
         next_: Union[Wire, Signal],
         init: Union[Wire, Signal, int, LiteralValue],
+        *,
+        generated: str | None = None,
     ) -> Reg:
         en = Wire.as_wire(en, m=self)
         next_ = Wire.as_wire(next_, m=self)
         init = Wire.as_wire(init, m=self, width=next_.width)
         self._record_struct_state_alloc()
-        q_sig = super().reg(clk, rst, en.sig, next_.sig, init.sig)
+        q_sig = super().reg(
+            clk,
+            rst,
+            en.sig,
+            next_.sig,
+            init.sig,
+            generated=generated,
+        )
         q_w = Wire(self, q_sig)
         return Reg(q=q_w, clk=clk, rst=rst, en=en, next=next_, init=init)
 
@@ -2162,6 +2194,18 @@ class Circuit(Module):
             if sig.ty == expected_ty:
                 return sig
 
+            # Vector <-> packed scalar of the same total width: the port ABI packs
+            # the whole lane set into one integer bus (lane 0 in the LSBs).
+            if isinstance(sig.ty, Vector) and isinstance(expected_ty, Bits):
+                info = self.lanes_of(sig)
+                assert info is not None
+                if int(info.leaf.width) * len(info.refs) == expected_ty.width:
+                    return self.pack_lanes(info.shape, info.leaf, info.refs)
+            if isinstance(sig.ty, Bits) and isinstance(expected_ty, Vector):
+                lanes = lane_count(tuple(int(d) for d in expected_ty.shape()))
+                if sig.ty.width == int(expected_ty.datatype().width) * lanes:
+                    return self.unpack_lanes(sig.ref, expected_ty.shape(), expected_ty.datatype())
+
             # Convenience: allow implicit integer resizing (zext/trunc) like `Circuit.assign`.
             if isinstance(sig.ty, Bits) and isinstance(expected_ty, Bits):
                 got_w = sig.ty.width
@@ -2250,7 +2294,6 @@ class Circuit(Module):
     def byte_mem(
         self,
         clk: Signal,
-        rst: Signal,
         *,
         raddr: Union[Wire, Reg, Signal],
         wvalid: Union[Wire, Reg, Signal],
@@ -2262,7 +2305,6 @@ class Circuit(Module):
     ) -> Wire:
         rdata = super().byte_mem(
             clk,
-            rst,
             Signal.as_sig(raddr),
             Signal.as_sig(wvalid),
             Signal.as_sig(waddr),
@@ -2277,7 +2319,6 @@ class Circuit(Module):
     def sync_mem(
         self,
         clk: Signal,
-        rst: Signal,
         *,
         ren: Union[Wire, Reg, Signal],
         raddr: Union[Wire, Reg, Signal],
@@ -2288,25 +2329,18 @@ class Circuit(Module):
         depth: int,
         name: str,
     ) -> Wire:
-        rdata = super().sync_mem(
+        return self.sync_mem_nm(
             clk,
-            rst,
-            Signal.as_sig(ren),
-            Signal.as_sig(raddr),
-            Signal.as_sig(wvalid),
-            Signal.as_sig(waddr),
-            Signal.as_sig(wdata),
-            Signal.as_sig(wstrb),
+            [(ren, raddr)],
+            [(wvalid, waddr, wdata, wstrb)],
             depth=depth,
             name=name,
-        )
-        self._record_struct_state_alloc()
-        return Wire(self, rdata)
+            read_mode="old",
+        )[0]
 
     def sync_mem_dp(
         self,
         clk: Signal,
-        rst: Signal,
         *,
         ren0: Union[Wire, Reg, Signal],
         raddr0: Union[Wire, Reg, Signal],
@@ -2319,22 +2353,47 @@ class Circuit(Module):
         depth: int,
         name: str,
     ) -> tuple[Wire, Wire]:
-        rdata0, rdata1 = super().sync_mem_dp(
+        rdata0, rdata1 = self.sync_mem_nm(
             clk,
-            rst,
-            Signal.as_sig(ren0),
-            Signal.as_sig(raddr0),
-            Signal.as_sig(ren1),
-            Signal.as_sig(raddr1),
-            Signal.as_sig(wvalid),
-            Signal.as_sig(waddr),
-            Signal.as_sig(wdata),
-            Signal.as_sig(wstrb),
+            [(ren0, raddr0), (ren1, raddr1)],
+            [(wvalid, waddr, wdata, wstrb)],
             depth=depth,
             name=name,
+            read_mode="old",
+        )
+        return rdata0, rdata1
+
+    def sync_mem_nm(
+        self,
+        clk: Signal,
+        read_ports: Sequence[tuple[Union[Wire, Reg, Signal], Union[Wire, Reg, Signal]]],
+        write_ports: Sequence[
+            tuple[
+                Union[Wire, Reg, Signal],
+                Union[Wire, Reg, Signal],
+                Union[Wire, Reg, Signal],
+                Union[Wire, Reg, Signal],
+            ]
+        ],
+        *,
+        depth: int,
+        name: str,
+        read_mode: str = "forward",
+    ) -> list[Wire]:
+        """N-read x M-write synchronous memory returning one Wire per read port."""
+        rdatas = super().sync_mem_nm(
+            clk,
+            [(Signal.as_sig(ren), Signal.as_sig(raddr)) for ren, raddr in read_ports],
+            [
+                (Signal.as_sig(wvalid), Signal.as_sig(waddr), Signal.as_sig(wdata), Signal.as_sig(wstrb))
+                for wvalid, waddr, wdata, wstrb in write_ports
+            ],
+            depth=depth,
+            name=name,
+            read_mode=read_mode,
         )
         self._record_struct_state_alloc()
-        return Wire(self, rdata0), Wire(self, rdata1)
+        return [Wire(self, rdata) for rdata in rdatas]
 
     def async_fifo(
         self,
