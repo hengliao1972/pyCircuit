@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <random>
+#include <type_traits>
 #include <vector>
 
 #include "pyc_bits.hpp"
@@ -12,6 +13,11 @@
 #include "pyc_state_loop.hpp"
 
 using namespace pyc::cpp;
+
+// Both loops are members of the loop family (BaseLoop). The component-family
+// contract (BaseElement / change_mask_t) intentionally does not apply here.
+static_assert(std::is_base_of_v<BaseLoop, RegLoop>);
+static_assert(std::is_base_of_v<BaseLoop, DelayLoop>);
 
 namespace {
 

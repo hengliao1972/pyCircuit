@@ -27,6 +27,24 @@ constexpr std::size_t loop_word_count(std::size_t lanes) {
   return (lanes + 63) / 64;
 }
 
+// Root of the state-loop family (RegLoop / DelayLoop). The only state shared
+// by every loop is the previous clock level: edge detection takes the clock
+// level from the caller (group counterpart of ClockedElement::rise). Sampling
+// and commit stay per-loop -- the two loops intentionally differ in pending
+// bookkeeping and commit signatures, so this base is deliberately tiny.
+class BaseLoop {
+public:
+  // Caller-supplied clock level: true exactly on a rising edge.
+  bool rise(bool clkNow) {
+    const bool isRise = !clkPrev_ && clkNow;
+    clkPrev_ = clkNow;
+    return isRise;
+  }
+
+protected:
+  bool clkPrev_ = false;
+};
+
 // RegLoop: lanes of different widths share one loop, so the
 // emitter groups by (loop id, fused) instead of (loop id, width, fused).
 // Lane values are raw words (Wire<W>::data()). Phased lanes park their
@@ -36,7 +54,7 @@ constexpr std::size_t loop_word_count(std::size_t lanes) {
 // copy of the state is kept for observation. Semantics mirror the
 // per-object pycReg exactly; the per-lane compare/copy loops are bounded
 // by the runtime word count.
-class RegLoop {
+class RegLoop : public BaseLoop {
 public:
   struct Lane {
     std::uint64_t *q;
@@ -94,9 +112,7 @@ public:
   }
 
   void compute_generic(bool clkNow) {
-    const bool posedge = (!clkPrev_) & clkNow;
-    clkPrev_ = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
+    if (__builtin_expect(!rise(clkNow), 1)) {
       pendingValid_ = false;
       clear_pending();
       return;
@@ -189,6 +205,65 @@ public:
     return dirty_;
   }
 
+  // Publish only the lanes whose bit is set in
+  // `marks` (word w carries lanes 64w..64w+63). Item-for-item the same update as
+  // direct_commit() — one control read, the same init/d selection and q write,
+  // the same dirty bits, the same pending restart for the lanes a consumer bound
+  // via lane_pending() — with the lane set narrowed to the marks. There is no
+  // shadow copy to refresh: write-intent probes read the lane's own q
+  // (lane_write_data), which this walk writes directly.
+  std::vector<std::uint64_t> &direct_commit_marked(const std::uint64_t *marks,
+                                                   std::size_t words) {
+    clkPrev_ = true;
+    const bool r = rst_->toBool();
+    const bool go = r | en_->toBool();
+    if (go) {
+      // Base pointers hoisted out of the walk (same shape as direct_commit()):
+      // no per-lane re-addressing of the lane tables.
+      std::uint64_t *const *const d = d_.data();
+      const std::uint64_t *const *const init = init_.data();
+      std::uint64_t *const *const qp = q_.data();
+      const unsigned *const laneWords = words_.data();
+      // `marks` carries real lane bits only: the emitter fills the last mark
+      // word with the lane tail mask instead of ~0, so no set bit can index
+      // past q_.size() and the walk needs no bounds check.
+      std::size_t base = 0;
+      for (std::size_t w = 0; w < words; ++w) {
+        std::uint64_t bits = marks[w];
+        std::uint64_t mask = 0;
+        while (bits != 0) {
+          const unsigned bit = static_cast<unsigned>(__builtin_ctzll(bits));
+          bits &= bits - 1;
+          const std::size_t i = base + bit;
+          const std::uint64_t *src = r ? init[i] : d[i];
+          std::uint64_t *q = qp[i];
+          if (laneWords[i] == 1) {
+            const std::uint64_t v = src[0];
+            mask |= static_cast<std::uint64_t>(q[0] != v) << bit;
+            q[0] = v;
+          } else {
+            std::uint64_t changed = 0;
+            for (unsigned k = 0; k < laneWords[i]; ++k) {
+              const std::uint64_t v = src[k];
+              changed |= q[k] != v;
+              q[k] = v;
+            }
+            mask |= changed << bit;
+          }
+        }
+        dirty_[w] |= mask;
+        base += 64;
+      }
+      for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
+        pending_[pendingLanes_[k]] = 1;
+    } else {
+      for (std::size_t k = 0; k < pendingLanes_.size(); ++k)
+        pending_[pendingLanes_[k]] = 0;
+    }
+    return dirty_;
+  }
+
+
   // Diagnostic/helper reset of the consumed-in-place dirty bitmap; generated
   // code never calls this (the wake walks clear as they consume).
   void clearDirty() { dirty_.assign(loop_word_count(q_.size()), 0); }
@@ -224,7 +299,6 @@ private:
   std::vector<std::size_t> pendingLanes_;  // lanes bound via lane_pending()
   std::vector<char> pendingSeen_;
   std::vector<std::uint64_t> dirty_;
-  bool clkPrev_ = false;
   bool pendingValid_ = false;  // compute ran, commit still owes this edge
 };
 
@@ -233,7 +307,7 @@ private:
 // so stage rings, sampled and qNext are per-lane word vectors of
 // lane.words entries; tap reads build a Wire<W> on the fly via the
 // explicit template argument the emitter knows.
-class DelayLoop {
+class DelayLoop : public BaseLoop {
 public:
   struct Lane {
     std::uint64_t *q;
@@ -311,9 +385,7 @@ public:
   }
 
   void compute_generic(bool clkNow) {
-    const bool posedge = (!clkPrev_) & clkNow;
-    clkPrev_ = clkNow;
-    if (__builtin_expect(!posedge, 1)) {
+    if (__builtin_expect(!rise(clkNow), 1)) {
       clear_pending();
       return;
     }
@@ -431,7 +503,6 @@ private:
   std::vector<char> pendingReset_;  // 0/1
   std::vector<std::uint64_t> dirty_;
   std::vector<std::uint64_t> advanced_;
-  bool clkPrev_ = false;
   bool sharedCtrl_ = true;  // all lanes share one rst and one en pointer
 };
 
