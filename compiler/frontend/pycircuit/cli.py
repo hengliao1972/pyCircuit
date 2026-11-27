@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .api_contract import collect_local_python_graph, nearest_project_root, scan_file
+from .data import Data
 from .diagnostics import render_diagnostic
 from .dsl import Module
 from .design import FRONTEND_CONTRACT, Design, DesignError, value_params_of
@@ -44,6 +45,7 @@ from .trace_dsl import (
     compute_trace_plan_from_artifacts,
     load_trace_config,
 )
+from .vector_lower import port_mlir_type
 
 
 def _default_top_name(src: Path) -> str:
@@ -467,6 +469,11 @@ def _as_int_width(ty: str) -> int:
     return _port_info(ty).total_width
 
 
+def _packed_port_ty(ty: Any) -> str:
+    """Port ABI type: vector ports are emitted as one packed integer bus."""
+    return str(port_mlir_type(ty if isinstance(ty, Data) else Data.from_str(str(ty))))
+
+
 def _collect_build(mod: object, src: Path, args: argparse.Namespace) -> Module | Design:
     if not hasattr(mod, "build"):
         raise SystemExit(f"{src} must define a pyCircuit entrypoint: `@module def build(m: Circuit, ...)`")
@@ -520,15 +527,15 @@ def _top_iface(design: Module | Design) -> _TopIface:
         return _TopIface(
             sym=cm.sym_name,
             in_raw=list(cm.arg_names),
-            in_tys=list(cm.arg_types),
+            in_tys=[_packed_port_ty(t) for t in cm.arg_types],
             out_raw=list(cm.result_names),
-            out_tys=list(cm.result_types),
+            out_tys=[_packed_port_ty(t) for t in cm.result_types],
         )
 
     in_raw = [n for n, _ in getattr(design, "_args", [])]  # noqa: SLF001
-    in_tys = [sig.ty for _, sig in getattr(design, "_args", [])]  # noqa: SLF001
+    in_tys = [_packed_port_ty(sig.ty) for _, sig in getattr(design, "_args", [])]  # noqa: SLF001
     out_raw = [n for n, _ in getattr(design, "_results", [])]  # noqa: SLF001
-    out_tys = [sig.ty for _, sig in getattr(design, "_results", [])]  # noqa: SLF001
+    out_tys = [_packed_port_ty(sig.ty) for _, sig in getattr(design, "_results", [])]  # noqa: SLF001
     return _TopIface(sym=str(getattr(design, "name", "Top")), in_raw=in_raw, in_tys=in_tys, out_raw=out_raw, out_tys=out_tys)
 
 
@@ -543,9 +550,9 @@ def _top_iface_from_manifest(manifest: Mapping[str, Any]) -> _TopIface:
         if str(m.get("name", "")).strip() != top:
             continue
         in_raw = [str(x) for x in (m.get("arg_names") or [])]
-        in_tys = [str(x) for x in (m.get("arg_types") or [])]
+        in_tys = [_packed_port_ty(x) for x in (m.get("arg_types") or [])]
         out_raw = [str(x) for x in (m.get("result_names") or [])]
-        out_tys = [str(x) for x in (m.get("result_types") or [])]
+        out_tys = [_packed_port_ty(x) for x in (m.get("result_types") or [])]
         return _TopIface(sym=top, in_raw=in_raw, in_tys=in_tys, out_raw=out_raw, out_tys=out_tys)
     raise SystemExit(f"invalid project_manifest.json: top module {top!r} not found in modules list")
 
@@ -2035,6 +2042,13 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
+def _backend_build_flag_hashes(build_flags: dict[str, Any], *, cpp_pch: bool) -> tuple[str, str]:
+    """Return shared-backend and C++-specific cache keys."""
+    shared_hash = _canonical_hash(build_flags)
+    cpp_hash = _canonical_hash({**build_flags, "cpp_pch": bool(cpp_pch)})
+    return shared_hash, cpp_hash
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -2180,6 +2194,46 @@ def _resolve_probe_outputs(
     return (probe_manifest, {"version": 1, "probes": probe_entries}, probe_plan_path)
 
 
+def _derive_trace_codegen_plan(
+    *,
+    trace_plan: TracePlan | None,
+    probe_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project selected internal named values onto their defining modules.
+
+    The trace DSL remains the sole selection authority.  This smaller plan is
+    consumed by pyc-apply-observation-demand so trace-selected names stay
+    eager (stable storage) for VCD sampling; ports already have stable
+    member storage.
+    """
+
+    selected = (
+        {str(path) for path in trace_plan.enabled_signals}
+        if trace_plan is not None
+        else set()
+    )
+    modules: dict[str, set[str]] = {}
+    raw_probes = probe_manifest.get("probes", [])
+    if isinstance(raw_probes, list):
+        for raw in raw_probes:
+            if not isinstance(raw, Mapping):
+                continue
+            canonical_path = str(raw.get("canonical_path", "")).strip()
+            if canonical_path not in selected or str(raw.get("dir", "")) != "internal":
+                continue
+            module = str(raw.get("module", "")).strip()
+            field = str(raw.get("field_path", "")).strip()
+            if module and field:
+                modules.setdefault(module, set()).add(field)
+    return {
+        "version": 1,
+        "modules": {
+            module: sorted(fields)
+            for module, fields in sorted(modules.items())
+        },
+    }
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
     src = Path(args.python_file).resolve()
     out_dir = Path(args.out_dir).resolve()
@@ -2294,8 +2348,12 @@ def _cmd_build(args: argparse.Namespace) -> int:
         "tb_schedule_mode": str(args.tb_schedule_mode),
         "frontend_contract": FRONTEND_CONTRACT,
     }
-    build_flags_hash = _canonical_hash(build_flags)
+    cpp_build_flags = {**build_flags, "cpp_pch": bool(args.cpp_pch)}
+    build_flags_hash, cpp_build_flags_hash = _backend_build_flag_hashes(
+        build_flags, cpp_pch=bool(args.cpp_pch)
+    )
     same_flags = str(cache.get("build_flags_hash", "")) == build_flags_hash
+    cpp_same_flags = str(cache.get("cpp_build_flags_hash", "")) == cpp_build_flags_hash
 
     design_key = "__design_pyc"
     old_hashes = dict(cache.get("module_hashes", {}))
@@ -2337,6 +2395,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         )
     except ProbeError as e:
         raise SystemExit(f"probe resolution failed: {e}") from e
+    probe_plan_obj = _load_json(probe_plan_path)
     probe_manifest_path = out_dir / "probe_manifest.json"
     _save_json(probe_manifest_path, probe_manifest_obj)
     manifest["probe_manifest"] = str(probe_manifest_path.relative_to(out_dir))
@@ -2362,6 +2421,17 @@ def _cmd_build(args: argparse.Namespace) -> int:
         trace_path = out_dir / "trace_plan.json"
         _save_json(trace_path, trace_plan.as_dict())
         manifest["trace_plan"] = str(trace_path.relative_to(out_dir))
+    trace_codegen_plan = _derive_trace_codegen_plan(
+        trace_plan=trace_plan,
+        probe_manifest=probe_manifest_obj,
+    )
+    trace_codegen_plan_path: Path | None = None
+    if trace_plan is not None:
+        trace_codegen_plan_path = out_dir / "trace_codegen_plan.json"
+        _save_json(trace_codegen_plan_path, trace_codegen_plan)
+        manifest["trace_codegen_plan"] = str(
+            trace_codegen_plan_path.relative_to(out_dir)
+        )
 
     tb_name: str | None = None
     tb_pyc_path: Path | None = None
@@ -2392,34 +2462,76 @@ def _cmd_build(args: argparse.Namespace) -> int:
     for sym in sorted(module_paths.keys()):
         mp = module_paths[sym]
         h = _module_hash(mp)
-        module_hashes[sym] = h
-        unchanged = same_flags and old_hashes.get(sym) == h
+        trace_fields = list(trace_codegen_plan["modules"].get(sym, []))
+        # Observation demand makes emitted C++ depend on the probe plan: a
+        # probe alias change keeps/strips eager storage even when the hardware
+        # is unchanged, so the alias paths must participate in the C++ cache
+        # key or stale headers silently break addAlias/dut.read. Both the
+        # canonical and the source path are emitted as registrations.
+        sym_prefix = f"{sym}:"
+        probe_paths = sorted(
+            f"{alias.get('canonical_path', '')}->{alias.get('source_path', '')}"
+            for alias in probe_plan_obj["aliases"]
+            if str(alias.get("source_path", "")).startswith(sym_prefix)
+        )
+        cpp_key = f"cpp:{sym}"
+        cpp_hash = _canonical_hash(
+            {
+                "module_hash": h,
+                "trace_fields": trace_fields,
+                "probe_paths": probe_paths,
+            }
+        )
+        verilog_key = f"verilog:{sym}"
+        module_hashes[cpp_key] = cpp_hash
+        module_hashes[verilog_key] = h
 
         cpp_out_dir = device_cpp_root / sym
-        cpp_ready = cpp_out_dir.is_dir() and any(cpp_out_dir.glob("*.cpp")) and any(cpp_out_dir.glob("*.hpp"))
-        if do_cpp and not (unchanged and cpp_ready):
+        cpp_ready = (
+            cpp_out_dir.is_dir()
+            and any(cpp_out_dir.glob("*.cpp"))
+            and any(cpp_out_dir.glob("*.hpp"))
+            and (cpp_out_dir / "cpp_compile_manifest.json").is_file()
+        )
+        cpp_unchanged = cpp_same_flags and old_hashes.get(cpp_key) == cpp_hash
+        if do_cpp and not (cpp_unchanged and cpp_ready):
             cpp_out_dir.mkdir(parents=True, exist_ok=True)
+            trace_codegen_args = (
+                [
+                    "--trace-codegen-plan",
+                    str(trace_codegen_plan_path),
+                ]
+                if trace_codegen_plan_path is not None
+                else []
+            )
+            cpp_args = [
+                str(pycc),
+                str(mp),
+                "--emit=cpp",
+                *pycc_hard_hierarchy_flags,
+                "--out-dir",
+                str(cpp_out_dir),
+                "--cpp-split=module",
+                "--probe-plan",
+                str(probe_plan_path),
+                "--observe-named",
+                "demand",
+                *trace_codegen_args,
+                f"--logic-depth={logic_depth}",
+            ]
+            if args.cpp_pch:
+                cpp_args.append("--cpp-pch")
             pycc_jobs.append(
                 (
                     f"cpp:{sym}",
-                    [
-                        str(pycc),
-                        str(mp),
-                        "--emit=cpp",
-                        *pycc_hard_hierarchy_flags,
-                        "--out-dir",
-                        str(cpp_out_dir),
-                        "--cpp-split=module",
-                        "--probe-plan",
-                        str(probe_plan_path),
-                        f"--logic-depth={logic_depth}",
-                    ],
+                    cpp_args,
                 )
             )
 
         verilog_out_dir = device_v_root / sym
         verilog_ready = verilog_out_dir.is_dir() and any(verilog_out_dir.glob("*.v"))
-        if emit_verilog and not (unchanged and verilog_ready):
+        verilog_unchanged = same_flags and old_hashes.get(verilog_key) == h
+        if emit_verilog and not (verilog_unchanged and verilog_ready):
             verilog_out_dir.mkdir(parents=True, exist_ok=True)
             pycc_jobs.append(
                 (
@@ -2538,6 +2650,27 @@ def _cmd_build(args: argparse.Namespace) -> int:
             "cxx_standard": "c++17",
             "profile": str(args.profile),
         }
+        if args.cpp_pch:
+            # Collect device hpp headers flagged for PCH across all module manifests.
+            seen: set[str] = set()
+            pch_headers: list[str] = []
+            for manifest_path in sorted(device_cpp_root.rglob("cpp_compile_manifest.json")):
+                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                profile = data.get("profile_summary") or {}
+                if not profile.get("cpp_pch"):
+                    continue
+                for header in data.get("precompile_headers") or []:
+                    if header not in seen:
+                        seen.add(header)
+                        pch_headers.append(header)
+            pch_headers.sort()
+            if not pch_headers:
+                pch_script = _tool_script("cpp_pch_headers.py")
+                pch_mod = _load_py_file(pch_script)
+                pch_headers = pch_mod.select_device_hpp_headers(build_manifest["headers"])
+            if pch_headers:
+                build_manifest["precompile_headers"] = pch_headers
+                build_manifest["precompile_headers_mode"] = "device_hpp"
         cpp_manifest = out_dir / "cpp_project_manifest.json"
         _save_json(cpp_manifest, build_manifest)
 
@@ -2674,6 +2807,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
             "pycc": str(pycc),
             "build_flags": build_flags,
             "build_flags_hash": build_flags_hash,
+            "cpp_build_flags": cpp_build_flags,
+            "cpp_build_flags_hash": cpp_build_flags_hash,
             "jit_cache_key": jit_key,
             "jit_cache_inputs": jit_inputs,
             "last_pycc_jobs": int(len(pycc_jobs)),
@@ -2797,6 +2932,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Backend targets to generate/build; verilog emits device RTL without requiring a testbench",
     )
     build.add_argument("--logic-depth", type=int, default=32, help="Max combinational logic depth for pycc")
+    build.add_argument(
+        "--cpp-pch",
+        action="store_true",
+        help="Precompile device module hpp headers in generated CMake build",
+    )
     build.add_argument(
         "--trace-config",
         default=None,

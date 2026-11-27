@@ -3,6 +3,8 @@
 // - `DEPTH` is in bytes.
 // - Combinational little-endian read window.
 // - Byte-enable write on posedge.
+// - No reset port: memory contents survive across reset (FIRRTL/Chisel
+//   memory semantics; SRAM in real hardware has no reset).
 module pyc_byte_mem #(
   parameter ADDR_WIDTH = 64,
   parameter DATA_WIDTH = 64,
@@ -12,7 +14,6 @@ module pyc_byte_mem #(
   parameter INIT_MEMH = ""
 ) (
   input                   clk,
-  input                   rst,
 
   input  [ADDR_WIDTH-1:0] raddr,
   output reg [DATA_WIDTH-1:0] rdata,
@@ -47,9 +48,9 @@ module pyc_byte_mem #(
 
   // Combinational read: assemble DATA_WIDTH bits from successive bytes.
   integer i;
-  integer a;
+  reg [ADDR_WIDTH-1:0] a;
   always @* begin
-    a = raddr[31:0];
+    a = raddr;
     rdata = {DATA_WIDTH{1'b0}};
     for (i = 0; i < STRB_WIDTH; i = i + 1) begin
       if ((a + i) < DEPTH)
@@ -57,14 +58,12 @@ module pyc_byte_mem #(
     end
   end
 
-  // Byte-enable write.
+  // Byte-enable write (no reset gating: contents survive across reset).
   integer j;
-  integer wa;
+  reg [ADDR_WIDTH-1:0] wa;
   always @(posedge clk) begin
-    if (rst) begin
-      // Reset does not clear memory (init happens via INIT_MEMH or sim-default 0s).
-    end else if (wvalid) begin
-      wa = waddr[31:0];
+    if (wvalid) begin
+      wa = waddr;
       for (j = 0; j < STRB_WIDTH; j = j + 1) begin
         if (wstrb[j] && ((wa + j) < DEPTH))
           mem[wa + j] <= wdata[8 * j +: 8];
