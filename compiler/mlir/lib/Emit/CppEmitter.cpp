@@ -1057,7 +1057,7 @@ static void emitCombResultPublish(
   os << "    }\n";
 }
 
-// L28 lane marks: per fused loop, the lanes whose next-state value is produced
+// Lane marks: per fused loop, the lanes whose next-state value is produced
 // by a given comb block. Emitted inside that comb's method body, so a lane is
 // marked exactly when its producer comb actually runs. A lane whose next value
 // has no comb producer (constant, delay tap, instance output, memory read) is
@@ -2634,7 +2634,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   os << "    #endif\n";
   os << "  }\n\n";
 
-  // L28: build the lane -> producer-comb table for fused loops, plus the
+  // Build the lane -> producer-comb table for fused loops, plus the
   // always-marked lanes (next value has no comb producer). Every fused lane must
   // be classified; an unknown producer is a hard error, never a silent skip.
   // Each fused loop gets its own mark array and stale flag: its lanes are a
@@ -2649,7 +2649,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   LaneMarkTable laneMarkTable;
   llvm::DenseMap<int64_t, LoopMarkInfo> loopMarks;
   std::size_t laneMarkWords = 0;
-  if (opts.laneMarkWalk) {
+  if (!fusedRegLoopIds.empty()) {
     // Attribute a lane to the comb that produces its next value by matching the
     // emitted symbol: names are minted from the original producer, so a lane
     // whose next value is a forwarding pyc.wire still carries the comb's name.
@@ -2696,7 +2696,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
             info.always.push_back({word, mask});
         } else {
           return def->emitError(
-              "L28: fused lane next-value has no comb producer and is not a "
+              "fused lane next-value has no comb producer and is not a "
               "known always-marked producer (constant/delay tap/instance/memory/"
               "wire); refusing to generate a marked walk that would miss it");
         }
@@ -2707,7 +2707,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
       laneMarkWords = std::max<std::size_t>(laneMarkWords, info.words);
     }
     if (laneMarkWords == 0)
-      return f.emitError("L28: lane-mark walk requested but there are no fused lanes");
+      return f.emitError("fused register loop has no lanes");
     for (int64_t loopId : fusedRegLoopIds) {
       const LoopMarkInfo &info = loopMarks[loopId];
       os << "  std::array<std::uint64_t, " << info.words << "> " << info.array
@@ -2720,7 +2720,7 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
   for (auto [i, comb] : llvm::enumerate(combs)) {
     if (failed(emitCombMethod(comb, os, nt, static_cast<unsigned>(i), opts,
                               *schedule, combIndex, &delayLoopLines,
-                              opts.laneMarkWalk ? &laneMarkTable : nullptr)))
+                              &laneMarkTable)))
       return failure();
   }
 
@@ -4449,14 +4449,9 @@ static LogicalResult emitFunc(func::FuncOp f, llvm::raw_ostream &os,
            << "ull}";
       });
       os << "}}};\n";
-      if (!opts.laneMarkWalk) {
-        os << "      " << wake << ".apply(" << loop
-           << ".direct_commit(), _pyc_comb_dirty);\n";
-        continue;
-      }
-      // L28 marked walk: only lanes whose producer comb ran (plus the always
-      // marked ones) are sampled; first rise / reset / en 0->1 fall back to a
-      // full walk. Marks are cleared in place after the walk (consume-in-place).
+      // Only lanes whose producer comb ran (plus the always marked ones)
+      // are sampled; first rise / reset / en 0->1 fall back to a full walk.
+      // Marks are cleared in place after the walk (consume-in-place).
       // Loop-local array/flag: another loop's marks must never be consumed here.
       const LoopMarkInfo &markInfo = loopMarks[loopId];
       pyc::RegOp lane0 = regLoopRegs[loopId].front();

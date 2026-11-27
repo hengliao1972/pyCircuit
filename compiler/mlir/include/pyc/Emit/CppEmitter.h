@@ -84,9 +84,6 @@ struct CppEmitterOptions {
   // persistent pool).
   unsigned parallelInstances = 1;
   std::string probePlanPath{};
-  // Experimental, off by default: walk only the lanes whose producing comb ran
-  // this cycle instead of every fused lane.
-  bool laneMarkWalk = false;
 };
 
 ::mlir::LogicalResult emitCpp(::mlir::ModuleOp module, ::llvm::raw_ostream &os,

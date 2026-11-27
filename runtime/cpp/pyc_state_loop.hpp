@@ -205,7 +205,7 @@ public:
     return dirty_;
   }
 
-  // L28 marked walk (experimental): publish only the lanes whose bit is set in
+  // Publish only the lanes whose bit is set in
   // `marks` (word w carries lanes 64w..64w+63). Item-for-item the same update as
   // direct_commit() — one control read, the same init/d selection and q write,
   // the same dirty bits, the same pending restart for the lanes a consumer bound

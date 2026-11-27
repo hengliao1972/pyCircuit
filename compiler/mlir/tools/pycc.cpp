@@ -135,13 +135,6 @@ static llvm::cl::opt<bool> cppPch(
     llvm::cl::desc("Record device module hpp for CMake precompiled headers (requires --cpp-split=module)"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<bool> cppLaneMarkWalk(
-    "cpp-lane-mark-walk",
-    llvm::cl::desc("EXPERIMENTAL (L28): sample only lanes whose producer comb ran "
-                   "this cycle instead of every fused lane"),
-    llvm::cl::init(false),
-    llvm::cl::Hidden);
-
 static llvm::cl::opt<bool> cppCompileBudget(
     "cpp-compile-budget",
     llvm::cl::desc("Enforce predicted C++ compile cost budgets (PYC991-993)"),
@@ -2729,7 +2722,6 @@ int main(int argc, char **argv) {
       pyc::CppEmitterOptions cppEmitOpts;
       cppEmitOpts.probePlanPath = probePlanPath;
       cppEmitOpts.parallelInstances = cppParallelInstances;
-      cppEmitOpts.laneMarkWalk = cppLaneMarkWalk;
 
       // Collect direct dependencies per module for header includes.
       llvm::StringMap<llvm::SmallVector<std::string>> deps;
@@ -3093,7 +3085,6 @@ int main(int argc, char **argv) {
     pyc::CppEmitterOptions cppEmitOpts;
     cppEmitOpts.probePlanPath = probePlanPath;
     cppEmitOpts.parallelInstances = cppParallelInstances;
-    cppEmitOpts.laneMarkWalk = cppLaneMarkWalk;
     if (failed(pyc::emitCpp(*module, os, cppEmitOpts)))
       return 1;
     if (failed(writeSingleOutputStats()))
