@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "top_symbol": "observation_demand",
+  "aliases": [
+    {
+      "canonical_path": "dut:probe.value.keep_me",
+      "source_path": "dut:keep_me"
+    }
+  ]
+}

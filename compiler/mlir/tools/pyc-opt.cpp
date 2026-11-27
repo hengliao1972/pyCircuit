@@ -1,4 +1,5 @@
 #include "pyc/Dialect/PYC/PYCDialect.h"
+#include "pyc/Emit/CppEmitter.h"
 #include "pyc/Support/PassIRDumper.h"
 #include "pyc/Transforms/Passes.h"
 
@@ -6,10 +7,15 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Extensions/InlinerExtension.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#ifdef PYC_HAVE_MLIR_REGISTER_ALL_PASSES
 #include "mlir/InitAllPasses.h"
+#endif
+#include "mlir/Pass/PassManager.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
+#include "mlir/Transforms/Passes.h"
 
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -43,18 +49,24 @@ static void forceLinkPycPasses() {
   (void)pyc::createCombCanonicalizePass();
   (void)pyc::createFuseCombPass();
   (void)pyc::createEliminateWiresPass();
+  (void)pyc::createRetimePipelinesPass();
+  (void)pyc::createCombineDelayChainsPass();
+  (void)pyc::createStateOptimizePass();
+  (void)pyc::createMergeRegCopiesPass();
+  (void)pyc::createStateLoopPartitionPass();
   (void)pyc::createPackI1RegsPass();
+  (void)pyc::createApplyObservationDemandPass();
   (void)pyc::createLowerSCFToPYCStaticPass();
   (void)pyc::createCheckFlatTypesPass();
   (void)pyc::createPrunePortsPass();
-  (void)pyc::createVectorUnrollPass();
-  (void)pyc::createSLPPackWiresPass();
+  (void)pyc::createCppPlacementPass(pyc::CppEmitterOptions::kDefaultCombChunkNodes);
   (void)pyc::createFlattenInstancesPass();
   (void)pyc::createEliminateDeadStatePass();
   (void)pyc::createEliminateDeadInstancesPass();
   (void)pyc::createCheckNoDynamicPass();
   (void)pyc::createCheckCombCyclesPass();
   (void)pyc::createCheckClockDomainsPass();
+  (void)pyc::createChangeDrivenSchedulePass();
   (void)pyc::createCheckLogicDepthPass(0);
   (void)pyc::createCollectCompileStatsPass();
   (void)pyc::createInlineFunctionsPass();
@@ -66,7 +78,11 @@ int main(int argc, char **argv) {
   DialectRegistry registry;
   registry.insert<pyc::PYCDialect, mlir::arith::ArithDialect, mlir::func::FuncDialect, mlir::scf::SCFDialect>();
   mlir::func::registerInlinerExtension(registry);
+#ifdef PYC_HAVE_MLIR_REGISTER_ALL_PASSES
   registerAllPasses();
+#else
+  registerCSEPass();
+#endif
   forceLinkPycPasses();
 
   // Parse CLI ourselves so we can read our custom dump flags before MlirOptMain
@@ -77,25 +93,24 @@ int main(int argc, char **argv) {
   // Build the config from the (now-parsed) standard mlir-opt CL options, then
   // install our IR-dump instrumentation via the pass-pipeline setup callback.
   MlirOptMainConfig config = MlirOptMainConfig::createFromCLOptions();
-  config.setPassPipelineSetupFn([](PassManager &pm) -> LogicalResult {
-    if (dumpPassIrDir.empty())
+  if (!dumpPassIrDir.empty())
+    config.setPassPipelineSetupFn([](PassManager &pm) -> LogicalResult {
+      if (dumpPassIrDir.getValue() == "auto") {
+        // pycc resolves `auto` to <--out-dir>/pass_ir; pyc-opt has no --out-dir.
+        llvm::errs() << "error: --dump-pass-ir=auto is not supported by pyc-opt; "
+                        "pass an explicit directory\n";
+        return failure();
+      }
+      pyc::PassIRDumperOptions opts;
+      opts.dir = dumpPassIrDir.getValue();
+      opts.phase = dumpPassIrPhase.getValue();
+      opts.filterRegex = dumpPassIrFilter.getValue();
+      opts.maxLines = static_cast<uint64_t>(dumpPassIrMaxLines.getValue());
+      // addInstrumentation takes ownership; the PassManager keeps the
+      // instrumentation alive for the duration of pm.run().
+      pm.addInstrumentation(std::make_unique<pyc::PassIRDumper>(std::move(opts)));
       return success();
-    if (dumpPassIrDir.getValue() == "auto") {
-      // pycc resolves `auto` to <--out-dir>/pass_ir; pyc-opt has no --out-dir.
-      llvm::errs() << "error: --dump-pass-ir=auto is not supported by pyc-opt; "
-                      "pass an explicit directory\n";
-      return failure();
-    }
-    pyc::PassIRDumperOptions opts;
-    opts.dir = dumpPassIrDir.getValue();
-    opts.phase = dumpPassIrPhase.getValue();
-    opts.filterRegex = dumpPassIrFilter.getValue();
-    opts.maxLines = static_cast<uint64_t>(dumpPassIrMaxLines.getValue());
-    // addInstrumentation takes ownership; the PassManager keeps the
-    // instrumentation alive for the duration of pm.run().
-    pm.addInstrumentation(std::make_unique<pyc::PassIRDumper>(std::move(opts)));
-    return success();
-  });
+    });
 
   // Read input buffer (stdin when input is "-").
   auto buffer = llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);

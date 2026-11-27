@@ -10,7 +10,13 @@ from .cases import VecCase
 from .generate import write_case_source, write_vector_ir_source
 
 
-VECTOR_IR_ONLY_KINDS = {"or_reduce", "and_reduce", "reduce_sum", "reduce_sum_signed"}
+# Cases whose vector-IR-only source uses a packed shape=[N] port instead of
+# per-lane inputs; they exercise the same scalar-lane lowering through a port.
+PACKED_PORT_KINDS = {"or_reduce", "and_reduce", "reduce_sum", "reduce_sum_signed"}
+
+# The frontend expands Vector values into scalar lanes while emitting .pyc, so
+# no vector type or pyc.v_* op may survive in the generated IR.
+NO_VECTOR_IR_TOKENS = ("vector<", "pyc.v_", "pyc_vec")
 
 
 def run_cmd(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -34,12 +40,30 @@ def run_cmd(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> 
     return proc
 
 
+def _staged_toolchain_root(pycc: Path) -> Path | None:
+    """Staged toolchain root (include/ + runtime archive) for this pycc.
+
+    Build-tree binaries live at <root>/bin/pycc but that tree has no
+    include/; the staged tree is <toolchain>/install next to it.
+    """
+    if pycc.parent.name != "bin":
+        return None
+    build_root = pycc.parent.parent
+    for root in (build_root, build_root.parent / "install"):
+        has_include = (root / "include").is_dir()
+        has_lib = any((root / lib / "libpyc4_runtime.a").is_file() for lib in ("lib", "lib64"))
+        if has_include and has_lib:
+            return root
+    return None
+
+
 def merged_env(*, pythonpath: str, pycc: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = pythonpath
     env["PYCC"] = str(pycc)
-    if pycc.parent.name == "bin":
-        env.setdefault("PYC_TOOLCHAIN_ROOT", str(pycc.parent.parent))
+    root = _staged_toolchain_root(pycc)
+    if root is not None:
+        env.setdefault("PYC_TOOLCHAIN_ROOT", str(root))
     return env
 
 
@@ -96,8 +120,16 @@ def check_ir(case: VecCase, mlir: str) -> None:
     missing = [tok for tok in case.ir_tokens if tok not in mlir]
     if missing:
         raise AssertionError(f"{case.name}: missing expected IR tokens {missing}")
-    if "vector<" not in mlir:
-        raise AssertionError(f"{case.name}: expected vector type in .pyc")
+    leftovers = [tok for tok in NO_VECTOR_IR_TOKENS if tok in mlir]
+    if leftovers:
+        raise AssertionError(f"{case.name}: vector IR leaked into .pyc: {leftovers}")
+
+
+def check_cpp_scalar_contract(case: VecCase, out_dir: Path) -> None:
+    for path in sorted(out_dir.rglob("*.cpp")) + sorted(out_dir.rglob("*.hpp")):
+        text = path.read_text(encoding="utf-8")
+        if "pyc::cpp::Vec<" in text or "pyc_vec" in text:
+            raise AssertionError(f"{case.name}: generated C++ still uses the vector runtime: {path}")
 
 
 def run_cpp_binary(out_dir: Path) -> None:
@@ -214,10 +246,11 @@ def run_vec_case(
         pycc=pycc,
         run_verilator=use_verilator,
     )
-    if case.kind in VECTOR_IR_ONLY_KINDS:
+    if case.kind in PACKED_PORT_KINDS:
         emit_vector_ir_case(case, repo_root=repo_root, case_root=case_root, pythonpath=pythonpath, pycc=pycc)
     else:
         check_ir(case, read_design_pyc(out_dir))
+    check_cpp_scalar_contract(case, out_dir)
     run_cpp_binary(out_dir)
     check_cpp_manifest_syntax(out_dir, repo_root=repo_root)
     if use_verilator:
