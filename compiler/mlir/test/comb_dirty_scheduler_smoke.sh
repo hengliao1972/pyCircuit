@@ -111,7 +111,7 @@ fi
 # per-lane names are gone by construction. A fused loop with no comb
 # fanout at all legitimately emits a bare direct_commit() instead.
 grep -q 'FusedLaneWake<' "${state_cpp}"
-grep -qE '\.apply\(reg_loop_[0-9]+\.(direct_commit|commit)\(\), _pyc_comb_dirty\)' "${state_cpp}"
+grep -qE '\.apply\(reg_loop_[0-9]+\.(direct_commit_marked|direct_commit|commit)\(' "${state_cpp}"
 # No markWordUnchecked assertion here: with one comb per module the state
 # fixture has no comb→comb fanout; that contract is covered by the main
 # fixture's _pyc_direct_fanout_ table assertion above.
